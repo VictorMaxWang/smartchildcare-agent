@@ -97,9 +97,19 @@ export function getDefaultAvatarForRole(role: AccountRole) {
 }
 
 export function getDefaultLandingPath(role: AccountRole) {
+  return getRoleHomePath(role);
+}
+
+export function getRoleHomePath(role: AccountRole) {
   if (role === "教师") return "/teacher";
   if (role === "家长") return "/parent";
-  return "/";
+  return "/admin";
+}
+
+export function getRoleAgentPath(role: AccountRole) {
+  if (role === "教师") return "/teacher/agent";
+  if (role === "家长") return "/parent/agent";
+  return "/admin/agent";
 }
 
 export function getDemoAccountById(accountId: string) {

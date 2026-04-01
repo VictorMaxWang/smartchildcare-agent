@@ -3,19 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X, Baby, BookHeart, LayoutDashboard, Salad, ShieldCheck, Users, LogOut, Monitor } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Baby, BookHeart, BrainCircuit, House, LogOut, Menu, Monitor, Salad, ShieldCheck, Users, X } from "lucide-react";
+import { getRoleAgentPath, getRoleHomePath } from "@/lib/auth/accounts";
 import { useApp } from "@/lib/store";
-
-const navItems = [
-  { href: "/", label: "数据概览", icon: LayoutDashboard },
-  { href: "/children", label: "幼儿档案", icon: Users },
-  { href: "/health", label: "晨检与健康", icon: ShieldCheck },
-  { href: "/growth", label: "成长行为", icon: BookHeart },
-  { href: "/diet", label: "饮食记录", icon: Salad },
-  { href: "/parent", label: "家长端", icon: Baby },
-  { href: "/teacher", label: "机构大屏", icon: Monitor },
-];
+import { cn } from "@/lib/utils";
 
 export default function MobileNav({ onLogout }: { onLogout: () => void }) {
   const pathname = usePathname();
@@ -24,16 +15,24 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const firstLinkRef = useRef<HTMLAnchorElement>(null);
+  const homeHref = getRoleHomePath(currentUser.role);
+  const agentHref = getRoleAgentPath(currentUser.role);
+  const navItems = [
+    { href: homeHref, label: "首页", icon: House },
+    { href: agentHref, label: "AI 助手", icon: BrainCircuit },
+    { href: "/children", label: "儿童档案", icon: Users },
+    { href: "/health", label: "晨检与健康", icon: ShieldCheck },
+    { href: "/growth", label: "成长观察", icon: BookHeart },
+    { href: "/diet", label: "饮食记录", icon: Salad },
+    currentUser.role === "机构管理员"
+      ? { href: "/admin", label: "园所首页", icon: Monitor }
+      : { href: homeHref, label: currentUser.role === "教师" ? "教师首页" : "家长首页", icon: Baby },
+  ];
 
   const close = () => setOpen(false);
 
-  // 打开时禁止 body 滚动
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
+    document.body.style.overflow = open ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
@@ -95,7 +94,6 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
         {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </button>
 
-      {/* Backdrop */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/30 backdrop-blur-sm transition-opacity duration-300",
@@ -105,7 +103,6 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
         aria-hidden="true"
       />
 
-      {/* Slide-in panel */}
       <nav
         ref={panelRef}
         id="mobile-nav-panel"
@@ -115,9 +112,8 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <Link href="/" className="flex items-center gap-2 font-bold text-indigo-600" onClick={close}>
+          <Link href={homeHref} className="flex items-center gap-2 font-bold text-indigo-600" onClick={close}>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100">
               <Baby className="h-5 w-5 text-indigo-600" />
             </div>
@@ -132,15 +128,14 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
 
-        {/* Nav items */}
         <div className="flex-1 overflow-y-auto px-3 py-4">
           <div className="space-y-1">
-            {navItems.map(({ href, label, icon: Icon }) => {
-              const active = pathname === href || (href !== "/" && pathname.startsWith(`${href}/`));
+            {navItems.map(({ href, label, icon: Icon }, index) => {
+              const active = href === homeHref ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
               return (
                 <Link
-                  key={href}
-                  ref={href === navItems[0].href ? firstLinkRef : undefined}
+                  key={`${href}-${label}`}
+                  ref={index === 0 ? firstLinkRef : undefined}
                   href={href}
                   onClick={close}
                   className={cn(
@@ -158,11 +153,10 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
 
-        {/* Footer: user info + logout */}
         <div className="border-t border-slate-100 px-5 py-4">
           <div className="mb-3 text-sm">
             <p className="text-xs text-slate-400">当前身份</p>
-            <p className="font-semibold text-slate-700" aria-label={`当前身份 ${currentUser.name}，角色 ${currentUser.role}`}>
+            <p className="font-semibold text-slate-700">
               {currentUser.avatar} {currentUser.name} · {currentUser.role}
             </p>
           </div>
