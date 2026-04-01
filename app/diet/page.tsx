@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { AlertTriangle, Camera, ChefHat, Loader2, Plus, Salad, ShieldAlert, Sparkles, X } from "lucide-react";
 import {
@@ -134,7 +134,7 @@ export default function DietPage() {
     getTodayAttendance,
   } = useApp();
 
-  const [selectedChildId, setSelectedChildId] = useState<string>(visibleChildren[0]?.id ?? "");
+  const [selectedChildId, setSelectedChildId] = useState<string>("");
 
   const [bulkMeal, setBulkMeal] = useState<MealType>("午餐");
   const [bulkFoodName, setBulkFoodName] = useState("");
@@ -153,8 +153,21 @@ export default function DietPage() {
   const [bulkPhotoPreview, setBulkPhotoPreview] = useState("");
   const [bulkVisionModel, setBulkVisionModel] = useState("");
 
+  const defaultSelectedChildId =
+    presentChildren.find((child) => mealRecords.some((record) => record.childId === child.id && record.date === TODAY))?.id ??
+    presentChildren[0]?.id ??
+    visibleChildren[0]?.id ??
+    "";
+
+  useEffect(() => {
+    if (!defaultSelectedChildId) return;
+    if (!selectedChildId || !visibleChildren.some((child) => child.id === selectedChildId)) {
+      setSelectedChildId(defaultSelectedChildId);
+    }
+  }, [defaultSelectedChildId, selectedChildId, visibleChildren]);
+
   const resolvedSelectedChildId =
-    visibleChildren.some((child) => child.id === selectedChildId) ? selectedChildId : (visibleChildren[0]?.id ?? "");
+    visibleChildren.some((child) => child.id === selectedChildId) ? selectedChildId : defaultSelectedChildId;
 
   const selectedChild = visibleChildren.find((child) => child.id === resolvedSelectedChildId) ?? null;
   const todayAttendance = getTodayAttendance();
@@ -953,6 +966,24 @@ function MealEditorCard({
             <p className="text-xs text-slate-400">先添加食物后再保存。</p>
           )}
         </div>
+
+        {record?.photoUrls?.length ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-slate-500">示例餐食图</p>
+            <div className="grid gap-2">
+              {record.photoUrls.map((photoUrl, index) => (
+                <Image
+                  key={`${record.id}-demo-photo-${index}`}
+                  src={photoUrl}
+                  alt={`${meal}示例餐食图 ${index + 1}`}
+                  width={640}
+                  height={240}
+                  className="h-32 w-full rounded-2xl object-cover ring-1 ring-slate-100"
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid gap-2 md:grid-cols-3">
           <Input value={foodName} onChange={(event) => setFoodName(event.target.value)} placeholder="食物名称" />

@@ -39,7 +39,10 @@ function isMealRecord(value: unknown): value is MealRecord {
   return (
     hasStringId(value) &&
     typeof (value as { childId?: unknown }).childId === "string" &&
-    Array.isArray((value as { foods?: unknown }).foods)
+    Array.isArray((value as { foods?: unknown }).foods) &&
+    (!(value as { photoUrls?: unknown }).photoUrls ||
+      (Array.isArray((value as { photoUrls?: unknown }).photoUrls) &&
+        (value as { photoUrls: unknown[] }).photoUrls.every((item) => typeof item === "string")))
   );
 }
 

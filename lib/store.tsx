@@ -132,6 +132,7 @@ export interface MealRecord {
   date: string;
   meal: MealType;
   foods: FoodItem[];
+  photoUrls?: string[];
   intakeLevel: IntakeLevel;
   preference: PreferenceStatus;
   allergyReaction?: string;
@@ -1889,6 +1890,7 @@ export function formatDisplayDate(dateString: string) {
 function normalizeRecords(records: MealRecord[]) {
   return records.map((record) => ({
     ...record,
+    photoUrls: record.photoUrls ? [...record.photoUrls] : undefined,
     nutritionScore: calcNutritionScore(record.foods, record.waterMl, record.preference),
   }));
 }
@@ -1918,6 +1920,7 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
     meals: ALL_INITIAL_MEALS.map((record) => ({
       ...record,
       foods: record.foods.map((food) => ({ ...food })),
+      photoUrls: record.photoUrls ? [...record.photoUrls] : undefined,
     })),
     growth: ALL_INITIAL_GROWTH.map((record) => ({
       ...record,
@@ -1929,6 +1932,47 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
     taskCheckIns: INITIAL_TASK_CHECKINS.map((record) => ({ ...record })),
     updatedAt: new Date().toISOString(),
   };
+}
+
+const DEMO_MEAL_PHOTO_LIBRARY: Record<MealType, string[]> = {
+  早餐: ["/demo-meals/breakfast-porridge.svg", "/demo-meals/breakfast-sandwich.svg"],
+  午餐: ["/demo-meals/lunch-bento-a.svg", "/demo-meals/lunch-bento-b.svg", "/demo-meals/lunch-bento-c.svg"],
+  晚餐: ["/demo-meals/lunch-bento-b.svg"],
+  加餐: ["/demo-meals/snack-fruit-yogurt.svg", "/demo-meals/snack-corn-milk.svg"],
+};
+
+function buildRecordKey(childId: string, date: string) {
+  return `${childId}-${date}`;
+}
+
+function buildAttendanceLookup(records: AttendanceRecord[]) {
+  return new Map(records.map((record) => [buildRecordKey(record.childId, record.date), record] as const));
+}
+
+function keepRecordsOnPresentDays<T extends { childId: string; date: string }>(
+  records: T[],
+  attendanceLookup: Map<string, AttendanceRecord>
+) {
+  return records.filter((record) => attendanceLookup.get(buildRecordKey(record.childId, record.date))?.isPresent);
+}
+
+function getDemoMealPhotoPaths(meal: MealType, childId: string, date: string) {
+  const library = DEMO_MEAL_PHOTO_LIBRARY[meal] ?? [];
+  if (library.length === 0) return undefined;
+
+  const seed = `${childId}-${date}-${meal}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return [library[seed % library.length]];
+}
+
+function attachDemoMealPhotos(records: MealRecord[]) {
+  return records.map((record) => {
+    if (record.photoUrls?.length) {
+      return { ...record, photoUrls: [...record.photoUrls] };
+    }
+
+    const photoUrls = getDemoMealPhotoPaths(record.meal, record.childId, record.date);
+    return photoUrls ? { ...record, photoUrls } : { ...record };
+  });
 }
 
 function shiftDemoDate(dateString: string, diffDays: number) {
@@ -1991,22 +2035,30 @@ function shiftDemoSnapshotDates(snapshot: AppStateSnapshot, targetToday: string)
 
 function validateDemoSnapshotCoverage(snapshot: AppStateSnapshot, targetToday: string) {
   const todayGrowthCount = snapshot.growth.filter((record) => normalizeLocalDate(record.createdAt) === targetToday).length;
-  const todayFeedbackCount = snapshot.feedback.filter((record) => record.date === targetToday).length;
   const todayHealthCount = snapshot.health.filter((record) => record.date === targetToday).length;
   const todayAttendanceCount = snapshot.attendance.filter((record) => record.date === targetToday && record.isPresent).length;
   const todayMealCount = snapshot.meals.filter((record) => record.date === targetToday).length;
+  const attendanceLookup = buildAttendanceLookup(snapshot.attendance);
+  const orphanMealCount = snapshot.meals.filter(
+    (record) => !attendanceLookup.get(buildRecordKey(record.childId, record.date))?.isPresent
+  ).length;
+  const orphanHealthCount = snapshot.health.filter(
+    (record) => !attendanceLookup.get(buildRecordKey(record.childId, record.date))?.isPresent
+  ).length;
 
   const hasCoverage =
     todayAttendanceCount > 0 &&
     todayMealCount > 0 &&
     todayGrowthCount > 0 &&
-    (todayFeedbackCount > 0 || todayHealthCount > 0);
+    todayHealthCount > 0 &&
+    orphanMealCount === 0 &&
+    orphanHealthCount === 0;
 
   if (hasCoverage) {
     return snapshot;
   }
 
-  const message = `[DEMO] Snapshot coverage invalid for ${targetToday}: attendance=${todayAttendanceCount}, meals=${todayMealCount}, growth=${todayGrowthCount}, feedback=${todayFeedbackCount}, health=${todayHealthCount}`;
+  const message = `[DEMO] Snapshot coverage invalid for ${targetToday}: attendance=${todayAttendanceCount}, meals=${todayMealCount}, growth=${todayGrowthCount}, health=${todayHealthCount}, orphanMeals=${orphanMealCount}, orphanHealth=${orphanHealthCount}`;
   if (process.env.NODE_ENV !== "production") {
     throw new Error(message);
   }
@@ -2016,7 +2068,15 @@ function validateDemoSnapshotCoverage(snapshot: AppStateSnapshot, targetToday: s
 }
 
 function buildFreshDemoSnapshot(targetToday = getLocalToday()): AppStateSnapshot {
-  return validateDemoSnapshotCoverage(shiftDemoSnapshotDates(cloneDemoSnapshotTemplate(), targetToday), targetToday);
+  const template = cloneDemoSnapshotTemplate();
+  const attendanceLookup = buildAttendanceLookup(template.attendance);
+  const normalizedTemplate: AppStateSnapshot = {
+    ...template,
+    meals: attachDemoMealPhotos(keepRecordsOnPresentDays(template.meals, attendanceLookup)),
+    health: keepRecordsOnPresentDays(template.health, attendanceLookup),
+  };
+
+  return validateDemoSnapshotCoverage(shiftDemoSnapshotDates(normalizedTemplate, targetToday), targetToday);
 }
 
 function filterChildrenByUser(children: Child[], user: User) {
@@ -2128,7 +2188,7 @@ const EXTRA_GEN_CHILDREN: Child[] = EXTRA_NAMES.map((name, i) => {
   };
 });
 
-const EXTRA_GEN_MEALS: MealRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
+const LEGACY_EXTRA_GEN_MEALS: MealRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
   DEMO_WEEK_DATES.flatMap((date, i) => [
     createMealRecord(
       `m-${child.id}-breakfast-${i + 1}`,
@@ -2169,7 +2229,7 @@ const EXTRA_GEN_MEALS: MealRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
   ])
 );
 
-const EXTRA_GEN_ATTENDANCE: AttendanceRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
+const LEGACY_EXTRA_GEN_ATTENDANCE: AttendanceRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
   DEMO_WEEK_DATES.map((date, i) => ({
     id: `a-${child.id}-${i + 1}`,
     childId: child.id,
@@ -2180,7 +2240,7 @@ const EXTRA_GEN_ATTENDANCE: AttendanceRecord[] = EXTRA_GEN_CHILDREN.flatMap((chi
   }))
 );
 
-const EXTRA_GEN_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
+const LEGACY_EXTRA_GEN_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
   DEMO_WEEK_DATES.map((date, i) =>
     createHealthRecord(
       `hc-${child.id}-${i + 1}`,
@@ -2194,6 +2254,169 @@ const EXTRA_GEN_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_GEN_CHILDREN.flatMap(
     )
   )
 );
+
+void [LEGACY_EXTRA_GEN_MEALS, LEGACY_EXTRA_GEN_ATTENDANCE, LEGACY_EXTRA_GEN_HEALTH_CHECKS];
+
+const EXTRA_GEN_ATTENDANCE_PATTERNS: DemoAttendanceSeed[][] = [
+  [
+    { isPresent: true, checkInAt: "08:22", checkOutAt: "17:12" },
+    { isPresent: true, checkInAt: "08:18", checkOutAt: "17:06" },
+    { isPresent: false, absenceReason: "居家观察" },
+    { isPresent: true, checkInAt: "08:27", checkOutAt: "17:10" },
+    { isPresent: true, checkInAt: "08:24", checkOutAt: "17:08" },
+    { isPresent: true, checkInAt: "08:20", checkOutAt: "17:15" },
+    { isPresent: true, checkInAt: "08:26", checkOutAt: "17:09" },
+  ],
+  [
+    { isPresent: true, checkInAt: "08:35", checkOutAt: "17:18" },
+    { isPresent: true, checkInAt: "08:41", checkOutAt: "17:12" },
+    { isPresent: true, checkInAt: "08:46", checkOutAt: "17:05" },
+    { isPresent: true, checkInAt: "08:38", checkOutAt: "17:16" },
+    { isPresent: false, absenceReason: "疫苗接种" },
+    { isPresent: true, checkInAt: "08:33", checkOutAt: "17:08" },
+    { isPresent: true, checkInAt: "08:44", checkOutAt: "17:14" },
+  ],
+  [
+    { isPresent: true, checkInAt: "08:16", checkOutAt: "17:04" },
+    { isPresent: false, absenceReason: "家长请假" },
+    { isPresent: true, checkInAt: "08:28", checkOutAt: "17:06" },
+    { isPresent: true, checkInAt: "08:24", checkOutAt: "17:10" },
+    { isPresent: true, checkInAt: "08:19", checkOutAt: "17:08" },
+    { isPresent: true, checkInAt: "08:21", checkOutAt: "17:12" },
+    { isPresent: false, absenceReason: "咳嗽居家休息" },
+  ],
+  [
+    { isPresent: true, checkInAt: "08:31", checkOutAt: "17:06" },
+    { isPresent: true, checkInAt: "08:29", checkOutAt: "17:10" },
+    { isPresent: true, checkInAt: "08:34", checkOutAt: "17:14" },
+    { isPresent: false, absenceReason: "半日请假" },
+    { isPresent: true, checkInAt: "08:37", checkOutAt: "17:05" },
+    { isPresent: true, checkInAt: "08:23", checkOutAt: "17:12" },
+    { isPresent: true, checkInAt: "08:32", checkOutAt: "17:07" },
+  ],
+  [
+    { isPresent: true, checkInAt: "08:40", checkOutAt: "17:15" },
+    { isPresent: true, checkInAt: "08:36", checkOutAt: "17:08" },
+    { isPresent: true, checkInAt: "08:45", checkOutAt: "17:10" },
+    { isPresent: true, checkInAt: "08:39", checkOutAt: "17:16" },
+    { isPresent: true, checkInAt: "08:34", checkOutAt: "17:12" },
+    { isPresent: false, absenceReason: "家中照护" },
+    { isPresent: true, checkInAt: "08:42", checkOutAt: "17:18" },
+  ],
+];
+
+const EXTRA_GEN_ATTENDANCE: AttendanceRecord[] = EXTRA_GEN_CHILDREN.flatMap((child, childIndex) => {
+  const pattern = EXTRA_GEN_ATTENDANCE_PATTERNS[childIndex % EXTRA_GEN_ATTENDANCE_PATTERNS.length];
+  return DEMO_WEEK_DATES.map((date, dayIndex) => ({
+    id: `a-${child.id}-${dayIndex + 1}`,
+    childId: child.id,
+    date,
+    ...pattern[dayIndex],
+  }));
+});
+
+const EXTRA_GEN_CHILD_INDEX = new Map(EXTRA_GEN_CHILDREN.map((child, index) => [child.id, index] as const));
+
+const EXTRA_GEN_MEALS: MealRecord[] = EXTRA_GEN_ATTENDANCE.flatMap((attendance) => {
+  if (!attendance.isPresent) return [];
+
+  const childIndex = EXTRA_GEN_CHILD_INDEX.get(attendance.childId) ?? 0;
+  const dayIndex = DEMO_WEEK_DATES.indexOf(attendance.date);
+  const breakfastOptions: DemoMealFoodSeed[][] = [
+    [["小米南瓜粥", "主食", "1碗"], ["水煮蛋", "蛋白", "1个"], ["蒸玉米", "蔬果", "半根"]],
+    [["豆浆", "奶制品", "180ml"], ["全麦吐司", "主食", "2片"], ["蓝莓", "蔬果", "1小份"]],
+    [["银耳红枣粥", "主食", "1碗"], ["鸡蛋羹", "蛋白", "半份"], ["香蕉", "蔬果", "半根"]],
+  ];
+  const lunchOptions: DemoMealFoodSeed[][] = [
+    [["杂粮饭", "主食", "1碗"], ["清蒸鸡腿肉", "蛋白", "70g"], ["西兰花胡萝卜", "蔬果", "60g"]],
+    [["米饭", "主食", "1碗"], ["番茄牛肉末", "蛋白", "65g"], ["清炒生菜", "蔬果", "55g"], ["苹果块", "蔬果", "30g"]],
+    [["南瓜饭", "主食", "1碗"], ["香菇豆腐", "蛋白", "70g"], ["菜花木耳", "蔬果", "60g"]],
+  ];
+  const snackOptions: DemoMealFoodSeed[][] = [
+    [["酸奶", "奶制品", "100ml"], ["圣女果", "蔬果", "3颗"]],
+    [["玉米杯", "主食", "半份"], ["温牛奶", "奶制品", "120ml"]],
+    [["苹果片", "蔬果", "1小份"], ["小米发糕", "主食", "1块"]],
+  ];
+  const breakfastSeed = breakfastOptions[(childIndex + dayIndex) % breakfastOptions.length];
+  const lunchSeed = lunchOptions[(childIndex * 2 + dayIndex) % lunchOptions.length];
+  const snackSeed = snackOptions[(childIndex + dayIndex * 3) % snackOptions.length];
+  const baseWater = 110 + ((childIndex + dayIndex) % 5) * 10;
+  const preference: PreferenceStatus =
+    childIndex % 6 === 0 && dayIndex % 3 === 1 ? "拒食" : childIndex % 4 === 0 ? "正常" : "偏好";
+
+  return [
+    createMealRecord(
+      `m-${attendance.childId}-breakfast-${dayIndex + 1}`,
+      attendance.childId,
+      attendance.date,
+      "早餐",
+      breakfastSeed,
+      baseWater,
+      preference,
+      "李老师",
+      "教师",
+      preference === "拒食" ? "少量" : "适中"
+    ),
+    createMealRecord(
+      `m-${attendance.childId}-lunch-${dayIndex + 1}`,
+      attendance.childId,
+      attendance.date,
+      "午餐",
+      lunchSeed,
+      baseWater + 30,
+      preference === "拒食" ? "正常" : "偏好",
+      "李老师",
+      "教师",
+      preference === "拒食" ? "少量" : "充足"
+    ),
+    createMealRecord(
+      `m-${attendance.childId}-snack-${dayIndex + 1}`,
+      attendance.childId,
+      attendance.date,
+      "加餐",
+      snackSeed,
+      baseWater - 10,
+      "正常",
+      "李老师",
+      "教师",
+      "适中"
+    ),
+  ];
+});
+
+const EXTRA_GEN_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_GEN_ATTENDANCE.flatMap((attendance) => {
+  if (!attendance.isPresent) return [];
+
+  const childIndex = EXTRA_GEN_CHILD_INDEX.get(attendance.childId) ?? 0;
+  const dayIndex = DEMO_WEEK_DATES.indexOf(attendance.date);
+  const temperature = [36.4, 36.5, 36.6, 36.7, 36.5, 36.8, 36.6][(childIndex + dayIndex) % 7];
+  const mood = ["愉快", "平稳", "困倦", "平稳", "轻咳", "愉快", "烦躁"][(childIndex * 2 + dayIndex) % 7];
+  const remark = [
+    "晨检配合良好，精神状态稳定。",
+    "入园稍晚，但安抚后能进入活动状态。",
+    "有些困倦，已提醒午睡前多喝温水。",
+    "晨起轻咳，已关注后续体温变化。",
+    "情绪略敏感，教师已做个别安抚。",
+    "整体正常，能主动洗手排队。",
+    "今日食欲一般，建议餐后观察饮水。",
+  ][(childIndex + dayIndex * 2) % 7];
+  const handMouthEye = mood === "轻咳" && dayIndex % 3 === 0 ? "异常" : "正常";
+  const normalizedMood = mood === "轻咳" ? "平稳" : mood;
+
+  return [
+    createHealthRecord(
+      `hc-${attendance.childId}-${dayIndex + 1}`,
+      attendance.childId,
+      attendance.date,
+      temperature,
+      normalizedMood,
+      remark,
+      "李老师",
+      "教师",
+      handMouthEye
+    ),
+  ];
+});
 
 const EXTRA_GEN_GROWTH: GrowthRecord[] = EXTRA_GEN_CHILDREN.map((child, i) => ({
   id: `g-extra-${child.id}`,
@@ -2210,7 +2433,7 @@ const EXTRA_GEN_GROWTH: GrowthRecord[] = EXTRA_GEN_CHILDREN.map((child, i) => ({
 
 const ALL_INITIAL_CHILDREN = [...INITIAL_CHILDREN, ...EXTRA_GEN_CHILDREN];
 const ALL_INITIAL_ATTENDANCE = [...INITIAL_ATTENDANCE, ...EXTRA_GEN_ATTENDANCE];
-const ALL_INITIAL_MEALS = [...INITIAL_MEALS, ...EXTRA_GEN_MEALS];
+const ALL_INITIAL_MEALS = attachDemoMealPhotos([...INITIAL_MEALS, ...EXTRA_GEN_MEALS]);
 const ALL_INITIAL_HEALTH_CHECKS = [...INITIAL_HEALTH_CHECKS, ...EXTRA_GEN_HEALTH_CHECKS];
 const ALL_INITIAL_GROWTH = [...INITIAL_GROWTH, ...EXTRA_GEN_GROWTH];
 
