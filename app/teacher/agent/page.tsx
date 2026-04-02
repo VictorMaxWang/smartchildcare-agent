@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { BrainCircuit, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import TeacherAgentHistoryList, { type TeacherAgentHistoryListItem } from "@/components/teacher/TeacherAgentHistoryList";
+import TeacherAgentResultCard from "@/components/teacher/TeacherAgentResultCard";
 import {
   AgentWorkspaceCard,
   InlineLinkButton,
@@ -12,64 +14,154 @@ import {
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
 import { Button } from "@/components/ui/button";
-import { buildTeacherAgentContext, buildTeacherAgentReply, buildTeacherHomeViewModel, type AgentReply } from "@/lib/view-models/role-home";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  buildTeacherAgentChildContext,
+  buildTeacherAgentClassContext,
+  buildTeacherAgentResultSummary,
+  pickTeacherAgentDefaultChildId,
+  type TeacherAgentObjectScope,
+  type TeacherAgentRequestPayload,
+  type TeacherAgentResult,
+  type TeacherAgentWorkflowType,
+} from "@/lib/agent/teacher-agent";
 import { useApp } from "@/lib/store";
 
-type TeacherAction = "communication" | "follow-up" | "weekly-summary";
-
-const ACTION_LABELS: Record<TeacherAction, string> = {
+const ACTION_LABELS: Record<TeacherAgentWorkflowType, string> = {
   communication: "生成家长沟通建议",
   "follow-up": "生成今日跟进行动",
   "weekly-summary": "总结本周观察",
 };
 
-type HistoryItem = {
-  id: string;
-  action: TeacherAction;
-  reply: AgentReply;
+type HistoryItem = TeacherAgentHistoryListItem & {
+  workflow: TeacherAgentWorkflowType;
 };
+
+function isWorkflow(value: string | null): value is TeacherAgentWorkflowType {
+  return value === "communication" || value === "follow-up" || value === "weekly-summary";
+}
 
 export default function TeacherAgentPage() {
   const searchParams = useSearchParams();
-  const { currentUser, visibleChildren, presentChildren, healthCheckRecords, growthRecords, guardianFeedbacks } = useApp();
+  const {
+    currentUser,
+    visibleChildren,
+    presentChildren,
+    healthCheckRecords,
+    growthRecords,
+    guardianFeedbacks,
+  } = useApp();
+  const [scope, setScope] = useState<TeacherAgentObjectScope>("child");
+  const [selectedChildId, setSelectedChildId] = useState<string>("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [, startTransition] = useTransition();
+  const preloadHandledRef = useRef<string | null>(null);
 
-  const home = useMemo(
+  const classContext = useMemo(
     () =>
-      buildTeacherHomeViewModel({
+      buildTeacherAgentClassContext({
+        currentUser: {
+          name: currentUser.name,
+          className: currentUser.className,
+          institutionId: currentUser.institutionId,
+          role: currentUser.role,
+        },
         visibleChildren,
         presentChildren,
         healthCheckRecords,
         growthRecords,
         guardianFeedbacks,
       }),
-    [guardianFeedbacks, growthRecords, healthCheckRecords, presentChildren, visibleChildren]
+    [currentUser.className, currentUser.institutionId, currentUser.name, currentUser.role, guardianFeedbacks, growthRecords, healthCheckRecords, presentChildren, visibleChildren]
   );
-  const context = useMemo(() => buildTeacherAgentContext({ currentUser, home }), [currentUser, home]);
+  const defaultChildId = useMemo(() => pickTeacherAgentDefaultChildId(classContext) ?? "", [classContext]);
+  const selectedChildContext = useMemo(
+    () => buildTeacherAgentChildContext(classContext, selectedChildId || defaultChildId),
+    [classContext, defaultChildId, selectedChildId]
+  );
+  const latestResult = history.at(-1)?.result ?? null;
   const preloadAction = searchParams.get("action");
-  const seededHistory = useMemo<HistoryItem[]>(() => {
-    if (preloadAction !== "communication" && preloadAction !== "follow-up" && preloadAction !== "weekly-summary") {
-      return [];
+
+  useEffect(() => {
+    if (!selectedChildId || !visibleChildren.some((child) => child.id === selectedChildId)) {
+      setSelectedChildId(defaultChildId);
+    }
+  }, [defaultChildId, selectedChildId, visibleChildren]);
+
+  async function runWorkflow(workflow: TeacherAgentWorkflowType) {
+    const nextScope: TeacherAgentObjectScope = workflow === "weekly-summary" ? "class" : "child";
+    const targetChildId = nextScope === "child" ? selectedChildId || defaultChildId : undefined;
+
+    if (nextScope === "child" && !targetChildId) {
+      setError("当前没有可用于教师 Agent 的幼儿数据。");
+      return;
     }
 
-    return [
-      {
-        id: `seed-${preloadAction}`,
-        action: preloadAction,
-        reply: buildTeacherAgentReply(context, preloadAction),
-      },
-    ];
-  }, [context, preloadAction]);
-  const visibleHistory = history.length > 0 ? history : seededHistory;
-  const latestReply = visibleHistory.at(-1)?.reply ?? null;
+    setError(null);
+    setScope(nextScope);
+    setIsLoading(true);
 
-  function runAction(action: TeacherAction) {
-    const reply = buildTeacherAgentReply(context, action);
-    setHistory((prev) => {
-      const base = prev.length > 0 ? prev : seededHistory;
-      return [...base, { id: `${action}-${base.length}`, action, reply }];
-    });
+    const payload: TeacherAgentRequestPayload = {
+      workflow,
+      scope: nextScope,
+      targetChildId,
+      currentUser: {
+        name: currentUser.name,
+        className: currentUser.className,
+        institutionId: currentUser.institutionId,
+        role: currentUser.role,
+      },
+      visibleChildren,
+      presentChildren,
+      healthCheckRecords,
+      growthRecords,
+      guardianFeedbacks,
+    };
+
+    try {
+      const response = await fetch("/api/ai/teacher-agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "教师 Agent 工作流生成失败。");
+      }
+
+      const result = (await response.json()) as TeacherAgentResult;
+
+      startTransition(() => {
+        setHistory((prev) => [
+          ...prev,
+          {
+            id: `${workflow}-${Date.now()}`,
+            workflow,
+            actionLabel: ACTION_LABELS[workflow],
+            targetLabel: result.targetLabel,
+            result,
+          },
+        ]);
+      });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "教师 Agent 工作流生成失败。");
+    } finally {
+      setIsLoading(false);
+    }
   }
+
+  useEffect(() => {
+    if (!isWorkflow(preloadAction) || visibleChildren.length === 0) return;
+    if (preloadHandledRef.current === preloadAction) return;
+
+    preloadHandledRef.current = preloadAction;
+    void runWorkflow(preloadAction);
+  }, [defaultChildId, preloadAction, visibleChildren.length]);
 
   if (visibleChildren.length === 0) {
     return (
@@ -86,52 +178,125 @@ export default function TeacherAgentPage() {
   return (
     <RolePageShell
       badge={`教师 AI 助手 · ${currentUser.className ?? "当前班级"}`}
-      title="先把班级上下文摆清楚，再用 AI 快速生成沟通和跟进建议"
-      description="这一版先把教师 Agent 的入口和使用方式定型：班级上下文、快捷操作、回复区和历史记录齐全，后续可以直接替换为完整工作流。"
+      title="把班级数据转成可执行的教师工作流，而不是静态演示回复"
+      description="这一轮教师 Agent 直接围绕班级上下文、单个儿童上下文和三个核心工作流展开：家长沟通建议、今日跟进行动、本周观察总结。"
       actions={
         <>
           <InlineLinkButton href="/teacher" label="返回教师首页" />
-          <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />
+          <InlineLinkButton href="/teacher/agent" label="刷新教师 AI 助手" variant="premium" />
         </>
       }
     >
       <RoleSplitLayout
         main={
           <div className="space-y-6">
-            <SectionCard title="当前儿童 / 班级上下文" description="让老师先确认 Agent 当前服务的是哪组对象。">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
-                  <p className="text-sm font-semibold text-slate-900">当前班级</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900">{context.className}</p>
+            <SectionCard title="当前服务对象 / 班级上下文" description="先确定这次工作流服务的是整个班级，还是单个儿童。">
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant={scope === "child" ? "premium" : "outline"}
+                    className="rounded-full"
+                    onClick={() => setScope("child")}
+                  >
+                    单个儿童模式
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={scope === "class" ? "premium" : "outline"}
+                    className="rounded-full"
+                    onClick={() => setScope("class")}
+                  >
+                    班级模式
+                  </Button>
                 </div>
-                <div className="rounded-3xl bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-900">当前任务对象</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900">{visibleChildren.length} 名儿童</p>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
+                    <p className="text-sm font-semibold text-slate-900">当前班级</p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-900">{classContext.className}</p>
+                  </div>
+                  <div className="rounded-3xl bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">当前服务对象</p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-900">
+                      {scope === "class" ? `${classContext.visibleChildren.length} 名幼儿` : selectedChildContext?.child.name ?? "未选择"}
+                    </p>
+                  </div>
                 </div>
+
+                {scope === "child" ? (
+                  <div className="max-w-md">
+                    <p className="mb-2 text-sm font-semibold text-slate-900">选择目标儿童</p>
+                    <Select value={selectedChildId || defaultChildId} onValueChange={setSelectedChildId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择目标儿童" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {visibleChildren.map((child) => (
+                          <SelectItem key={child.id} value={child.id}>
+                            {child.name} · {child.className}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <p className="text-sm leading-6 text-slate-600">
+                    班级模式适合直接生成本周观察总结；若点击“家长沟通建议”或“今日跟进行动”，系统会自动切回单个儿童模式。
+                  </p>
+                )}
               </div>
             </SectionCard>
 
-            <SectionCard title="今日异常摘要" description="Agent 先展示老师最关心的当天上下文。">
+            <SectionCard title="今日异常摘要" description="展示真实业务数据，不再只显示固定壳。">
               <div className="space-y-3">
-                {context.abnormalSummary.length > 0 ? (
-                  context.abnormalSummary.map((item) => (
-                    <div key={item} className="rounded-3xl border border-rose-100 bg-rose-50/60 p-4 text-sm text-slate-700">
-                      {item}
+                {scope === "child" && selectedChildContext ? (
+                  <>
+                    {selectedChildContext.todayAbnormalChecks.length > 0 ? (
+                      selectedChildContext.todayAbnormalChecks.map((record) => (
+                        <div key={record.id} className="rounded-3xl border border-rose-100 bg-rose-50/60 p-4 text-sm text-slate-700">
+                          {record.date} · {selectedChildContext.child.name} · 体温 {record.temperature}℃ · {record.mood} · {record.handMouthEye}
+                          {record.remark ? ` · ${record.remark}` : ""}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-3xl border border-slate-100 bg-white p-4 text-sm text-slate-600">
+                        {selectedChildContext.child.name} 今日暂无晨检异常，适合继续围绕待复查记录和家长反馈生成建议。
+                      </div>
+                    )}
+
+                    {selectedChildContext.pendingReviews.slice(0, 2).map((record) => (
+                      <div key={record.id} className="rounded-3xl border border-amber-100 bg-amber-50/60 p-4 text-sm text-slate-700">
+                        待复查 · {record.category} · {record.followUpAction ?? record.description}
+                      </div>
+                    ))}
+                  </>
+                ) : classContext.todayAbnormalChildren.length > 0 ? (
+                  classContext.todayAbnormalChildren.map((item) => (
+                    <div key={item.record.id} className="rounded-3xl border border-rose-100 bg-rose-50/60 p-4 text-sm text-slate-700">
+                      {item.child.name} · 体温 {item.record.temperature}℃ · {item.record.mood} · {item.record.handMouthEye}
+                      {item.record.remark ? ` · ${item.record.remark}` : ""}
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-500">今日暂无异常摘要，适合直接生成班级周观察总结。</p>
+                  <p className="text-sm text-slate-500">今天暂未发现晨检异常，适合直接做班级周总结或优先补晨检。</p>
                 )}
               </div>
             </SectionCard>
 
             <AgentWorkspaceCard
               title="快捷操作"
-              description="先让老师一键得到可执行结果，再决定是否进入下一轮追问。"
+              description="快捷操作现在会真实驱动工作流，返回稳定的结构化结果。"
               promptButtons={
                 <>
-                  {(Object.keys(ACTION_LABELS) as TeacherAction[]).map((action) => (
-                    <Button key={action} variant="outline" className="rounded-full" onClick={() => runAction(action)}>
+                  {(Object.keys(ACTION_LABELS) as TeacherAgentWorkflowType[]).map((action) => (
+                    <Button
+                      key={action}
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => void runWorkflow(action)}
+                      disabled={isLoading}
+                    >
                       {ACTION_LABELS[action]}
                     </Button>
                   ))}
@@ -139,85 +304,76 @@ export default function TeacherAgentPage() {
               }
             >
               <div className="rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5">
-                {latestReply ? (
-                  <div className="space-y-4">
-                    <p className="text-sm leading-7 text-slate-700">{latestReply.answer}</p>
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="rounded-2xl bg-white p-4">
-                        <p className="text-sm font-semibold text-slate-900">关键点</p>
-                        <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                          {latestReply.keyPoints.map((item) => <li key={item}>• {item}</li>)}
-                        </ul>
-                      </div>
-                      <div className="rounded-2xl bg-white p-4">
-                        <p className="text-sm font-semibold text-slate-900">下一步</p>
-                        <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                          {latestReply.nextSteps.map((item) => <li key={item}>• {item}</li>)}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
+                {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
+
+                {latestResult ? (
+                  <TeacherAgentResultCard result={latestResult} />
                 ) : (
-                  <p className="text-sm text-slate-500">点击上方任一快捷操作，教师 Agent 会基于班级上下文生成建议。</p>
+                  <p className="text-sm text-slate-500">
+                    点击上方任一快捷操作，教师 Agent 会基于当前班级或儿童上下文生成结构化结果。
+                  </p>
                 )}
+
+                {isLoading ? <p className="mt-4 text-sm text-slate-500">教师 Agent 正在编排工作流，请稍候…</p> : null}
               </div>
             </AgentWorkspaceCard>
 
-            <SectionCard title="历史记录" description="保留本次演示中已经生成过的 AI 回复。">
-              <div className="space-y-3">
-                {visibleHistory.length > 0 ? (
-                  visibleHistory.map((item) => (
-                    <div key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <Sparkles className="h-4 w-4 text-indigo-500" />
-                        {ACTION_LABELS[item.action]}
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{item.reply.answer}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">还没有历史记录，先点一个快捷操作。</p>
-                )}
-              </div>
+            <SectionCard title="历史记录" description="保留当前会话内已生成的工作流结果摘要。">
+              <TeacherAgentHistoryList items={history} />
             </SectionCard>
           </div>
         }
         aside={
           <div className="space-y-6">
-            <SectionCard title="当前服务对象" description="固定展示教师 Agent 的上下文。">
+            <SectionCard title="当前服务对象" description="帮助老师确认这次工作流聚焦的对象与上下文。">
               <ul className="space-y-3 text-sm text-slate-600">
-                <li>当前班级：{context.className}</li>
-                <li>待复查：{context.pendingReviewSummary.length} 人</li>
-                <li>待沟通家长：{context.parentCommunicationSummary.length} 人</li>
+                <li>当前班级：{classContext.className}</li>
+                <li>班级可见幼儿：{classContext.visibleChildren.length} 名</li>
+                <li>今日异常晨检：{classContext.todayAbnormalChildren.length} 名</li>
+                <li>待复查记录：{classContext.pendingReviews.length} 项</li>
               </ul>
             </SectionCard>
 
-            <SectionCard title="待复查摘要" description="作为侧边辅助信息区。">
+            <SectionCard title="班级高优先级摘要" description="用于老师快速扫一眼今天最值得先处理的内容。">
               <div className="space-y-3">
-                {context.pendingReviewSummary.length > 0 ? (
-                  context.pendingReviewSummary.map((item) => (
-                    <div key={item} className="rounded-2xl border border-slate-100 bg-white p-4 text-sm text-slate-600">
-                      {item}
+                {classContext.focusChildren.length > 0 ? (
+                  classContext.focusChildren.map((item) => (
+                    <div key={item.childId} className="rounded-2xl border border-slate-100 bg-white p-4 text-sm text-slate-600">
+                      <p className="font-semibold text-slate-900">{item.childName}</p>
+                      <p className="mt-2 leading-6">{item.reasons.join("、")}</p>
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-500">当前没有待复查摘要。</p>
+                  <p className="text-sm text-slate-500">当前没有需要重点提级的儿童，适合保持稳定记录节奏。</p>
                 )}
               </div>
             </SectionCard>
 
-            <SectionCard title="待沟通家长摘要" description="帮助老师在桌面端快速扫一眼。">
-              <div className="space-y-3">
-                {context.parentCommunicationSummary.length > 0 ? (
-                  context.parentCommunicationSummary.map((item) => (
-                    <div key={item} className="rounded-2xl border border-slate-100 bg-white p-4 text-sm text-slate-600">
-                      {item}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">当前没有待沟通摘要。</p>
-                )}
-              </div>
+            <SectionCard title="推荐演示顺序" description="比赛 demo 可以直接沿这条顺序演示。">
+              <ol className="space-y-3 text-sm text-slate-600">
+                <li className="flex items-center gap-3">
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  先选一个异常或待复查儿童，生成家长沟通建议
+                </li>
+                <li className="flex items-center gap-3">
+                  <Sparkles className="h-4 w-4 text-sky-500" />
+                  再切到今日跟进行动，展示结构化行动列表
+                </li>
+                <li className="flex items-center gap-3">
+                  <Sparkles className="h-4 w-4 text-indigo-500" />
+                  最后切到班级模式，总结本周观察
+                </li>
+              </ol>
+            </SectionCard>
+
+            <SectionCard title="当前结果摘要" description="方便演示时在侧边快速回看。">
+              {latestResult ? (
+                <div className="rounded-2xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-600">
+                  {buildTeacherAgentResultSummary(latestResult)}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">还没有结果，先运行一个工作流。</p>
+              )}
             </SectionCard>
           </div>
         }

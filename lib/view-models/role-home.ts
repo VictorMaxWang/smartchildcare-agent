@@ -11,7 +11,6 @@ import type {
   HealthCheckRecord,
   ParentFeed,
   SmartInsight,
-  User,
   WeeklyDietTrend,
 } from "@/lib/store";
 import { getAgeBandFromBirthDate } from "@/lib/store";
@@ -55,14 +54,6 @@ export type AdminHomeViewModel = {
   pendingItems: string[];
   weeklyHighlights: string[];
   heroStats: Array<{ label: string; value: string }>;
-};
-
-export type TeacherAgentContext = {
-  className: string;
-  childCount: number;
-  abnormalSummary: string[];
-  pendingReviewSummary: string[];
-  parentCommunicationSummary: string[];
 };
 
 export type AdminAgentContext = {
@@ -327,27 +318,6 @@ export function buildAdminHomeViewModel(params: {
   };
 }
 
-export function buildTeacherAgentContext(params: {
-  currentUser: User;
-  home: TeacherHomeViewModel;
-}): TeacherAgentContext {
-  return {
-    className: params.currentUser.className ?? "当前班级",
-    childCount:
-      params.home.todayAbnormalChildren.length +
-      params.home.uncheckedMorningChecks.length,
-    abnormalSummary: params.home.todayAbnormalChildren.map(
-      (item) => `${item.child.name}：${item.record.mood} / ${item.record.handMouthEye}`
-    ),
-    pendingReviewSummary: params.home.pendingReviews.map(
-      (item) => `${item.child.name}：${item.record.followUpAction ?? item.record.description}`
-    ),
-    parentCommunicationSummary: params.home.parentsToCommunicate.map(
-      (item) => `${item.child.name}：${item.reason}`
-    ),
-  };
-}
-
 export function buildAdminAgentContext(params: {
   institutionName: string;
   home: AdminHomeViewModel;
@@ -361,57 +331,6 @@ export function buildAdminAgentContext(params: {
     feedbackCompletionRate: params.home.feedbackCompletionRate,
     pendingItems: params.home.pendingItems,
     weeklyHighlights: params.home.weeklyHighlights,
-  };
-}
-
-export function buildTeacherAgentReply(
-  context: TeacherAgentContext,
-  action: "communication" | "follow-up" | "weekly-summary"
-): AgentReply {
-  if (action === "communication") {
-    return {
-      answer: `建议优先联系 ${context.parentCommunicationSummary[0]?.split("：")[0] ?? "重点儿童家长"}，先同步园内观察，再明确今晚需要家长配合观察的 1 到 2 个点，避免信息过多。`,
-      keyPoints: [
-        "先说客观观察，再给家庭配合建议",
-        "把风险描述压缩到当日最关键的一个场景",
-        "沟通结束前明确明早回传什么信息",
-      ],
-      nextSteps: [
-        "按异常儿童优先级逐一沟通",
-        "把沟通结果记录到成长观察或反馈链路",
-        "明早根据家长反馈调整跟进动作",
-      ],
-    };
-  }
-
-  if (action === "follow-up") {
-    return {
-      answer: `今天班级里最需要推进的是未晨检和待复查两类事项。建议先补齐晨检，再对 ${context.pendingReviewSummary[0]?.split("：")[0] ?? "重点儿童"} 做一次复查记录，保证明日的 AI 建议有连续数据。`,
-      keyPoints: [
-        "先补齐基础记录，再做干预判断",
-        "复查动作要和上一次观察点对应",
-        "异常儿童和待沟通家长名单保持同步",
-      ],
-      nextSteps: [
-        "30 分钟内补齐未晨检名单",
-        "午睡前后完成重点儿童复查",
-        "离园前同步家长今日跟进行动",
-      ],
-    };
-  }
-
-  return {
-    answer: `本周班级观察重点集中在异常晨检、待复查和家长沟通闭环。整体建议是减少信息分散，把每个重点儿童都压缩成“今天发生了什么、今晚家长做什么、明天老师看什么”的三句结构。`,
-    keyPoints: [
-      "异常和复查儿童构成了本周主要工作量",
-      "家长沟通越结构化，明日跟进越高效",
-      "优先保留连续 7 天可复盘的数据链路",
-    ],
-    nextSteps: [
-      "整理本周重点儿童清单",
-      "统一一版家长沟通话术",
-      "下周沿用同一记录节奏继续追踪",
-    ],
   };
 }
 
