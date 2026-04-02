@@ -158,8 +158,9 @@ async function main() {
       "RELEASE_BASE_URL",
       "RELEASE_ADMIN_COOKIE",
       "CRON_SECRET",
-      "NEXT_PUBLIC_SUPABASE_URL",
-      "SUPABASE_SERVICE_ROLE_KEY",
+      "DATABASE_URL",
+      "DATABASE_SSL",
+      "AUTH_SESSION_SECRET",
       "DASHSCOPE_API_KEY",
     ];
     for (const key of requiredEnvKeys) {

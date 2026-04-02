@@ -3105,8 +3105,8 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       id: "ins-role-ready",
       level: "success",
       title: "角色权限模型已就绪",
-      description: "已支持家长/教师/机构管理员的前端数据权限视图，可对接 Supabase Auth + RLS。",
-      tags: ["Auth", "RLS", currentUser.role],
+      description: "已支持家长/教师/机构管理员的前端数据权限视图，可继续扩展更细粒度的访问控制。",
+      tags: ["Auth", "Access", currentUser.role],
     });
 
     insights.unshift({
