@@ -18,6 +18,10 @@ export function emptyInstitutionSnapshot(): AppStateSnapshot {
     feedback: [],
     health: [],
     taskCheckIns: [],
+    interventionCards: [],
+    consultations: [],
+    mobileDrafts: [],
+    reminders: [],
     updatedAt: new Date().toISOString(),
   };
 }

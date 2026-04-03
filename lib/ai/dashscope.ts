@@ -4,6 +4,7 @@ import type {
   AiFollowUpResponse,
   AiSuggestionResponse,
   ChildSuggestionSnapshot,
+  InstitutionSuggestionSnapshot,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
@@ -223,6 +224,24 @@ function buildPrompt(snapshot: ChildSuggestionSnapshot): string {
   ].join("\n");
 }
 
+function buildInstitutionPrompt(snapshot: InstitutionSuggestionSnapshot): string {
+  return [
+    "你是托育机构的园长运营决策助手。",
+    "你只做机构级风险归因、优先级判断和动作建议，不做医疗诊断，不输出任何额外文本。",
+    "请基于机构近7天汇总、优先级列表、高风险儿童、高风险班级、家长协同风险和待处理派单，输出严格JSON。",
+    "JSON字段必须包含 riskLevel, summary, highlights, concerns, actions, actionPlan, disclaimer。",
+    "summary 要说明今天园长最该优先推动什么、为什么、先动谁。",
+    "highlights 写机构层面可直接用于UI展示的重点摘要。",
+    "concerns 写当前需要优先处理的 TOP 问题，不要泛泛而谈。",
+    "actions 写 3-5 条可执行动作，要带责任人角色和完成时点。",
+    "actionPlan.schoolActions 写园内教师/班级动作，familyActions 写家长协同动作，reviewActions 写园长复盘动作。",
+    "如果 priorityTopItems 已经给出明确排序，优先顺着排序解释，不要重新发明完全不同的结论。",
+    "disclaimer 必须强调非医疗诊断。",
+    "输入:",
+    JSON.stringify(snapshot),
+  ].join("\n");
+}
+
 function buildWeeklyReportPrompt(snapshot: WeeklyReportSnapshot): string {
   return [
     "你是托育机构周报分析助手。",
@@ -241,6 +260,10 @@ function buildWeeklyReportPrompt(snapshot: WeeklyReportSnapshot): string {
 }
 
 function buildFollowUpPrompt(payload: AiFollowUpPayload): string {
+  if ("institutionName" in payload.snapshot) {
+    return buildInstitutionFollowUpPrompt(payload, payload.snapshot);
+  }
+
   const recentHistory = (payload.history ?? []).slice(-6);
 
   return [
@@ -257,6 +280,34 @@ function buildFollowUpPrompt(payload: AiFollowUpPayload): string {
     JSON.stringify({
       ...payload,
       history: recentHistory,
+    }),
+  ].join("\n");
+}
+
+function buildInstitutionFollowUpPrompt(
+  payload: AiFollowUpPayload,
+  snapshot: InstitutionSuggestionSnapshot
+) {
+  const recentHistory = (payload.history ?? []).slice(-6);
+
+  return [
+    "你是托育机构的园长运营追问助手。",
+    "你只围绕机构级优先事项回答园长追问，帮助其判断今天最该先做什么、分配给谁、什么时候复盘。",
+    "不要输出任何额外文本，只输出严格JSON。",
+    "JSON字段必须包含 answer, keyPoints, nextSteps, disclaimer。",
+    "answer 要紧扣园长问题，直接给出优先顺序和动作建议。",
+    "keyPoints 要引用 priorityTopItems、风险儿童、风险班级或待处理派单中的真实对象。",
+    "nextSteps 要给出 3 条明确动作，尽量包含 今日上午、今日放学前、今晚21:00前、本周五前 等时间词。",
+    "如果历史里已有上一轮回答，要承接上下文，不要重复。",
+    "disclaimer 必须强调非医疗诊断。",
+    "输入:",
+    JSON.stringify({
+      snapshot,
+      suggestionTitle: payload.suggestionTitle,
+      suggestionDescription: payload.suggestionDescription,
+      question: payload.question,
+      history: recentHistory,
+      institutionContext: payload.institutionContext,
     }),
   ].join("\n");
 }
@@ -502,10 +553,12 @@ export async function requestDashscopeDietEvaluation(
 }
 
 export async function requestDashscopeSuggestion(
-  snapshot: ChildSuggestionSnapshot
+  snapshot: ChildSuggestionSnapshot | InstitutionSuggestionSnapshot
 ): Promise<Omit<AiSuggestionResponse, "source"> | null> {
   try {
-    const parsed = await requestDashscopeJson(buildPrompt(snapshot));
+    const parsed = await requestDashscopeJson(
+      "institutionName" in snapshot ? buildInstitutionPrompt(snapshot) : buildPrompt(snapshot)
+    );
     const normalized = normalizeAiOutput(parsed);
     if (!normalized) {
       console.error("[AI] DashScope returned suggestion content that could not be normalized.");

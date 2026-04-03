@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import {
@@ -12,6 +13,9 @@ import {
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
+import { buildParentAgentChildContext, buildParentAgentSuggestionResult, buildParentChildSuggestionSnapshot, type ParentAgentResult } from "@/lib/agent/parent-agent";
+import { buildFallbackSuggestion } from "@/lib/ai/fallback";
+import type { AiSuggestionResponse } from "@/lib/ai/types";
 import { buildParentHomeViewModel } from "@/lib/view-models/role-home";
 import { formatDisplayDate, getAgeText, useApp } from "@/lib/store";
 
@@ -22,11 +26,73 @@ const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
 });
 
 export default function ParentHomePage() {
-  const { getParentFeed } = useApp();
+  const { getParentFeed, healthCheckRecords, mealRecords, growthRecords, guardianFeedbacks, taskCheckInRecords } = useApp();
   const feed = getParentFeed()[0];
   const viewModel = buildParentHomeViewModel(feed);
+  const [previewResult, setPreviewResult] = useState<ParentAgentResult | null>(null);
 
-  if (!viewModel) {
+  const previewContext = useMemo(() => {
+    if (!feed) return null;
+
+    return buildParentAgentChildContext({
+      child: feed.child,
+      smartInsights: feed.suggestions,
+      healthCheckRecords,
+      mealRecords,
+      growthRecords,
+      guardianFeedbacks,
+      taskCheckInRecords,
+      weeklyTrend: feed.weeklyTrend,
+    });
+  }, [feed, guardianFeedbacks, growthRecords, healthCheckRecords, mealRecords, taskCheckInRecords]);
+
+  const snapshot = useMemo(
+    () => (previewContext ? buildParentChildSuggestionSnapshot(previewContext) : null),
+    [previewContext]
+  );
+
+  useEffect(() => {
+    if (!previewContext || !snapshot) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const context = previewContext;
+    const snapshotPayload = snapshot;
+
+    async function fetchPreview() {
+      try {
+        const response = await fetch("/api/ai/suggestions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshot: snapshotPayload }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("fetch preview failed");
+        }
+
+        const data = (await response.json()) as AiSuggestionResponse;
+        if (!cancelled) {
+          setPreviewResult(buildParentAgentSuggestionResult({ context, suggestion: data }));
+        }
+      } catch {
+        if (!cancelled) {
+          const fallback = buildFallbackSuggestion(snapshotPayload.ruleFallback);
+          setPreviewResult(buildParentAgentSuggestionResult({ context, suggestion: fallback }));
+        }
+      }
+    }
+
+    void fetchPreview();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [previewContext, snapshot]);
+
+  if (!viewModel || !feed || !previewContext) {
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <EmptyState
@@ -38,17 +104,18 @@ export default function ParentHomePage() {
     );
   }
 
-  const primaryAgentLabel = feed.suggestions.length > 0 ? "继续追问" : "进入 AI 助手";
+  const agentHref = `/parent/agent?child=${feed.child.id}`;
+  const primaryAgentLabel = previewResult ? "继续追问" : "进入 AI 助手";
 
   return (
     <RolePageShell
       badge={`家长首页 · ${TODAY_TEXT}`}
-      title={`今天先看 ${viewModel.child.name} 的状态，再决定今晚怎么陪伴`}
-      description="首页只保留今天最需要处理的信息：孩子状态、AI 提醒、今晚任务、待反馈事项和 7 天趋势入口。手机端一屏可达，桌面端补充更完整摘要。"
+      title={`先看 ${viewModel.child.name} 今天的状态，再决定今晚怎么做`}
+      description="首页只保留今天最需要处理的信息：孩子状态、AI 提醒、今晚任务、AI 干预卡预览、待反馈事项和 7 天趋势入口。手机端一屏可达，桌面端补充更完整摘要。"
       actions={
         <>
-          <InlineLinkButton href="/parent/agent" label={primaryAgentLabel} variant="premium" />
-          <InlineLinkButton href="/parent/agent#trend" label="查看近 7 天趋势" />
+          <InlineLinkButton href={agentHref} label={primaryAgentLabel} variant="premium" />
+          <InlineLinkButton href={`${agentHref}#feedback`} label="今晚完成后去反馈" />
         </>
       }
     >
@@ -65,7 +132,7 @@ export default function ParentHomePage() {
 
             <SectionCard
               title="孩子今日情况摘要"
-              description="把家长最关心的几件事压缩到首屏。"
+              description="先把家长最关心的几件事压缩到首屏。"
             >
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
@@ -86,11 +153,11 @@ export default function ParentHomePage() {
                   </div>
                 </div>
                 <div className="rounded-3xl border border-slate-100 bg-white p-4">
-                  <p className="text-sm font-semibold text-slate-900">今日看护提示</p>
+                  <p className="text-sm font-semibold text-slate-900">今晚闭环重点</p>
                   <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                    <li>先看 AI 今日提醒，再决定今晚是否需要重点陪伴。</li>
-                    <li>如果今晚完成家庭任务，离园后补一条反馈效果最好。</li>
-                    <li>若孩子状态明显变化，直接进入 AI 助手继续追问。</li>
+                    <li>先看 AI 干预卡，再决定今晚只做哪一件事。</li>
+                    <li>做完后直接在家长 Agent 页提交反馈，明天老师会继续接着看。</li>
+                    <li>如果今晚有明显变化，直接进入 AI 助手继续追问。</li>
                   </ul>
                 </div>
               </div>
@@ -98,28 +165,32 @@ export default function ParentHomePage() {
 
             <SectionCard
               title="AI 今日提醒"
-              description="优先看最值得家长马上处理的一条提示。"
+              description="优先看当前最值得家长马上处理的一条提示。"
               actions={<Badge variant={viewModel.aiReminder.level === "warning" ? "warning" : "info"}>{viewModel.aiReminder.level === "warning" ? "需关注" : "今日建议"}</Badge>}
             >
               <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
-                <p className="text-base font-semibold text-slate-900">{viewModel.aiReminder.title}</p>
-                <p className="mt-3 text-sm leading-7 text-slate-600">{viewModel.aiReminder.description}</p>
+                <p className="text-base font-semibold text-slate-900">{previewResult?.title ?? viewModel.aiReminder.title}</p>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{previewResult?.whyNow ?? viewModel.aiReminder.description}</p>
               </div>
             </SectionCard>
 
             <div className="grid gap-6 xl:grid-cols-2">
               <SectionCard
                 title="今晚家庭任务"
-                description="今晚只做一件最适合当前孩子年龄段的小任务。"
+                description="今晚先做一件最适合当前状态的动作。"
                 actions={<Badge variant="info">{viewModel.tonightTask.tag}</Badge>}
               >
                 <div className="rounded-3xl bg-sky-50 p-5">
                   <div className="flex items-start gap-3">
                     <MoonStar className="mt-0.5 h-5 w-5 text-sky-600" />
                     <div>
-                      <p className="text-base font-semibold text-slate-900">{viewModel.tonightTask.title}</p>
-                      <p className="mt-2 text-sm leading-7 text-slate-600">{viewModel.tonightTask.description}</p>
+                      <p className="text-base font-semibold text-slate-900">{previewResult?.interventionCard.title ?? viewModel.tonightTask.title}</p>
+                      <p className="mt-2 text-sm leading-7 text-slate-600">{previewResult?.tonightTopAction ?? viewModel.tonightTask.description}</p>
                       <p className="mt-3 text-sm font-medium text-sky-700">建议时长：{viewModel.tonightTask.durationText}</p>
+                      <Link href={`${agentHref}#intervention`} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-sky-700">
+                        查看完整干预卡
+                        <TrendingUp className="h-4 w-4" />
+                      </Link>
                     </div>
                   </div>
                 </div>
@@ -135,9 +206,9 @@ export default function ParentHomePage() {
                     <MessageCircleMore className="mt-0.5 h-5 w-5 text-amber-600" />
                     <div>
                       <p className="text-base font-semibold text-slate-900">{viewModel.pendingFeedback.title}</p>
-                      <p className="mt-2 text-sm leading-7 text-slate-600">{viewModel.pendingFeedback.description}</p>
-                      <Link href="/parent/agent" className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-amber-700">
-                        去 AI 助手继续补充
+                      <p className="mt-2 text-sm leading-7 text-slate-600">{previewResult?.feedbackPrompt ?? viewModel.pendingFeedback.description}</p>
+                      <Link href={`${agentHref}#feedback`} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-amber-700">
+                        去 AI 助手提交反馈
                         <TrendingUp className="h-4 w-4" />
                       </Link>
                     </div>
@@ -149,7 +220,7 @@ export default function ParentHomePage() {
             <SectionCard
               title="最近 7 天趋势入口"
               description="给家长一个足够轻量的趋势摘要，避免首页变成报表页。"
-              actions={<InlineLinkButton href="/parent/agent#trend" label="进入趋势与追问" />}
+              actions={<InlineLinkButton href={agentHref} label="进入趋势与追问" />}
             >
               <div className="grid gap-3 sm:grid-cols-3">
                 {viewModel.weeklyTrend.map((item) => (
@@ -166,35 +237,40 @@ export default function ParentHomePage() {
           <div className="space-y-6">
             <AssistantEntryCard
               title="进入 AI 助手 / 继续追问"
-              description="当你想知道今晚怎么陪伴、为什么最近状态有变化，直接从这里进入。"
-              href="/parent/agent"
+              description="当你想知道今晚怎么陪伴、为什么最近状态有变化、做完后怎么反馈，直接从这里进入。"
+              href={agentHref}
               buttonLabel={primaryAgentLabel}
             >
               <ul className="space-y-3 text-sm leading-6 text-slate-600">
                 <li>当前服务对象：{viewModel.child.name}</li>
-                <li>当前任务：今晚家庭陪伴 + 离园后反馈</li>
-                <li>推荐方式：先看快捷问题，再继续追问</li>
+                <li>当前任务：今晚家庭动作 + 明早反馈</li>
+                <li>推荐路径：先看干预卡，再继续追问</li>
               </ul>
             </AssistantEntryCard>
 
             <SectionCard
               title="最近一张 AI 干预卡预览"
-              description="先露出一张干预卡，让首页有明显 AI 产品感。"
+              description="首页先露出一张真实干预卡，让家长清楚今晚怎么做。"
             >
-              <div className="rounded-3xl border border-slate-100 bg-white p-5">
+              <Link href={`${agentHref}#intervention`} className="block rounded-3xl border border-slate-100 bg-white p-5 transition hover:bg-slate-50">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  <p className="text-sm font-semibold text-slate-900">{viewModel.interventionPreview.title}</p>
+                  <p className="text-sm font-semibold text-slate-900">{previewResult?.interventionCard.title ?? viewModel.interventionPreview.title}</p>
                 </div>
-                <p className="mt-3 text-sm leading-7 text-slate-600">{viewModel.interventionPreview.description}</p>
-              </div>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{previewResult?.interventionCard.summary ?? viewModel.interventionPreview.description}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {previewResult?.interventionCard.observationPoints.slice(0, 2).map((item) => (
+                    <Badge key={item} variant="secondary">{item}</Badge>
+                  ))}
+                </div>
+              </Link>
             </SectionCard>
 
-            <SectionCard title="今日查看顺序" description="更适合移动端首屏操作顺序。">
+            <SectionCard title="今日查看顺序" description="更适合移动端首页操作顺序。">
               <ol className="space-y-3 text-sm text-slate-600">
                 <li className="flex items-center gap-3"><CalendarDays className="h-4 w-4 text-indigo-500" />先看今日情况摘要</li>
-                <li className="flex items-center gap-3"><BrainCircuit className="h-4 w-4 text-indigo-500" />再看 AI 今日提醒</li>
-                <li className="flex items-center gap-3"><MoonStar className="h-4 w-4 text-indigo-500" />今晚按家庭任务执行</li>
+                <li className="flex items-center gap-3"><BrainCircuit className="h-4 w-4 text-indigo-500" />再看 AI 干预卡预览</li>
+                <li className="flex items-center gap-3"><MoonStar className="h-4 w-4 text-indigo-500" />今晚按家庭动作执行并反馈</li>
               </ol>
             </SectionCard>
           </div>

@@ -1,34 +1,67 @@
 "use client";
 
 import { Clock3, MessageSquareText, Target } from "lucide-react";
+import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
 import { Badge } from "@/components/ui/badge";
-import type { TeacherAgentResult } from "@/lib/agent/teacher-agent";
-import { buildTeacherAgentTimeLabel } from "@/lib/agent/teacher-agent";
+import { buildTeacherAgentTimeLabel, type TeacherAgentResult } from "@/lib/agent/teacher-agent";
 
 export default function TeacherAgentResultCard({ result }: { result: TeacherAgentResult }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
-        <Badge variant={result.objectScope === "class" ? "info" : "warning"}>
-          {result.objectScope === "class" ? "班级模式" : "单个儿童模式"}
+        <Badge variant={result.mode === "class" ? "info" : "warning"}>
+          {result.mode === "class" ? "班级模式" : "单儿童模式"}
         </Badge>
+        {result.consultationMode ? <Badge variant="warning">会诊模式</Badge> : null}
+        <Badge variant="secondary">对象：{result.targetLabel}</Badge>
         <Badge variant={result.source === "ai" ? "success" : result.source === "mock" ? "info" : "secondary"}>
           来源：{result.source}
         </Badge>
         {result.model ? <Badge variant="secondary">{result.model}</Badge> : null}
       </div>
 
-      <div>
+      <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
+        <p className="text-sm font-semibold text-slate-900">标题</p>
         <h3 className="text-lg font-semibold text-slate-900">{result.title}</h3>
+        <p className="mt-4 text-sm font-semibold text-slate-900">摘要</p>
         <p className="mt-2 text-sm leading-7 text-slate-700">{result.summary}</p>
       </div>
+
+      {result.consultation ? (
+        <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-4">
+          <p className="text-sm font-semibold text-slate-900">高风险多 Agent 会诊</p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            {result.consultation.coordinatorSummary.finalConclusion}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {result.consultation.participants.map((item) => (
+              <Badge key={item.id} variant={item.id === "coordinator" ? "warning" : "outline"}>
+                {item.label}
+              </Badge>
+            ))}
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {result.consultation.agentFindings.map((item) => (
+              <div key={item.agentId} className="rounded-2xl border border-white/70 bg-white/80 p-4">
+                <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{item.riskExplanation}</p>
+                <ul className="mt-3 space-y-1 text-sm text-slate-600">
+                  {item.signals.slice(0, 3).map((signal) => (
+                    <li key={signal}>- {signal}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {result.highlights.length > 0 ? (
         <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
           <p className="text-sm font-semibold text-slate-900">关键点</p>
           <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
             {result.highlights.map((item) => (
-              <li key={item}>• {item}</li>
+              <li key={item}>- {item}</li>
             ))}
           </ul>
         </div>
@@ -95,9 +128,22 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
         </div>
       ) : null}
 
+      {result.interventionCard ? (
+        <InterventionCardPanel
+          card={result.interventionCard}
+          title="共享 AI 干预卡"
+          footer={
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+              <p className="text-sm font-semibold text-slate-900">教师后续跟进草稿</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{result.interventionCard.teacherFollowupDraft}</p>
+            </div>
+          }
+        />
+      ) : null}
+
       {result.tomorrowObservationPoint ? (
         <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-4">
-          <p className="text-sm font-semibold text-slate-900">下一步</p>
+          <p className="text-sm font-semibold text-slate-900">下一步建议</p>
           <p className="mt-2 text-sm leading-7 text-slate-700">{result.tomorrowObservationPoint}</p>
         </div>
       ) : null}

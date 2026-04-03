@@ -61,7 +61,7 @@ export default function Navbar() {
                 key={`${href}-${label}`}
                 href={href}
                 className={cn(
-                  "relative flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors after:absolute after:bottom-0 after:left-4 after:h-0.5 after:rounded-full after:transition-all after:duration-300 after:content-['']",
+                  "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors after:absolute after:bottom-0 after:left-4 after:h-0.5 after:rounded-full after:transition-all after:duration-300 after:content-['']",
                   active
                     ? "bg-indigo-50/70 text-indigo-600 after:w-[calc(100%-2rem)] after:bg-indigo-500"
                     : "text-slate-600 after:w-0 hover:bg-slate-50 hover:text-slate-900"

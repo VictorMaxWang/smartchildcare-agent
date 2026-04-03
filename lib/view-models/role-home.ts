@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  buildAdminHomeViewModel as buildStructuredAdminHomeViewModel,
+} from "@/lib/agent/admin-agent";
+import type { AdminDispatchEvent } from "@/lib/agent/admin-types";
 import { buildFallbackWeeklyReport } from "@/lib/ai/fallback";
 import { getWeeklyTaskForChild } from "@/lib/mock/coparenting";
 import type {
@@ -9,6 +13,7 @@ import type {
   GrowthRecord,
   GuardianFeedback,
   HealthCheckRecord,
+  MealRecord,
   ParentFeed,
   SmartInsight,
   WeeklyDietTrend,
@@ -54,6 +59,12 @@ export type AdminHomeViewModel = {
   pendingItems: string[];
   weeklyHighlights: string[];
   heroStats: Array<{ label: string; value: string }>;
+  priorityTopItems?: Array<{ targetName: string; priorityLevel: string; reason: string; recommendedDeadline: string }>;
+  riskChildren?: Array<{ childName: string; reason: string }>;
+  riskClasses?: Array<{ className: string; reason: string }>;
+  pendingDispatches?: Array<{ title: string; status: string; recommendedDeadline: string }>;
+  actionEntrySummary?: string;
+  adminContext?: unknown;
 };
 
 export type AdminAgentContext = {
@@ -62,6 +73,9 @@ export type AdminAgentContext = {
   feedbackCompletionRate: number;
   pendingItems: string[];
   weeklyHighlights: string[];
+  priorityTopItems?: Array<{ targetName: string; reason: string; recommendedDeadline: string }>;
+  actionItems?: Array<{ ownerLabel: string; action: string }>;
+  raw?: unknown;
 };
 
 export type AgentReply = {
@@ -86,7 +100,7 @@ export function buildParentHomeViewModel(feed?: ParentFeed | null): ParentHomeVi
     };
 
   const pendingFeedback =
-    feed.feedbacks.length === 0
+    !feed.hasFeedbackToday
       ? {
           title: "今晚反馈待提交",
           description: "离园后补充今晚在家状态，帮助老师判断建议是否有效。",
@@ -217,23 +231,78 @@ export function buildAdminHomeViewModel(params: {
   healthCheckRecords: HealthCheckRecord[];
   growthRecords: GrowthRecord[];
   guardianFeedbacks: GuardianFeedback[];
+  mealRecords?: MealRecord[];
   adminBoardData: AdminBoardData;
   weeklyTrend: WeeklyDietTrend;
   smartInsights: SmartInsight[];
+  notificationEvents?: AdminDispatchEvent[];
 }): AdminHomeViewModel {
+  const nextHome = buildStructuredAdminHomeViewModel({
+    workflow: "daily-priority",
+    currentUser: {
+      name: params.institutionName,
+      institutionName: params.institutionName,
+      role: "机构管理员",
+    },
+    visibleChildren: params.visibleChildren,
+    attendanceRecords: params.attendanceRecords,
+    healthCheckRecords: params.healthCheckRecords,
+    growthRecords: params.growthRecords,
+    guardianFeedbacks: params.guardianFeedbacks,
+    mealRecords: params.mealRecords ?? [],
+    adminBoardData: params.adminBoardData,
+    weeklyTrend: params.weeklyTrend,
+    smartInsights: params.smartInsights,
+    notificationEvents: params.notificationEvents ?? [],
+  });
+
+  return {
+    riskChildrenCount: nextHome.riskChildrenCount,
+    weeklySummary: nextHome.weeklySummary,
+    feedbackCompletionRate: nextHome.feedbackCompletionRate,
+    pendingItems: nextHome.pendingItems,
+    weeklyHighlights: nextHome.weeklyHighlights,
+    heroStats: nextHome.heroStats,
+    priorityTopItems: nextHome.priorityTopItems.map((item) => ({
+      targetName: item.targetName,
+      priorityLevel: item.priorityLevel,
+      reason: item.reason,
+      recommendedDeadline: item.recommendedDeadline,
+    })),
+    riskChildren: nextHome.riskChildren.map((item) => ({
+      childName: item.childName,
+      reason: item.reason,
+    })),
+    riskClasses: nextHome.riskClasses.map((item) => ({
+      className: item.className,
+      reason: item.reason,
+    })),
+    pendingDispatches: nextHome.pendingDispatches.map((item) => ({
+      title: item.title,
+      status: item.status,
+      recommendedDeadline: item.recommendedDeadline,
+    })),
+    actionEntrySummary: nextHome.actionEntrySummary,
+    adminContext: nextHome.adminContext,
+  };
+
   const today = getLocalToday();
   const childMap = new Map(params.visibleChildren.map((child) => [child.id, child] as const));
 
   const parentLinkedChildren = params.visibleChildren.filter((child) => Boolean(child.parentUserId));
+  const parentLinkedChildIds = new Set(parentLinkedChildren.map((child) => child.id));
   const feedbackChildren = new Set(
     params.guardianFeedbacks
-      .filter((record) => record.date === today && childMap.has(record.childId))
+      .filter(
+        (record) =>
+          record.date === today && childMap.has(record.childId) && parentLinkedChildIds.has(record.childId)
+      )
       .map((record) => record.childId)
   );
 
   const feedbackCompletionRate =
     parentLinkedChildren.length > 0
-      ? Math.round((feedbackChildren.size / parentLinkedChildren.length) * 100)
+      ? Math.min(100, Math.round((feedbackChildren.size / parentLinkedChildren.length) * 100))
       : 0;
 
   const riskChildIds = new Set<string>();
@@ -324,13 +393,27 @@ export function buildAdminAgentContext(params: {
 }): AdminAgentContext {
   return {
     institutionName: params.institutionName,
-    riskSummary: [
-      `当前重点风险儿童 ${params.home.riskChildrenCount} 人`,
-      ...params.home.weeklyHighlights.slice(0, 2),
-    ],
+    riskSummary:
+      (
+        params.home.adminContext as {
+          highlights?: string[];
+        } | undefined
+      )?.highlights?.slice(0, 3) ?? [`当前重点风险儿童 ${params.home.riskChildrenCount} 人`, ...params.home.weeklyHighlights.slice(0, 2)],
     feedbackCompletionRate: params.home.feedbackCompletionRate,
     pendingItems: params.home.pendingItems,
     weeklyHighlights: params.home.weeklyHighlights,
+    priorityTopItems: params.home.priorityTopItems?.map((item) => ({
+      targetName: item.targetName,
+      reason: item.reason,
+      recommendedDeadline: item.recommendedDeadline,
+    })),
+    actionItems:
+      (
+        params.home.adminContext as {
+          actionItems?: Array<{ ownerLabel: string; action: string }>;
+        } | undefined
+      )?.actionItems?.slice(0, 3),
+    raw: params.home.adminContext,
   };
 }
 
@@ -339,6 +422,43 @@ export function buildAdminAgentReply(
   action: "weekly-report" | "risk-list" | "rectification"
 ): AgentReply {
   if (action === "weekly-report") {
+    return {
+      answer:
+        context.riskSummary[0] ??
+        "本周机构运营建议优先围绕高优先级对象、家长协同链路和待复查闭环展开。",
+      keyPoints: context.weeklyHighlights.slice(0, 3),
+      nextSteps:
+        context.actionItems?.slice(0, 3).map((item) => `${item.ownerLabel}：${item.action}`) ?? [],
+    };
+  }
+
+  if (action === "risk-list") {
+    return {
+      answer:
+        context.priorityTopItems?.[0]
+          ? `当前最值得优先查看的是 ${context.priorityTopItems[0].targetName}，原因是${context.priorityTopItems[0].reason}。`
+          : "当前没有进入高优先级列表的重点对象。",
+      keyPoints:
+        context.priorityTopItems?.slice(0, 3).map((item) => `${item.targetName}：${item.reason}`) ??
+        context.riskSummary.slice(0, 3),
+      nextSteps:
+        context.actionItems?.slice(0, 3).map((item) => `${item.ownerLabel}：${item.action}`) ?? [],
+    };
+  }
+
+  if (action === "rectification" && context.actionItems?.length) {
+    return {
+      answer:
+        context.pendingItems[0] ??
+        "当前最需要整改的是把识别出的高风险事项进一步指定责任人和处理时限。",
+      keyPoints: context.pendingItems.slice(0, 3),
+      nextSteps: context.actionItems.slice(0, 3).map((item) => `${item.ownerLabel}：${item.action}`),
+    };
+  }
+
+  const legacyAction = action as string;
+
+  if (legacyAction === "weekly-report") {
     return {
       answer: `本周园所运营风险主要集中在重点儿童持续跟踪和家长反馈完成率两处。建议周报先讲风险数量与趋势，再讲闭环率和下周整改动作，保持展示逻辑简洁。`,
       keyPoints: [
@@ -353,7 +473,7 @@ export function buildAdminAgentReply(
     };
   }
 
-  if (action === "risk-list") {
+  if (legacyAction === "risk-list") {
     return {
       answer: `建议优先汇总“高关注频次、低饮水、低蔬菜摄入”三类儿童，形成园长每日过目名单。当前可先从 ${context.riskSummary[0]} 开始。`,
       keyPoints: [

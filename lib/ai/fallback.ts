@@ -2,6 +2,7 @@ import type {
   AiFollowUpPayload,
   AiFollowUpResponse,
   AiSuggestionResponse,
+  InstitutionSuggestionSnapshot,
   RuleFallbackItem,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
@@ -52,10 +53,68 @@ export function buildFallbackSuggestion(items: RuleFallbackItem[]): AiSuggestion
   };
 }
 
+export function buildFallbackInstitutionSuggestion(snapshot: InstitutionSuggestionSnapshot): AiSuggestionResponse {
+  const topItems = snapshot.priorityTopItems.slice(0, 3);
+  const primary = topItems[0];
+
+  return {
+    riskLevel:
+      topItems.some((item) => item.priorityLevel === "P1")
+        ? "high"
+        : topItems.some((item) => item.priorityLevel === "P2")
+          ? "medium"
+          : "low",
+    summary:
+      primary
+        ? `今天园所最应优先推动的是${primary.targetName}相关问题，原因是${primary.reason}。当前还需同步关注${snapshot.riskChildren.length}名重点儿童、${snapshot.riskClasses.length}个高风险班级和${snapshot.pendingDispatches.length}条待处理事项，先把最高优先级动作在今天完成。`
+        : `今天园所整体运行较平稳，但仍建议围绕晨检、待复查和家长反馈闭环持续跟进。当前可优先看${snapshot.pendingDispatches.length}条待处理通知事件，保证机构级动作及时落地。`,
+    highlights: [
+      snapshot.sevenDayOverview.feedbackCompletionRate > 0
+        ? `近7天家长反馈完成率 ${snapshot.sevenDayOverview.feedbackCompletionRate}%`
+        : "",
+      snapshot.riskChildren[0]
+        ? `重点儿童：${snapshot.riskChildren[0].childName}（${snapshot.riskChildren[0].className}）`
+        : "",
+      snapshot.riskClasses[0]
+        ? `高风险班级：${snapshot.riskClasses[0].className}`
+        : "",
+    ].filter(Boolean),
+    concerns:
+      topItems.length > 0
+        ? topItems.map((item) => `${item.targetName}：${item.reason}`)
+        : ["当前暂无进入TOP列表的机构级风险事项，建议继续保持日常巡检与闭环复盘。"],
+    actions:
+      topItems.length > 0
+        ? topItems.map((item) => `${item.recommendedAction}，建议由${item.recommendedOwnerName ?? item.recommendedOwnerRole ?? "责任人"}在${item.recommendedDeadline}前完成。`)
+        : ["优先核对今日晨检与待复查台账，再检查家长反馈是否按时回流。"],
+    actionPlan: {
+      schoolActions: topItems.slice(0, 2).map((item) => item.recommendedAction),
+      familyActions: snapshot.feedbackRiskItems.slice(0, 2).map((item) => `提醒${item.childName}家长今晚补充反馈，说明孩子在家状态与执行情况。`),
+      reviewActions: [
+        "今日放学前复盘TOP3优先事项是否形成负责人、动作和时限。",
+        "本周五前回看高风险班级的整改进度与反馈闭环情况。",
+      ],
+    },
+    trendPrediction:
+      snapshot.priorityTopItems.some((item) => item.priorityLevel === "P1")
+        ? "up"
+        : snapshot.pendingDispatches.length > 0
+          ? "stable"
+          : "down",
+    disclaimer: DEFAULT_DISCLAIMER,
+    source: "fallback",
+  };
+}
+
 export function buildFallbackFollowUp(payload: AiFollowUpPayload): AiFollowUpResponse {
+  if ("institutionName" in payload.snapshot) {
+    return buildFallbackInstitutionFollowUp(payload, payload.snapshot);
+  }
+
   const childName = payload.snapshot.child.name;
   const hydrationAvg = payload.snapshot.summary.meals.hydrationAvg;
   const pendingReviewCount = payload.snapshot.summary.growth.pendingReviewCount;
+  const latestFeedback = payload.latestFeedback;
 
   return {
     answer:
@@ -72,6 +131,72 @@ export function buildFallbackFollowUp(payload: AiFollowUpPayload): AiFollowUpRes
       "今天园内先补充一次对应场景的观察记录，写明触发因素和处理结果。",
       "今晚家庭按当前建议执行一次，并记录孩子的情绪、饮水或作息变化。",
       "48小时内回看连续记录，如果仍无改善，再升级为重点跟踪事项。",
+    ],
+    tonightTopAction: payload.currentInterventionCard?.tonightHomeAction ?? "今晚先做一项最容易执行的家庭动作，并记录孩子当下反应。",
+    whyNow:
+      latestFeedback?.improved === false
+        ? "因为上一轮家庭动作效果还不稳定，需要今晚继续验证哪一步真正有效。"
+        : "因为今晚的执行情况会直接影响老师明天如何继续观察和调整建议。",
+    homeSteps: [
+      payload.currentInterventionCard?.tonightHomeAction ?? "先按当前建议完成一项家庭动作。",
+      "执行时记录孩子的情绪、饮水或入睡反应。",
+      "明早把结果反馈给老师，形成下一轮调整依据。",
+    ],
+    observationPoints: payload.currentInterventionCard?.observationPoints ?? [
+      "孩子情绪是否更稳定",
+      "饮水或进食是否更配合",
+      "入睡和晨起是否比前一天更顺",
+    ],
+    teacherObservation:
+      payload.currentInterventionCard?.tomorrowObservationPoint ?? `${childName} 明日入园后的情绪、晨检状态和家庭反馈是否一致。`,
+    reviewIn48h: payload.currentInterventionCard?.reviewIn48h ?? "48 小时内结合今晚反馈和明早入园状态复查一次。",
+    recommendedQuestions: [
+      "我做完之后应该怎么反馈？",
+      "明天老师会继续看什么？",
+      "如果今晚没有改善，下一步怎么调？",
+    ],
+    disclaimer: DEFAULT_DISCLAIMER,
+    source: "fallback",
+  };
+}
+
+export function buildFallbackInstitutionFollowUp(
+  payload: AiFollowUpPayload,
+  snapshot: InstitutionSuggestionSnapshot
+): AiFollowUpResponse {
+  const topItems = snapshot.priorityTopItems.slice(0, 3);
+  const focusText = payload.question.trim();
+  const focusedItems =
+    focusText.includes("儿童")
+      ? snapshot.priorityTopItems.filter((item) => item.targetType === "child").slice(0, 3)
+      : focusText.includes("班级")
+        ? snapshot.priorityTopItems.filter((item) => item.targetType === "class").slice(0, 3)
+        : focusText.includes("家长")
+          ? snapshot.priorityTopItems.filter((item) => item.targetType === "family").slice(0, 3)
+          : topItems;
+  const primary = focusedItems[0] ?? topItems[0];
+
+  return {
+    answer:
+      primary
+        ? `围绕“${focusText}”，当前最值得园长先推动的是${primary.targetName}。它排在前面的原因是${primary.reason}，建议先锁定责任人、截止时间和复盘节点，再决定是否扩展到更多班级或家庭。`
+        : `围绕“${focusText}”，当前更适合先把机构级闭环做扎实：先看待处理派单，再看家长反馈和待复查积压，避免同时推动过多事项导致执行分散。`,
+    keyPoints:
+      focusedItems.length > 0
+        ? focusedItems.map((item) => `${item.targetName}｜${item.priorityLevel}｜${item.recommendedAction}`)
+        : [
+            `待处理通知事件 ${snapshot.pendingDispatches.length} 条`,
+            `重点儿童 ${snapshot.riskChildren.length} 名`,
+            `高风险班级 ${snapshot.riskClasses.length} 个`,
+          ],
+    nextSteps: [
+      primary
+        ? `先由${primary.recommendedOwnerName ?? primary.recommendedOwnerRole ?? "责任人"}在${primary.recommendedDeadline}前处理${primary.targetName}。`
+        : "先确认今天最高优先级事项的责任人与完成时点。",
+      snapshot.feedbackRiskItems[0]
+        ? `今晚补齐${snapshot.feedbackRiskItems[0].childName}相关家庭的反馈回传，避免闭环继续变弱。`
+        : "今晚检查家长反馈回流情况，保证重点儿童链路不断点。",
+      "放学前复盘TOP3事项是否已经形成派单、跟进和状态更新。",
     ],
     disclaimer: DEFAULT_DISCLAIMER,
     source: "fallback",

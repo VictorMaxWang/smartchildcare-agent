@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AppStateSnapshot } from "@/lib/persistence/snapshot";
+import type { ConsultationResult, MobileDraft, MobileDraftSyncStatus, ReminderItem } from "@/lib/ai/types";
 import {
   DEMO_ACCOUNTS,
   type AccountRole,
@@ -9,6 +10,7 @@ import {
   type RegisterAccountInput,
   type SessionUser,
 } from "@/lib/auth/accounts";
+import type { InterventionCard } from "@/lib/agent/intervention-card";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate, shiftLocalDate, startOfLocalDay } from "@/lib/date";
 import { emptyInstitutionSnapshot } from "@/lib/persistence/bootstrap";
 
@@ -172,6 +174,12 @@ export interface GuardianFeedback {
   date: string;
   status: CollaborationStatus;
   content: string;
+  interventionCardId?: string;
+  sourceWorkflow?: "parent-agent" | "teacher-agent" | "manual";
+  executed?: boolean;
+  childReaction?: string;
+  improved?: boolean | "unknown";
+  freeNote?: string;
   createdBy: string;
   createdByRole: Role;
 }
@@ -201,6 +209,9 @@ export interface ParentFeed {
   weeklyTrend: WeeklyDietTrend;
   suggestions: SmartInsight[];
   feedbacks: GuardianFeedback[];
+  recentFeedbacks: GuardianFeedback[];
+  latestFeedback?: GuardianFeedback;
+  hasFeedbackToday: boolean;
 }
 
 export interface AdminBoardData {
@@ -305,6 +316,18 @@ interface AppContextType {
 
   guardianFeedbacks: GuardianFeedback[];
   addGuardianFeedback: (input: Omit<GuardianFeedback, "id" | "createdBy" | "createdByRole">) => void;
+  interventionCards: InterventionCard[];
+  consultations: ConsultationResult[];
+  mobileDrafts: MobileDraft[];
+  reminders: ReminderItem[];
+  upsertInterventionCard: (card: InterventionCard) => void;
+  upsertConsultation: (consultation: ConsultationResult) => void;
+  saveMobileDraft: (draft: MobileDraft) => void;
+  markMobileDraftSyncStatus: (draftId: string, syncStatus: MobileDraftSyncStatus) => void;
+  upsertReminder: (reminder: ReminderItem) => void;
+  updateReminderStatus: (reminderId: string, status: ReminderItem["status"]) => void;
+  getChildInterventionCard: (childId: string) => InterventionCard | undefined;
+  getConsultationsForChild: (childId: string) => ConsultationResult[];
 
   getTodayMealRecords: (childIds?: string[]) => MealRecord[];
   getWeeklyDietTrend: (childId?: string) => WeeklyDietTrend;
@@ -324,6 +347,10 @@ const STORAGE_KEYS = {
   feedback: "feedback.v3",
   health: "health.v3",
   taskCheckIns: "taskcheckins.v3",
+  interventionCards: "interventioncards.v1",
+  consultations: "consultations.v1",
+  mobileDrafts: "mobile-drafts.v1",
+  reminders: "reminders.v1",
 } as const;
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -365,6 +392,22 @@ function readScopedSnapshot(namespace: string, fallbackSnapshot: AppStateSnapsho
       buildScopedStorageKey(namespace, "taskCheckIns"),
       fallbackSnapshot.taskCheckIns
     ),
+    interventionCards: readStorage<InterventionCard[]>(
+      buildScopedStorageKey(namespace, "interventionCards"),
+      fallbackSnapshot.interventionCards
+    ),
+    consultations: readStorage<ConsultationResult[]>(
+      buildScopedStorageKey(namespace, "consultations"),
+      fallbackSnapshot.consultations
+    ),
+    mobileDrafts: readStorage<MobileDraft[]>(
+      buildScopedStorageKey(namespace, "mobileDrafts"),
+      fallbackSnapshot.mobileDrafts
+    ),
+    reminders: readStorage<ReminderItem[]>(
+      buildScopedStorageKey(namespace, "reminders"),
+      fallbackSnapshot.reminders
+    ),
     updatedAt: fallbackSnapshot.updatedAt,
   };
 }
@@ -377,6 +420,10 @@ function writeScopedSnapshot(namespace: string, snapshot: AppStateSnapshot) {
   writeStorage(buildScopedStorageKey(namespace, "feedback"), snapshot.feedback);
   writeStorage(buildScopedStorageKey(namespace, "health"), snapshot.health);
   writeStorage(buildScopedStorageKey(namespace, "taskCheckIns"), snapshot.taskCheckIns);
+  writeStorage(buildScopedStorageKey(namespace, "interventionCards"), snapshot.interventionCards);
+  writeStorage(buildScopedStorageKey(namespace, "consultations"), snapshot.consultations);
+  writeStorage(buildScopedStorageKey(namespace, "mobileDrafts"), snapshot.mobileDrafts);
+  writeStorage(buildScopedStorageKey(namespace, "reminders"), snapshot.reminders);
 }
 
 function buildScopedStorageKey(namespace: string, key: keyof typeof STORAGE_KEYS) {
@@ -1930,6 +1977,10 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
     feedback: INITIAL_FEEDBACKS.map((record) => ({ ...record })),
     health: ALL_INITIAL_HEALTH_CHECKS.map((record) => ({ ...record })),
     taskCheckIns: INITIAL_TASK_CHECKINS.map((record) => ({ ...record })),
+    interventionCards: [],
+    consultations: [],
+    mobileDrafts: [],
+    reminders: [],
     updatedAt: new Date().toISOString(),
   };
 }
@@ -2449,6 +2500,10 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
   const [guardianFeedbacks, setGuardianFeedbacks] = useState<GuardianFeedback[]>([]);
   const [healthCheckRecords, setHealthCheckRecords] = useState<HealthCheckRecord[]>([]);
   const [taskCheckInRecords, setTaskCheckInRecords] = useState<TaskCheckInRecord[]>([]);
+  const [interventionCards, setInterventionCards] = useState<InterventionCard[]>([]);
+  const [consultations, setConsultations] = useState<ConsultationResult[]>([]);
+  const [mobileDrafts, setMobileDrafts] = useState<MobileDraft[]>([]);
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const lastSyncedSnapshotKeyRef = useRef<string | null>(null);
   const isAuthenticated = currentUser.id !== UNAUTHENTICATED_USER.id;
   const isDemoUser = isAuthenticated && currentUser.accountKind === "demo";
@@ -2463,6 +2518,10 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     setGuardianFeedbacks(snapshot.feedback);
     setHealthCheckRecords(snapshot.health);
     setTaskCheckInRecords(snapshot.taskCheckIns);
+    setInterventionCards(snapshot.interventionCards);
+    setConsultations(snapshot.consultations);
+    setMobileDrafts(snapshot.mobileDrafts);
+    setReminders(snapshot.reminders);
   }, []);
 
   const remoteSnapshot = useMemo<AppStateSnapshot>(() => ({
@@ -2473,6 +2532,10 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     feedback: guardianFeedbacks,
     health: healthCheckRecords,
     taskCheckIns: taskCheckInRecords,
+    interventionCards,
+    consultations,
+    mobileDrafts,
+    reminders,
     updatedAt: new Date().toISOString(),
   }), [
     childrenList,
@@ -2482,6 +2545,10 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     guardianFeedbacks,
     healthCheckRecords,
     taskCheckInRecords,
+    interventionCards,
+    consultations,
+    mobileDrafts,
+    reminders,
   ]);
 
   const remoteSnapshotKey = useMemo(() => JSON.stringify(remoteSnapshot), [remoteSnapshot]);
@@ -2494,7 +2561,11 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       snapshot.growth.length === 0 &&
       snapshot.feedback.length === 0 &&
       snapshot.health.length === 0 &&
-      snapshot.taskCheckIns.length === 0
+      snapshot.taskCheckIns.length === 0 &&
+      snapshot.interventionCards.length === 0 &&
+      snapshot.consultations.length === 0 &&
+      snapshot.mobileDrafts.length === 0 &&
+      snapshot.reminders.length === 0
     );
   }, []);
 
@@ -2680,6 +2751,15 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     () => groupRecordsByChildId(guardianFeedbacks.filter((feedback) => feedback.date === TODAY)),
     [guardianFeedbacks]
   );
+  const weeklyFeedbackMap = useMemo(
+    () =>
+      groupRecordsByChildId(
+        guardianFeedbacks
+          .filter((feedback) => isInLastDays(feedback.date, 7))
+          .sort((left, right) => right.date.localeCompare(left.date))
+      ),
+    [guardianFeedbacks]
+  );
   const todayHealthCheckMap = useMemo(
     () => new Map(healthCheckRecords.filter((record) => record.date === TODAY).map((record) => [record.childId, record] as const)),
     [healthCheckRecords]
@@ -2804,6 +2884,12 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     setMealRecords((prev) => prev.filter((record) => record.childId !== id));
     setGrowthRecords((prev) => prev.filter((record) => record.childId !== id));
     setGuardianFeedbacks((prev) => prev.filter((record) => record.childId !== id));
+    setHealthCheckRecords((prev) => prev.filter((record) => record.childId !== id));
+    setTaskCheckInRecords((prev) => prev.filter((record) => record.childId !== id));
+    setInterventionCards((prev) => prev.filter((card) => card.targetChildId !== id));
+    setConsultations((prev) => prev.filter((item) => item.childId !== id));
+    setMobileDrafts((prev) => prev.filter((draft) => draft.childId !== id));
+    setReminders((prev) => prev.filter((reminder) => reminder.targetId !== id));
   }, []);
 
   const markAttendance = useCallback((input: Omit<AttendanceRecord, "id">) => {
@@ -2918,6 +3004,84 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       ...prev,
     ]);
   }, [currentUser.name, currentUser.role]);
+
+  const upsertInterventionCard = useCallback((card: InterventionCard) => {
+    setInterventionCards((prev) => {
+      const existingIndex = prev.findIndex((item) => item.id === card.id || item.targetChildId === card.targetChildId);
+      if (existingIndex === -1) {
+        return [card, ...prev];
+      }
+
+      const next = [...prev];
+      next[existingIndex] = { ...next[existingIndex], ...card };
+      return next;
+    });
+  }, []);
+
+  const upsertConsultation = useCallback((consultation: ConsultationResult) => {
+    setConsultations((prev) => {
+      const existingIndex = prev.findIndex((item) => item.consultationId === consultation.consultationId);
+      if (existingIndex === -1) {
+        return [consultation, ...prev];
+      }
+
+      const next = [...prev];
+      next[existingIndex] = consultation;
+      return next;
+    });
+  }, []);
+
+  const saveMobileDraft = useCallback((draft: MobileDraft) => {
+    setMobileDrafts((prev) => {
+      const existingIndex = prev.findIndex((item) => item.draftId === draft.draftId);
+      if (existingIndex === -1) {
+        return [draft, ...prev];
+      }
+
+      const next = [...prev];
+      next[existingIndex] = { ...next[existingIndex], ...draft };
+      return next;
+    });
+  }, []);
+
+  const markMobileDraftSyncStatus = useCallback((draftId: string, syncStatus: MobileDraftSyncStatus) => {
+    setMobileDrafts((prev) =>
+      prev.map((draft) =>
+        draft.draftId === draftId
+          ? { ...draft, syncStatus, syncedAt: syncStatus === "synced" ? new Date().toISOString() : draft.syncedAt }
+          : draft
+      )
+    );
+  }, []);
+
+  const upsertReminder = useCallback((reminder: ReminderItem) => {
+    setReminders((prev) => {
+      const existingIndex = prev.findIndex((item) => item.reminderId === reminder.reminderId);
+      if (existingIndex === -1) {
+        return [reminder, ...prev];
+      }
+
+      const next = [...prev];
+      next[existingIndex] = { ...next[existingIndex], ...reminder };
+      return next;
+    });
+  }, []);
+
+  const updateReminderStatus = useCallback((reminderId: string, status: ReminderItem["status"]) => {
+    setReminders((prev) =>
+      prev.map((reminder) => (reminder.reminderId === reminderId ? { ...reminder, status } : reminder))
+    );
+  }, []);
+
+  const getChildInterventionCard = useCallback((childId: string) => {
+    return interventionCards.find((card) => card.targetChildId === childId);
+  }, [interventionCards]);
+
+  const getConsultationsForChild = useCallback((childId: string) => {
+    return consultations
+      .filter((item) => item.childId === childId)
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  }, [consultations]);
 
   const getTodayHealthCheck = useCallback((childId: string) => {
     return todayHealthCheckMap.get(childId);
@@ -3132,6 +3296,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       const todayGrowth = todayGrowthRecordsMap.get(child.id) ?? [];
       const suggestions = smartInsights.filter((insight) => !insight.childId || insight.childId === child.id);
       const feedbacks = todayFeedbackMap.get(child.id) ?? [];
+      const recentFeedbacks = weeklyFeedbackMap.get(child.id) ?? [];
 
       return {
         child,
@@ -3140,9 +3305,12 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
         weeklyTrend: visibleWeeklyTrendMap.get(child.id) ?? getWeeklyDietTrend(child.id),
         suggestions,
         feedbacks,
+        recentFeedbacks,
+        latestFeedback: recentFeedbacks[0],
+        hasFeedbackToday: feedbacks.length > 0,
       };
     });
-  }, [currentUser.role, getWeeklyDietTrend, smartInsights, todayFeedbackMap, todayGrowthRecordsMap, todayMealRecordsMap, visibleChildren, visibleWeeklyTrendMap]);
+  }, [currentUser.role, getWeeklyDietTrend, smartInsights, todayFeedbackMap, todayGrowthRecordsMap, todayMealRecordsMap, visibleChildren, visibleWeeklyTrendMap, weeklyFeedbackMap]);
 
   const getParentFeed = useCallback(() => parentFeedData, [parentFeedData]);
 
@@ -3193,6 +3361,18 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     addGrowthRecord,
     guardianFeedbacks,
     addGuardianFeedback,
+    interventionCards,
+    consultations,
+    mobileDrafts,
+    reminders,
+    upsertInterventionCard,
+    upsertConsultation,
+    saveMobileDraft,
+    markMobileDraftSyncStatus,
+    upsertReminder,
+    updateReminderStatus,
+    getChildInterventionCard,
+    getConsultationsForChild,
     getTodayMealRecords,
     getWeeklyDietTrend,
     getSmartInsights,
@@ -3233,6 +3413,18 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     addGrowthRecord,
     guardianFeedbacks,
     addGuardianFeedback,
+    interventionCards,
+    consultations,
+    mobileDrafts,
+    reminders,
+    upsertInterventionCard,
+    upsertConsultation,
+    saveMobileDraft,
+    markMobileDraftSyncStatus,
+    upsertReminder,
+    updateReminderStatus,
+    getChildInterventionCard,
+    getConsultationsForChild,
     getTodayMealRecords,
     getWeeklyDietTrend,
     getSmartInsights,

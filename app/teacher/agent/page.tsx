@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
-import { BrainCircuit, Sparkles } from "lucide-react";
+import { BellRing, BrainCircuit, Mic, ScanSearch, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import TeacherAgentHistoryList, { type TeacherAgentHistoryListItem } from "@/components/teacher/TeacherAgentHistoryList";
 import TeacherAgentResultCard from "@/components/teacher/TeacherAgentResultCard";
@@ -20,11 +20,15 @@ import {
   buildTeacherAgentClassContext,
   buildTeacherAgentResultSummary,
   pickTeacherAgentDefaultChildId,
-  type TeacherAgentObjectScope,
+  type TeacherAgentMode,
   type TeacherAgentRequestPayload,
   type TeacherAgentResult,
   type TeacherAgentWorkflowType,
 } from "@/lib/agent/teacher-agent";
+import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
+import { buildReminderItems, getReminderStatusLabel } from "@/lib/mobile/reminders";
+import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
+import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
 import { useApp } from "@/lib/store";
 
 const ACTION_LABELS: Record<TeacherAgentWorkflowType, string> = {
@@ -50,8 +54,13 @@ export default function TeacherAgentPage() {
     healthCheckRecords,
     growthRecords,
     guardianFeedbacks,
+    mobileDrafts,
+    reminders,
+    saveMobileDraft,
+    markMobileDraftSyncStatus,
+    upsertReminder,
   } = useApp();
-  const [scope, setScope] = useState<TeacherAgentObjectScope>("child");
+  const [scope, setScope] = useState<TeacherAgentMode>("child");
   const [selectedChildId, setSelectedChildId] = useState<string>("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +91,46 @@ export default function TeacherAgentPage() {
     [classContext, defaultChildId, selectedChildId]
   );
   const latestResult = history.at(-1)?.result ?? null;
+  const teacherDrafts = useMemo(
+    () =>
+      mobileDrafts.filter(
+        (draft) => draft.targetRole === "teacher" && (!selectedChildContext || draft.childId === selectedChildContext.child.id)
+      ),
+    [mobileDrafts, selectedChildContext]
+  );
+  const teacherReminders = useMemo(
+    () =>
+      reminders.filter(
+        (item) =>
+          (item.targetRole === "teacher" || item.targetRole === "admin") &&
+          (!selectedChildContext || item.childId === selectedChildContext.child.id)
+      ),
+    [reminders, selectedChildContext]
+  );
   const preloadAction = searchParams.get("action");
+
+  const createVoiceDraft = useCallback(() => {
+    if (!selectedChildContext) return;
+    saveMobileDraft(
+      buildMockVoiceDraft({
+        childId: selectedChildContext.child.id,
+        targetRole: "teacher",
+        childName: selectedChildContext.child.name,
+        scenario: "teacher-observation",
+      })
+    );
+  }, [saveMobileDraft, selectedChildContext]);
+
+  const createOcrDraft = useCallback(() => {
+    if (!selectedChildContext) return;
+    saveMobileDraft(
+      buildMockOcrDraft({
+        childId: selectedChildContext.child.id,
+        targetRole: "teacher",
+        childName: selectedChildContext.child.name,
+      })
+    );
+  }, [saveMobileDraft, selectedChildContext]);
 
   useEffect(() => {
     if (!selectedChildId || !visibleChildren.some((child) => child.id === selectedChildId)) {
@@ -90,8 +138,8 @@ export default function TeacherAgentPage() {
     }
   }, [defaultChildId, selectedChildId, visibleChildren]);
 
-  async function runWorkflow(workflow: TeacherAgentWorkflowType) {
-    const nextScope: TeacherAgentObjectScope = workflow === "weekly-summary" ? "class" : "child";
+  const runWorkflow = useCallback(async (workflow: TeacherAgentWorkflowType) => {
+    const nextScope: TeacherAgentMode = workflow === "weekly-summary" ? "class" : "child";
     const targetChildId = nextScope === "child" ? selectedChildId || defaultChildId : undefined;
 
     if (nextScope === "child" && !targetChildId) {
@@ -135,6 +183,22 @@ export default function TeacherAgentPage() {
       }
 
       const result = (await response.json()) as TeacherAgentResult;
+      const resultChildId = result.targetChildId ?? targetChildId;
+
+      if (resultChildId) {
+        teacherDrafts
+          .filter((draft) => draft.childId === resultChildId && draft.syncStatus === "local_pending")
+          .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
+
+        buildReminderItems({
+          childId: resultChildId,
+          targetRole: "teacher",
+          targetId: resultChildId,
+          childName: result.targetLabel,
+          interventionCard: result.interventionCard,
+          consultation: result.consultation,
+        }).forEach((item) => upsertReminder(item));
+      }
 
       startTransition(() => {
         setHistory((prev) => [
@@ -153,7 +217,22 @@ export default function TeacherAgentPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [
+    currentUser.className,
+    currentUser.institutionId,
+    currentUser.name,
+    currentUser.role,
+    defaultChildId,
+    guardianFeedbacks,
+    growthRecords,
+    healthCheckRecords,
+    presentChildren,
+    selectedChildId,
+    teacherDrafts,
+    visibleChildren,
+    markMobileDraftSyncStatus,
+    upsertReminder,
+  ]);
 
   useEffect(() => {
     if (!isWorkflow(preloadAction) || visibleChildren.length === 0) return;
@@ -161,7 +240,7 @@ export default function TeacherAgentPage() {
 
     preloadHandledRef.current = preloadAction;
     void runWorkflow(preloadAction);
-  }, [defaultChildId, preloadAction, visibleChildren.length]);
+  }, [preloadAction, runWorkflow, visibleChildren.length]);
 
   if (visibleChildren.length === 0) {
     return (
@@ -284,6 +363,38 @@ export default function TeacherAgentPage() {
               </div>
             </SectionCard>
 
+            <SectionCard title="移动端协同入口" description="教师可先用语音速记或 OCR 形成本地草稿，工作流完成后再同步。">
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" className="rounded-full" onClick={createVoiceDraft} disabled={!selectedChildContext}>
+                    <Mic className="mr-2 h-4 w-4" />
+                    语音速记
+                  </Button>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={createOcrDraft} disabled={!selectedChildContext}>
+                    <ScanSearch className="mr-2 h-4 w-4" />
+                    OCR 草稿
+                  </Button>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {teacherDrafts.length > 0 ? (
+                    teacherDrafts.slice(0, 4).map((draft) => (
+                      <div key={draft.draftId} className="rounded-3xl border border-slate-100 bg-white p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-900">{draft.draftType.toUpperCase()} 草稿</p>
+                          <span className="text-xs text-slate-500">{getDraftSyncStatusLabel(draft.syncStatus)}</span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{draft.content}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                      当前还没有教师端本地草稿。
+                    </div>
+                  )}
+                </div>
+              </div>
+            </SectionCard>
+
             <AgentWorkspaceCard
               title="快捷操作"
               description="快捷操作现在会真实驱动工作流，返回稳定的结构化结果。"
@@ -374,6 +485,27 @@ export default function TeacherAgentPage() {
               ) : (
                 <p className="text-sm text-slate-500">还没有结果，先运行一个工作流。</p>
               )}
+            </SectionCard>
+
+            <SectionCard title="提醒中心" description="展示今晚任务、48 小时复查和升级关注提醒。">
+              <div className="space-y-3">
+                {teacherReminders.length > 0 ? (
+                  teacherReminders.slice(0, 5).map((item) => (
+                    <div key={item.reminderId} className="rounded-2xl border border-slate-100 bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <BellRing className="h-4 w-4 text-indigo-500" />
+                          <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                        </div>
+                        <span className="text-xs text-slate-500">{getReminderStatusLabel(item.status)}</span>
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-500">当前没有待展示提醒。</p>
+                )}
+              </div>
             </SectionCard>
           </div>
         }

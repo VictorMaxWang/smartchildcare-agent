@@ -14,6 +14,18 @@ export class DatabaseConfigError extends Error {
 export type DatabaseConnection = PoolConnection;
 
 type DatabaseRow = Record<string, unknown>;
+type DatabaseExecuteValue =
+  | string
+  | number
+  | bigint
+  | boolean
+  | Date
+  | null
+  | Blob
+  | Buffer
+  | Uint8Array
+  | DatabaseExecuteValue[]
+  | { [key: string]: DatabaseExecuteValue };
 
 type DatabaseQueryResult<T extends DatabaseRow> = {
   rows: T[];
@@ -82,7 +94,7 @@ export function getDatabasePool() {
   return globalWithDbPool.__smartChildcareDbPool;
 }
 
-export async function dbQuery<T extends DatabaseRow>(text: string, values: any[] = []): Promise<DatabaseQueryResult<T>> {
+export async function dbQuery<T extends DatabaseRow>(text: string, values: DatabaseExecuteValue[] = []): Promise<DatabaseQueryResult<T>> {
   const [rows] = await getDatabasePool().execute(text, values);
   if (!Array.isArray(rows)) {
     return { rows: [] };
