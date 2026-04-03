@@ -9,6 +9,7 @@ function createDraftId(prefix: string) {
 }
 
 export function createMobileDraft(params: {
+  draftId?: string;
   childId: string;
   draftType: MobileDraftType;
   targetRole: MobileDraft["targetRole"];
@@ -20,7 +21,7 @@ export function createMobileDraft(params: {
   const timestamp = new Date().toISOString();
 
   return {
-    draftId: createDraftId("draft"),
+    draftId: params.draftId ?? createDraftId("draft"),
     childId: params.childId,
     draftType: params.draftType,
     targetRole: params.targetRole,
@@ -38,4 +39,3 @@ export function getDraftSyncStatusLabel(syncStatus: MobileDraftSyncStatus) {
   if (syncStatus === "failed") return "同步失败";
   return "待同步";
 }
-

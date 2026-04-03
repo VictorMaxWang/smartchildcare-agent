@@ -2,6 +2,9 @@ import type {
   ConsultationParticipant,
   ConsultationResult,
   ConsultationResultSource,
+  DirectorDecisionCard,
+  ExplainabilityItem,
+  HighRiskAgentView,
 } from "@/lib/ai/types";
 import { analyzeCoparentingConsultation } from "@/lib/agent/consultation/coparenting-agent";
 import { analyzeDietConsultation } from "@/lib/agent/consultation/diet-agent";
@@ -11,11 +14,11 @@ import type { ConsultationInput } from "@/lib/agent/consultation/input";
 import { detectConsultationTrigger } from "@/lib/agent/consultation/trigger";
 
 const PARTICIPANTS: ConsultationParticipant[] = [
-  { id: "health-agent", label: "健康观察 Agent" },
-  { id: "diet-agent", label: "饮食行为 Agent" },
-  { id: "coparenting-agent", label: "家园沟通 Agent" },
-  { id: "execution-agent", label: "园内执行 Agent" },
-  { id: "coordinator", label: "协调器 Agent" },
+  { id: "health-agent", label: "HealthObservationAgent" },
+  { id: "diet-agent", label: "DietBehaviorAgent" },
+  { id: "coparenting-agent", label: "ParentCommunicationAgent" },
+  { id: "execution-agent", label: "InSchoolActionAgent" },
+  { id: "coordinator", label: "CoordinatorAgent" },
 ];
 
 function createConsultationId(childId: string) {
@@ -37,11 +40,110 @@ function takeUnique(items: Array<string | undefined>, limit = 5) {
   return result;
 }
 
-function mapToConsultationSource(source: ConsultationResultSource | "ai" | "fallback" | "mock"): ConsultationResultSource {
-  if (source === "ai" || source === "fallback" || source === "mock") {
+function mapToConsultationSource(
+  source: ConsultationResultSource | "ai" | "fallback" | "mock" | "vivo"
+): ConsultationResultSource {
+  if (source === "ai" || source === "fallback" || source === "mock" || source === "vivo") {
     return source;
   }
   return "rule";
+}
+
+function mapFindingToView(
+  role: HighRiskAgentView["role"],
+  finding: {
+    title: string;
+    riskExplanation: string;
+    signals: string[];
+    actions: string[];
+    observationPoints: string[];
+    evidence: string[];
+  }
+): HighRiskAgentView {
+  return {
+    role,
+    title: finding.title,
+    summary: finding.riskExplanation,
+    signals: finding.signals,
+    actions: finding.actions,
+    observationPoints: finding.observationPoints,
+    evidence: finding.evidence,
+  };
+}
+
+function buildExplainability(params: {
+  triggerReasons: string[];
+  healthView: HighRiskAgentView;
+  dietView: HighRiskAgentView;
+  parentView: HighRiskAgentView;
+  schoolView: HighRiskAgentView;
+  continuityNotes?: string[];
+}): ExplainabilityItem[] {
+  return takeUnique(
+    [
+      ...params.triggerReasons.map((item) => `触发原因：${item}`),
+      ...(params.continuityNotes ?? []).map((item) => `连续性参考：${item}`),
+      ...params.healthView.evidence.map((item) => `健康证据：${item}`),
+      ...params.dietView.evidence.map((item) => `饮食证据：${item}`),
+      ...params.parentView.evidence.map((item) => `家长证据：${item}`),
+      ...params.schoolView.evidence.map((item) => `园内执行证据：${item}`),
+    ],
+    8
+  ).map((item) => {
+    const separatorIndex = item.indexOf("：");
+
+    return separatorIndex > -1
+      ? {
+          label: item.slice(0, separatorIndex),
+          detail: item.slice(separatorIndex + 1),
+        }
+      : {
+          label: "说明",
+          detail: item,
+        };
+  });
+}
+
+function buildDirectorDecisionCard(params: {
+  childName: string;
+  riskLevel: ConsultationResult["riskLevel"];
+  shouldEscalateToAdmin: boolean;
+  triggerReasons: string[];
+  schoolAction: string;
+  continuityNotes?: string[];
+}): DirectorDecisionCard {
+  const recommendedOwnerRole = params.shouldEscalateToAdmin ? "admin" : "teacher";
+  const continuityReason = params.continuityNotes?.[0];
+
+  return {
+    title: `${params.childName} 今日优先级决策卡`,
+    reason: [
+      `${params.childName} 当前需要优先处理，原因是${params.triggerReasons[0] ?? "已出现连续高风险信号"}。`,
+      continuityReason ?? "",
+      `建议先落地：${params.schoolAction}`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    recommendedOwnerRole,
+    recommendedOwnerName: recommendedOwnerRole === "admin" ? "园长" : "班主任",
+    recommendedAt: params.riskLevel === "high" ? "今天放学前" : "今天晚饭前",
+    status: "pending",
+  };
+}
+
+function buildParentMessageDraft(params: {
+  childName: string;
+  tonightAtHomeActions: string[];
+  nextCheckpoints: string[];
+  continuityNotes?: string[];
+}) {
+  return [
+    `${params.childName} 今天在园已进入重点会诊闭环。今晚请优先完成：${params.tonightAtHomeActions[0] ?? "一项家庭稳定动作"}。`,
+    params.continuityNotes?.[0] ?? "",
+    `反馈时请重点说明：${params.nextCheckpoints.slice(0, 2).join("、")}。`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export async function maybeRunHighRiskConsultation(input: ConsultationInput): Promise<ConsultationResult | null> {
@@ -58,37 +160,109 @@ export async function maybeRunHighRiskConsultation(input: ConsultationInput): Pr
   ]);
 
   const agentFindings = [healthFinding, dietFinding, coparentingFinding, executionFinding];
-  const schoolAction = executionFinding.actions[0] ?? healthFinding.actions[0] ?? "今日补齐关键观察并在离园前同步。";
-  const homeAction = coparentingFinding.actions[0] ?? dietFinding.actions[0] ?? "今晚先执行一个核心家庭动作并记录反馈。";
+  const healthAgentView = mapFindingToView("HealthObservationAgent", healthFinding);
+  const dietBehaviorAgentView = mapFindingToView("DietBehaviorAgent", dietFinding);
+  const parentCommunicationAgentView = mapFindingToView("ParentCommunicationAgent", coparentingFinding);
+  const inSchoolActionAgentView = mapFindingToView("InSchoolActionAgent", executionFinding);
+
+  const todayInSchoolActions = takeUnique([...executionFinding.actions, ...healthFinding.actions], 4);
+  const tonightAtHomeActions = takeUnique([...coparentingFinding.actions, ...dietFinding.actions], 4);
   const observationPoints = takeUnique(agentFindings.flatMap((item) => item.observationPoints), 4);
   const shouldEscalateToAdmin =
     trigger.triggerTypes.includes("admin-priority") ||
     trigger.triggerTypes.includes("stale-intervention") ||
     trigger.riskLevel === "high";
 
-  const finalConclusion = `${input.childName} 已进入高风险联合分析，需把园内复查、家庭动作和明日观察点压缩为同一条闭环。`;
-  const problemDefinition = takeUnique([
-    trigger.triggerReason,
-    healthFinding.riskExplanation,
-    dietFinding.riskExplanation,
-  ], 1)[0] ?? `${input.childName} 当前存在需要跨角色协同的连续风险。`;
+  const schoolAction = todayInSchoolActions[0] ?? "今天先完成一次园内复核，并在离园前同步结果。";
+  const homeAction = tonightAtHomeActions[0] ?? "今晚先完成一次家庭配合动作，并在睡前记录反馈。";
   const reviewIn48h =
     executionFinding.actions[1] ??
     input.currentInterventionCard?.reviewIn48h ??
-    "48 小时内复看晨检、饮食和家长反馈是否同步改善。";
+    "48 小时内回看晨检、饮食和家长反馈是否同步改善。";
+  const nextCheckpoints = takeUnique(
+    [
+      ...observationPoints,
+      reviewIn48h,
+      ...todayInSchoolActions.slice(1),
+      ...tonightAtHomeActions.slice(1),
+      ...(input.memoryContext?.openLoops ?? []).slice(0, 2),
+    ],
+    6
+  );
+  const triggerReasons = takeUnique(
+    [...trigger.triggers.map((item) => item.reason), trigger.triggerReason, ...(input.continuityNotes ?? [])],
+    4
+  );
+  const keyFindings = takeUnique(
+    [
+      healthFinding.riskExplanation,
+      dietFinding.riskExplanation,
+      coparentingFinding.riskExplanation,
+      executionFinding.riskExplanation,
+      ...(input.memoryContext?.lastConsultationTakeaways ?? []).slice(0, 2),
+    ],
+    5
+  );
+  const summary = [
+    `${input.childName} 当前已进入高风险会诊闭环，建议把园内复核、今晚家庭动作和 48 小时复查压缩到同一条执行路径。`,
+    input.continuityNotes?.[0] ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const finalConclusion = [
+    summary,
+    `当前优先动作是“${schoolAction}”，并要求家长今晚完成“${homeAction}”。`,
+    input.memoryContext?.openLoops?.[0] ? `仍需继续盯住：${input.memoryContext.openLoops[0]}。` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const directorDecisionCard = buildDirectorDecisionCard({
+    childName: input.childName,
+    riskLevel: trigger.riskLevel,
+    shouldEscalateToAdmin,
+    triggerReasons,
+    schoolAction,
+    continuityNotes: input.continuityNotes,
+  });
 
   return {
     consultationId: createConsultationId(input.childId),
     triggerReason: trigger.triggerReason,
     triggerType: trigger.triggerTypes,
+    triggerReasons,
     participants: PARTICIPANTS,
     childId: input.childId,
     riskLevel: trigger.riskLevel,
     agentFindings,
+    summary,
+    keyFindings,
+    healthAgentView,
+    dietBehaviorAgentView,
+    parentCommunicationAgentView,
+    inSchoolActionAgentView,
+    todayInSchoolActions,
+    tonightAtHomeActions,
+    followUp48h: [reviewIn48h, ...nextCheckpoints.slice(0, 2)],
+    parentMessageDraft: buildParentMessageDraft({
+      childName: input.childName,
+      tonightAtHomeActions,
+      nextCheckpoints,
+      continuityNotes: input.continuityNotes,
+    }),
+    directorDecisionCard,
+    explainability: buildExplainability({
+      triggerReasons,
+      healthView: healthAgentView,
+      dietView: dietBehaviorAgentView,
+      parentView: parentCommunicationAgentView,
+      schoolView: inSchoolActionAgentView,
+      continuityNotes: input.continuityNotes,
+    }),
+    nextCheckpoints,
     coordinatorSummary: {
       finalConclusion,
       riskLevel: trigger.riskLevel,
-      problemDefinition,
+      problemDefinition: triggerReasons[0] ?? `${input.childName} 当前存在需要跨角色协同的连续风险。`,
       schoolAction,
       homeAction,
       observationPoints,
@@ -100,6 +274,8 @@ export async function maybeRunHighRiskConsultation(input: ConsultationInput): Pr
     observationPoints,
     reviewIn48h,
     shouldEscalateToAdmin,
+    continuityNotes: input.continuityNotes,
+    memoryMeta: input.memoryMeta,
     source: mapToConsultationSource(input.responseSource),
     model: input.model,
     generatedAt: input.generatedAt,

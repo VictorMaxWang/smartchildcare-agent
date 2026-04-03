@@ -4,6 +4,8 @@ import type {
   AiFollowUpResponse,
   AiSuggestionResponse,
   InstitutionSuggestionSnapshot,
+  MemoryContextEnvelope,
+  MemoryContextMeta,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
@@ -19,6 +21,11 @@ import {
 } from "@/lib/agent/admin-types";
 import { buildInstitutionPriorityEngine } from "@/lib/agent/priority-engine";
 import { getLocalToday, isDateWithinLastDays } from "@/lib/date";
+import {
+  buildContinuityNotes,
+  createEmptyMemoryMeta,
+  mergePromptMemoryContexts,
+} from "@/lib/memory/prompt-context";
 
 export const ADMIN_AGENT_QUICK_QUESTIONS = [
   "今天最该优先处理的 3 件事是什么？",
@@ -51,6 +58,20 @@ function takeUnique(items: string[], limit: number) {
   }
 
   return result;
+}
+
+function mergeMemoryMeta(contexts: Array<MemoryContextEnvelope | null | undefined>): MemoryContextMeta | undefined {
+  const normalized = contexts.filter((item): item is MemoryContextEnvelope => Boolean(item));
+  if (normalized.length === 0) return undefined;
+
+  return createEmptyMemoryMeta({
+    backend: normalized.map((item) => item.meta.backend).find(Boolean) ?? "unknown",
+    degraded: normalized.some((item) => item.meta.degraded),
+    usedSources: takeUnique(normalized.flatMap((item) => item.meta.usedSources), 8),
+    matchedSnapshotIds: takeUnique(normalized.flatMap((item) => item.meta.matchedSnapshotIds), 8),
+    matchedTraceIds: takeUnique(normalized.flatMap((item) => item.meta.matchedTraceIds), 8),
+    errors: takeUnique(normalized.flatMap((item) => item.meta.errors), 6),
+  });
 }
 
 function sortNotificationEvents(events: AdminDispatchEvent[]) {
@@ -699,6 +720,46 @@ export function buildAdminWeeklyReportResult(params: {
     source: params.report.source,
     model: params.report.model,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+export function buildAdminWeeklyReportSnapshotWithMemory(
+  payload: AdminAgentRequestPayload,
+  context: AdminAgentContext,
+  memoryContexts: Array<MemoryContextEnvelope | null | undefined> = []
+): WeeklyReportSnapshot {
+  const snapshot = buildAdminWeeklyReportSnapshot(payload, context);
+  const promptMemoryContext = mergePromptMemoryContexts(memoryContexts.map((item) => item?.promptContext));
+  const continuityNotes = buildContinuityNotes(context.institutionScope.institutionName, promptMemoryContext);
+
+  return {
+    ...snapshot,
+    highlights: takeUnique([...snapshot.highlights, ...continuityNotes.slice(0, 2)], 5),
+    risks: takeUnique([...snapshot.risks, ...promptMemoryContext.openLoops.slice(0, 2)], 4),
+    memoryContext: promptMemoryContext,
+    continuityNotes,
+  };
+}
+
+export function buildAdminWeeklyReportResultWithMemory(params: {
+  context: AdminAgentContext;
+  report: WeeklyReportResponse;
+  memoryContexts?: Array<MemoryContextEnvelope | null | undefined>;
+}): AdminAgentResult {
+  const result = buildAdminWeeklyReportResult({
+    context: params.context,
+    report: params.report,
+  });
+  const promptMemoryContext = mergePromptMemoryContexts((params.memoryContexts ?? []).map((item) => item?.promptContext));
+  const continuityNotes = buildContinuityNotes(params.context.institutionScope.institutionName, promptMemoryContext);
+  const memoryMeta = mergeMemoryMeta(params.memoryContexts ?? []);
+
+  return {
+    ...result,
+    summary: continuityNotes[0] ? `${continuityNotes[0]} ${result.summary}` : result.summary,
+    highlights: takeUnique([...continuityNotes, ...result.highlights], 5),
+    continuityNotes,
+    memoryMeta,
   };
 }
 

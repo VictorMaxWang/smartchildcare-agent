@@ -158,6 +158,7 @@ async function main() {
       "RELEASE_BASE_URL",
       "RELEASE_ADMIN_COOKIE",
       "CRON_SECRET",
+      "BRAIN_API_BASE_URL",
       "DATABASE_URL",
       "DATABASE_SSL",
       "AUTH_SESSION_SECRET",

@@ -4,7 +4,11 @@ import type {
   AiSuggestionResponse,
   ChildSuggestionSnapshot,
   ConsultationResultSource,
+  MemoryContextEnvelope,
+  MemoryContextMeta,
+  PromptMemoryContext,
 } from "@/lib/ai/types";
+import { buildContinuityNotes } from "@/lib/memory/prompt-context";
 
 export interface ConsultationPriorityHint {
   level?: "P1" | "P2" | "P3";
@@ -30,6 +34,9 @@ export interface ConsultationInput {
   priorityHint?: ConsultationPriorityHint;
   responseSource: ConsultationResultSource;
   model?: string;
+  memoryContext?: PromptMemoryContext;
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
 }
 
 export interface ConsultationInputFromSnapshotParams {
@@ -42,6 +49,7 @@ export interface ConsultationInputFromSnapshotParams {
   followUp?: AiFollowUpResponse;
   source?: ConsultationInput["source"];
   priorityHint?: ConsultationPriorityHint;
+  memoryContext?: MemoryContextEnvelope | null;
 }
 
 function takeUnique(items: Array<string | undefined>, limit = 6) {
@@ -63,6 +71,10 @@ export function buildConsultationInputFromSnapshot(
   params: ConsultationInputFromSnapshotParams
 ): ConsultationInput {
   const generatedAt = new Date().toISOString();
+  const promptMemoryContext = params.memoryContext?.promptContext ?? params.snapshot.memoryContext;
+  const continuityNotes =
+    params.snapshot.continuityNotes ??
+    buildContinuityNotes(params.snapshot.child.name, promptMemoryContext);
   const recentFeedback = params.snapshot.recentDetails?.feedback?.[0];
   const latestFeedback =
     params.latestFeedback ??
@@ -75,6 +87,9 @@ export function buildConsultationInputFromSnapshot(
       : undefined);
   const focusReasons = takeUnique([
     ...(params.focusReasons ?? []),
+    ...continuityNotes,
+    ...(promptMemoryContext?.openLoops ?? []),
+    ...(promptMemoryContext?.recentContinuitySignals ?? []),
     params.suggestion?.summary,
     ...params.suggestion?.concerns ?? [],
     ...params.snapshot.ruleFallback.map((item) => item.title),
@@ -99,6 +114,8 @@ export function buildConsultationInputFromSnapshot(
     priorityHint: params.priorityHint,
     responseSource,
     model: params.followUp?.model ?? params.suggestion?.model,
+    memoryContext: promptMemoryContext,
+    continuityNotes,
+    memoryMeta: params.memoryContext?.meta,
   };
 }
-

@@ -4,8 +4,8 @@ import {
   buildAdminDailyPriorityResult,
   buildAdminQuestionFollowUpPayload,
   buildAdminFollowUpResult,
-  buildAdminWeeklyReportResult,
-  buildAdminWeeklyReportSnapshot,
+  buildAdminWeeklyReportResultWithMemory,
+  buildAdminWeeklyReportSnapshotWithMemory,
 } from "@/lib/agent/admin-agent";
 import type { AdminAgentRequestPayload, AdminAgentWorkflowType } from "@/lib/agent/admin-types";
 import {
@@ -14,6 +14,8 @@ import {
   executeWeeklyReport,
   getAiRuntimeOptions,
 } from "@/lib/ai/server";
+import { forwardBrainRequest } from "@/lib/server/brain-client";
+import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
 function isRecordArray(value: unknown) {
   return Array.isArray(value);
@@ -46,6 +48,9 @@ function isValidPayload(payload: unknown): payload is AdminAgentRequestPayload {
 }
 
 export async function POST(request: Request) {
+  const proxied = await forwardBrainRequest(request, "/api/v1/agents/admin/run");
+  if (proxied) return proxied;
+
   let payload: AdminAgentRequestPayload | null = null;
 
   try {
@@ -99,15 +104,29 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { status: 200 });
   }
 
+  const weeklyMemoryContexts = await Promise.all(
+    (context.riskChildren.map((item) => item.childId).slice(0, 3).length > 0
+      ? context.riskChildren.map((item) => item.childId).slice(0, 3)
+      : payload.visibleChildren.map((item) => item.id).slice(0, 3)
+    ).map((childId) =>
+      buildMemoryContextForPrompt({
+        childId,
+        workflowType: "weekly-report",
+        query: payload.question?.trim() || "weekly ops report risk child continuity",
+        request,
+      })
+    )
+  );
   const report = await executeWeeklyReport(
     {
-      snapshot: buildAdminWeeklyReportSnapshot(payload, context),
+      snapshot: buildAdminWeeklyReportSnapshotWithMemory(payload, context, weeklyMemoryContexts),
     },
     runtimeOptions
   );
-  const result = buildAdminWeeklyReportResult({
+  const result = buildAdminWeeklyReportResultWithMemory({
     context,
     report,
+    memoryContexts: weeklyMemoryContexts,
   });
 
   return NextResponse.json(result, { status: 200 });

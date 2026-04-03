@@ -1,4 +1,4 @@
-import type { AiFollowUpMessage, InstitutionSuggestionSnapshot } from "@/lib/ai/types";
+import type { AiFollowUpMessage, InstitutionSuggestionSnapshot, MemoryContextMeta } from "@/lib/ai/types";
 
 export type AdminAgentWorkflowType = "daily-priority" | "question-follow-up" | "weekly-ops-report";
 export type InstitutionPriorityTargetType = "child" | "class" | "issue" | "family";
@@ -321,6 +321,8 @@ export interface AdminAgentResult {
   recommendedOwnerMap: AdminRecommendedOwnerMapEntry[];
   quickQuestions: string[];
   notificationEvents: AdminDispatchEvent[];
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
   source: "ai" | "fallback" | "mock" | "rule";
   model?: string;
   generatedAt: string;

@@ -5,6 +5,7 @@ import type {
   AiSuggestionResponse,
   ChildSuggestionSnapshot,
   InstitutionSuggestionSnapshot,
+  PromptMemoryContext,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
@@ -93,6 +94,17 @@ function normalizeActionPlan(input: unknown): AiActionPlan | undefined {
     schoolActions,
     familyActions,
     reviewActions,
+  };
+}
+
+function normalizePromptMemoryContext(input: PromptMemoryContext | undefined) {
+  if (!input) return undefined;
+
+  return {
+    longTermTraits: input.longTermTraits.slice(0, 3),
+    recentContinuitySignals: input.recentContinuitySignals.slice(0, 3),
+    lastConsultationTakeaways: input.lastConsultationTakeaways.slice(0, 2),
+    openLoops: input.openLoops.slice(0, 2),
   };
 }
 
@@ -202,6 +214,8 @@ function buildPrompt(snapshot: ChildSuggestionSnapshot): string {
     },
     summary: snapshot.summary,
     recentDetails: snapshot.recentDetails,
+    continuityNotes: snapshot.continuityNotes,
+    memoryContext: normalizePromptMemoryContext(snapshot.memoryContext),
   };
 
   return [
@@ -238,7 +252,10 @@ function buildInstitutionPrompt(snapshot: InstitutionSuggestionSnapshot): string
     "如果 priorityTopItems 已经给出明确排序，优先顺着排序解释，不要重新发明完全不同的结论。",
     "disclaimer 必须强调非医疗诊断。",
     "输入:",
-    JSON.stringify(snapshot),
+    JSON.stringify({
+      ...snapshot,
+      memoryContext: normalizePromptMemoryContext(snapshot.memoryContext),
+    }),
   ].join("\n");
 }
 
@@ -255,7 +272,10 @@ function buildWeeklyReportPrompt(snapshot: WeeklyReportSnapshot): string {
     "nextWeekActions写3到5条可执行动作，尽量具体到机构管理或班级执行层面。",
     "disclaimer必须强调非医疗诊断。",
     "输入:",
-    JSON.stringify(snapshot),
+    JSON.stringify({
+      ...snapshot,
+      memoryContext: normalizePromptMemoryContext(snapshot.memoryContext),
+    }),
   ].join("\n");
 }
 
@@ -279,6 +299,7 @@ function buildFollowUpPrompt(payload: AiFollowUpPayload): string {
     "输入:",
     JSON.stringify({
       ...payload,
+      memoryContext: normalizePromptMemoryContext(payload.memoryContext),
       history: recentHistory,
     }),
   ].join("\n");
@@ -308,6 +329,8 @@ function buildInstitutionFollowUpPrompt(
       question: payload.question,
       history: recentHistory,
       institutionContext: payload.institutionContext,
+      memoryContext: normalizePromptMemoryContext(payload.memoryContext),
+      continuityNotes: payload.continuityNotes,
     }),
   ].join("\n");
 }

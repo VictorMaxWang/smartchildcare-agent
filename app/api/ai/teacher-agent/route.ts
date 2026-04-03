@@ -8,18 +8,20 @@ import {
 import {
   buildTeacherAgentChildContext,
   buildTeacherAgentClassContext,
-  buildTeacherChildSuggestionSnapshot,
-  buildTeacherCommunicationFollowUpPayload,
-  buildTeacherCommunicationResult,
-  buildTeacherFollowUpResult,
-  buildTeacherWeeklyReportSnapshot,
-  buildTeacherWeeklySummaryResult,
+  buildTeacherChildSuggestionSnapshotWithMemory,
+  buildTeacherCommunicationFollowUpPayloadWithMemory,
+  buildTeacherCommunicationResultWithMemory,
+  buildTeacherFollowUpResultWithMemory,
+  buildTeacherWeeklyReportSnapshotWithMemory,
+  buildTeacherWeeklySummaryResultWithMemory,
   type TeacherAgentRequestPayload,
   type TeacherAgentWorkflowType,
 } from "@/lib/agent/teacher-agent";
 import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/input";
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
 import { attachConsultationToInterventionCard } from "@/lib/agent/intervention-card";
+import { forwardBrainRequest } from "@/lib/server/brain-client";
+import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
 function isRecordArray(value: unknown) {
   return Array.isArray(value);
@@ -47,6 +49,9 @@ function isValidPayload(payload: unknown): payload is TeacherAgentRequestPayload
 }
 
 export async function POST(request: Request) {
+  const proxied = await forwardBrainRequest(request, "/api/v1/agents/teacher/run");
+  if (proxied) return proxied;
+
   let payload: TeacherAgentRequestPayload | null = null;
 
   try {
@@ -63,20 +68,48 @@ export async function POST(request: Request) {
   const classContext = buildTeacherAgentClassContext(payload);
   const childContext = buildTeacherAgentChildContext(classContext, payload.targetChildId);
   const runtimeOptions = getAiRuntimeOptions(request);
+  const memoryContext = childContext
+    ? await buildMemoryContextForPrompt({
+        childId: childContext.child.id,
+        workflowType: "teacher-agent",
+        query: childContext.focusReasons.join(" "),
+        request,
+      })
+    : null;
+  const weeklyMemoryContexts =
+    payload.workflow === "weekly-summary"
+      ? await Promise.all(
+          (classContext.focusChildren.map((item) => item.childId).slice(0, 3).length > 0
+            ? classContext.focusChildren.map((item) => item.childId).slice(0, 3)
+            : payload.visibleChildren.map((item) => item.id).slice(0, 3)
+          ).map((childId) =>
+            buildMemoryContextForPrompt({
+              childId,
+              workflowType: "weekly-report",
+              query: "weekly report focus child continuity",
+              request,
+            })
+          )
+        )
+      : [];
 
   if (payload.workflow === "communication") {
     if (!childContext) {
       return NextResponse.json({ error: "No visible child available for communication workflow" }, { status: 400 });
     }
 
-    const aiResponse = await executeFollowUp(buildTeacherCommunicationFollowUpPayload(childContext), runtimeOptions);
-    const baseResult = buildTeacherCommunicationResult({
+    const aiResponse = await executeFollowUp(
+      buildTeacherCommunicationFollowUpPayloadWithMemory(childContext, memoryContext),
+      runtimeOptions
+    );
+    const baseResult = buildTeacherCommunicationResultWithMemory({
       context: childContext,
       response: aiResponse,
+      memoryContext,
     });
     const consultation = await maybeRunHighRiskConsultation(
       buildConsultationInputFromSnapshot({
-        snapshot: buildTeacherChildSuggestionSnapshot(childContext),
+        snapshot: buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext),
         latestFeedback: childContext.latestFeedback
           ? {
               date: childContext.latestFeedback.date,
@@ -91,6 +124,7 @@ export async function POST(request: Request) {
         focusReasons: childContext.focusReasons,
         followUp: aiResponse,
         source: "teacher",
+        memoryContext,
       })
     );
     const result = consultation
@@ -111,17 +145,18 @@ export async function POST(request: Request) {
     }
 
     const aiSuggestion = await executeSuggestion(
-      { snapshot: buildTeacherChildSuggestionSnapshot(childContext) },
+      { snapshot: buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext) },
       runtimeOptions
     );
-    const baseResult = buildTeacherFollowUpResult({
+    const baseResult = buildTeacherFollowUpResultWithMemory({
       classContext,
       childContext,
       suggestion: aiSuggestion,
+      memoryContext,
     });
     const consultation = await maybeRunHighRiskConsultation(
       buildConsultationInputFromSnapshot({
-        snapshot: buildTeacherChildSuggestionSnapshot(childContext),
+        snapshot: buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext),
         latestFeedback: childContext.latestFeedback
           ? {
               date: childContext.latestFeedback.date,
@@ -136,6 +171,7 @@ export async function POST(request: Request) {
         focusReasons: childContext.focusReasons,
         suggestion: aiSuggestion,
         source: "teacher",
+        memoryContext,
       })
     );
     const result = consultation
@@ -151,12 +187,13 @@ export async function POST(request: Request) {
   }
 
   const aiReport = await executeWeeklyReport(
-    { snapshot: buildTeacherWeeklyReportSnapshot(classContext) },
+    { snapshot: buildTeacherWeeklyReportSnapshotWithMemory(classContext, weeklyMemoryContexts) },
     runtimeOptions
   );
-  const result = buildTeacherWeeklySummaryResult({
+  const result = buildTeacherWeeklySummaryResultWithMemory({
     classContext,
     report: aiReport,
+    memoryContexts: weeklyMemoryContexts,
   });
 
   return NextResponse.json(result, { status: 200 });

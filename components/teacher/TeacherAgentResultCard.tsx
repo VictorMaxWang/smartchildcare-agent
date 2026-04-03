@@ -30,15 +30,22 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
       {result.consultation ? (
         <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-4">
           <p className="text-sm font-semibold text-slate-900">高风险多 Agent 会诊</p>
-          <p className="mt-2 text-sm leading-6 text-slate-700">
-            {result.consultation.coordinatorSummary.finalConclusion}
-          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">{result.consultation.summary}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{result.consultation.coordinatorSummary.finalConclusion}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {result.consultation.participants.map((item) => (
               <Badge key={item.id} variant={item.id === "coordinator" ? "warning" : "outline"}>
                 {item.label}
               </Badge>
             ))}
+          </div>
+          <div className="mt-4 rounded-2xl border border-white/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold text-slate-900">触发原因</p>
+            <ul className="mt-2 space-y-1 text-sm text-slate-600">
+              {result.consultation.triggerReasons.map((item) => (
+                <li key={item}>- {item}</li>
+              ))}
+            </ul>
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             {result.consultation.agentFindings.map((item) => (
@@ -52,6 +59,22 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
                 </ul>
               </div>
             ))}
+          </div>
+          <div className="mt-4 rounded-2xl border border-white/70 bg-white/80 p-4">
+            <p className="text-sm font-semibold text-slate-900">园长决策卡</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{result.consultation.directorDecisionCard.reason}</p>
+            <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-600">
+              <span>负责人：{result.consultation.directorDecisionCard.recommendedOwnerName}</span>
+              <span>处理时间：{result.consultation.directorDecisionCard.recommendedAt}</span>
+              <span>
+                状态：
+                {result.consultation.directorDecisionCard.status === "completed"
+                  ? "已完成"
+                  : result.consultation.directorDecisionCard.status === "in_progress"
+                    ? "跟进中"
+                    : "待分派"}
+              </span>
+            </div>
           </div>
         </div>
       ) : null}

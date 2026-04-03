@@ -34,13 +34,21 @@ type HistoryItem = {
 };
 
 function buildFeedbackContent(input: {
-  executed: boolean | null;
+  executionStatus: "completed" | "partial" | "not_started" | null;
   childReaction: string;
   improved: boolean | "unknown";
   freeNote: string;
 }) {
+  const executionText =
+    input.executionStatus === "completed"
+      ? "今晚家庭任务已完整执行"
+      : input.executionStatus === "partial"
+        ? "今晚家庭任务已部分执行"
+        : input.executionStatus === "not_started"
+          ? "今晚家庭任务尚未执行"
+          : "执行状态待确认";
   const parts = [
-    input.executed === true ? "已执行今晚动作" : input.executed === false ? "暂未执行今晚动作" : "执行状态待确认",
+    executionText,
     input.childReaction.trim() ? `孩子反应：${input.childReaction.trim()}` : "",
     input.improved === true ? "观察到改善" : input.improved === false ? "暂未看到改善" : "改善情况待观察",
     input.freeNote.trim() ? `补充：${input.freeNote.trim()}` : "",
@@ -60,10 +68,14 @@ export default function ParentAgentPage() {
     taskCheckInRecords,
     addGuardianFeedback,
     checkInTask,
+    reminders,
     mobileDrafts,
     saveMobileDraft,
     markMobileDraftSyncStatus,
     upsertReminder,
+    updateReminderStatus,
+    getChildInterventionCard,
+    getLatestConsultationForChild,
   } = useApp();
 
   const parentFeed = getParentFeed();
@@ -75,7 +87,7 @@ export default function ParentAgentPage() {
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [followUpLoading, setFollowUpLoading] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
-  const [feedbackExecuted, setFeedbackExecuted] = useState<boolean | null>(null);
+  const [feedbackExecutionStatus, setFeedbackExecutionStatus] = useState<"completed" | "partial" | "not_started" | null>(null);
   const [feedbackImproved, setFeedbackImproved] = useState<boolean | "unknown">("unknown");
   const [childReaction, setChildReaction] = useState("");
   const [freeNote, setFreeNote] = useState("");
@@ -119,6 +131,37 @@ export default function ParentAgentPage() {
       ),
     [mobileDrafts, selectedFeed]
   );
+  const latestInterventionCard = useMemo(
+    () => (selectedFeed ? getChildInterventionCard(selectedFeed.child.id) : undefined),
+    [getChildInterventionCard, selectedFeed]
+  );
+  const latestConsultation = useMemo(
+    () => (selectedFeed ? getLatestConsultationForChild(selectedFeed.child.id) : undefined),
+    [getLatestConsultationForChild, selectedFeed]
+  );
+  const displayInterventionCard = latestInterventionCard ?? currentResult?.interventionCard;
+  const displayConsultation = latestConsultation ?? currentResult?.consultation;
+  const displayTonightTopAction = displayInterventionCard?.tonightHomeAction ?? currentResult?.tonightTopAction ?? baseContext?.task.description ?? "";
+  const displayWhyNow =
+    displayConsultation?.summary ??
+    currentResult?.whyNow ??
+    "系统综合近 7 天业务数据、教师观察和家长反馈，为今晚优先选出一条最值得执行的家庭动作。";
+  const displayObservationPoints =
+    displayInterventionCard?.observationPoints ?? currentResult?.tonightObservationPoints ?? [];
+  const displayTeacherObservation =
+    displayInterventionCard?.tomorrowObservationPoint ??
+    currentResult?.teacherTomorrowObservation ??
+    "明早继续反馈今晚执行结果，方便教师继续观察。";
+  const familyTaskReminder = useMemo(
+    () =>
+      reminders.find(
+        (item) =>
+          item.targetRole === "parent" &&
+          item.childId === selectedFeed?.child.id &&
+          item.reminderType === "family-task"
+      ),
+    [reminders, selectedFeed]
+  );
 
   useEffect(() => {
     if (!selectedChildId && parentFeed[0]?.child.id) {
@@ -130,6 +173,7 @@ export default function ParentAgentPage() {
     setHistory([]);
     setQuestion("");
     setFeedbackStatus(null);
+    setFeedbackExecutionStatus(null);
   }, [selectedChildId]);
 
   useEffect(() => {
@@ -236,8 +280,8 @@ export default function ParentAgentPage() {
   }
 
   function submitFeedback() {
-    if (!selectedFeed || !currentResult) return;
-    if (feedbackExecuted === null) {
+    if (!selectedFeed || !displayInterventionCard) return;
+    if (feedbackExecutionStatus === null) {
       setFeedbackStatus("请先选择今晚是否已执行。");
       return;
     }
@@ -249,23 +293,24 @@ export default function ParentAgentPage() {
     addGuardianFeedback({
       childId: selectedFeed.child.id,
       date: getLocalToday(),
-      status: feedbackExecuted ? "在家已配合" : "今晚反馈",
+      status: feedbackExecutionStatus === "not_started" ? "今晚反馈" : "在家已配合",
       content: buildFeedbackContent({
-        executed: feedbackExecuted,
+        executionStatus: feedbackExecutionStatus,
         childReaction,
         improved: feedbackImproved,
         freeNote,
       }),
-      interventionCardId: currentResult.interventionCard.id,
+      interventionCardId: displayInterventionCard.id,
       sourceWorkflow: "parent-agent",
-      executed: feedbackExecuted,
+      executionStatus: feedbackExecutionStatus,
+      executed: feedbackExecutionStatus !== "not_started",
       childReaction: childReaction.trim(),
       improved: feedbackImproved,
       freeNote: freeNote.trim() || undefined,
     });
 
-    if (feedbackExecuted) {
-      checkInTask(selectedFeed.child.id, activeContext?.task.id ?? currentResult.interventionCard.id, getLocalToday());
+    if (feedbackExecutionStatus !== "not_started") {
+      checkInTask(selectedFeed.child.id, activeContext?.task.id ?? displayInterventionCard.id, getLocalToday());
     }
 
     parentDrafts
@@ -273,10 +318,24 @@ export default function ParentAgentPage() {
       .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
 
     setFeedbackStatus("今晚反馈已提交，下一轮 follow-up 会自动把这条反馈带进上下文。");
-    setFeedbackExecuted(null);
+    if (familyTaskReminder) {
+      updateReminderStatus(familyTaskReminder.reminderId, "acknowledged");
+    }
+
+    setFeedbackExecutionStatus(null);
     setFeedbackImproved("unknown");
     setChildReaction("");
     setFreeNote("");
+  }
+
+  function snoozeFamilyReminder() {
+    if (!familyTaskReminder) {
+      setFeedbackStatus("当前没有可稍后提醒的家庭任务提醒。");
+      return;
+    }
+
+    updateReminderStatus(familyTaskReminder.reminderId, "snoozed");
+    setFeedbackStatus("已设置稍后提醒，任务卡状态会同步保存在本地。");
   }
 
   function createVoiceDraft() {
@@ -351,9 +410,10 @@ export default function ParentAgentPage() {
                 </div>
                 <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
                   <p className="text-sm font-semibold text-slate-900">今晚家庭任务</p>
-                  <p className="mt-2 text-base font-semibold text-slate-900">{baseContext.task.title}</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">{baseContext.task.description}</p>
+                  <p className="mt-2 text-base font-semibold text-slate-900">{displayInterventionCard?.title ?? baseContext.task.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{displayTonightTopAction}</p>
                   <p className="mt-3 text-sm font-medium text-sky-700">{baseContext.task.durationText} · {baseContext.task.tag}</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">为什么推荐：{displayWhyNow}</p>
                 </div>
               </div>
             </SectionCard>
@@ -428,26 +488,29 @@ export default function ParentAgentPage() {
                       {currentResult.model ? <Badge variant="secondary">{currentResult.model}</Badge> : null}
                     </div>
                     <p className="mt-3 text-lg font-semibold text-slate-900">{currentResult.title}</p>
-                    <p className="mt-3 text-sm leading-7 text-slate-600">{currentResult.summary}</p>
+                    <p className="mt-3 text-sm leading-7 text-slate-600">{displayConsultation?.summary ?? currentResult.summary}</p>
                     <div className="mt-4 rounded-2xl bg-white/80 p-4">
                       <p className="text-sm font-semibold text-slate-900">今晚最该做的一件事</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-700">{currentResult.tonightTopAction}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-700">{displayTonightTopAction}</p>
                       <p className="mt-3 text-sm font-semibold text-slate-900">为什么现在做</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{currentResult.whyNow}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{displayWhyNow}</p>
                     </div>
                   </div>
                   <div className="grid gap-4 lg:grid-cols-2">
                     <div className="rounded-3xl border border-slate-100 bg-white p-4">
                       <p className="text-sm font-semibold text-slate-900">今晚观察点</p>
                       <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                        {currentResult.tonightObservationPoints.map((item) => (
+                        {displayObservationPoints.map((item) => (
                           <li key={item}>- {item}</li>
                         ))}
                       </ul>
                     </div>
                     <div className="rounded-3xl border border-slate-100 bg-white p-4">
                       <p className="text-sm font-semibold text-slate-900">明天老师继续看</p>
-                      <p className="mt-3 text-sm leading-6 text-slate-600">{currentResult.teacherTomorrowObservation}</p>
+                      <p className="mt-3 text-sm leading-6 text-slate-600">{displayTeacherObservation}</p>
+                      <p className="mt-3 text-sm leading-6 text-slate-600">
+                        48 小时内复查：{displayConsultation?.followUp48h?.[0] ?? displayInterventionCard?.reviewIn48h ?? "继续观察并补一条反馈。"}
+                      </p>
                     </div>
                   </div>
                   <div className="grid gap-3 lg:grid-cols-2">
@@ -504,20 +567,20 @@ export default function ParentAgentPage() {
               </div>
             </SectionCard>
 
-            {currentResult ? (
+            {displayInterventionCard ? (
               <div id="intervention">
                 <SectionCard title="当前干预卡摘要区" description="这张卡既服务家长端，也能给教师端继续消费。">
                   <InterventionCardPanel
-                    card={currentResult.interventionCard}
+                    card={displayInterventionCard}
                     footer={
                       <div className="grid gap-4 lg:grid-cols-2">
                         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
                           <p className="text-sm font-semibold text-slate-900">家长沟通话术</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{currentResult.interventionCard.parentMessageDraft}</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-600">{displayInterventionCard.parentMessageDraft}</p>
                         </div>
                         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
                           <p className="text-sm font-semibold text-slate-900">教师后续跟进</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{currentResult.interventionCard.teacherFollowupDraft}</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-600">{displayInterventionCard.teacherFollowupDraft}</p>
                         </div>
                       </div>
                     }
@@ -531,13 +594,16 @@ export default function ParentAgentPage() {
                 <div className="space-y-4">
                   <div className="grid gap-4 lg:grid-cols-2">
                   <div className="rounded-3xl border border-slate-100 bg-white p-4">
-                    <p className="text-sm font-semibold text-slate-900">今晚是否已执行</p>
-                    <div className="mt-3 flex gap-2">
-                      <Button type="button" variant={feedbackExecuted === true ? "premium" : "outline"} onClick={() => setFeedbackExecuted(true)}>
+                    <p className="text-sm font-semibold text-slate-900">今晚任务执行状态</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button type="button" variant={feedbackExecutionStatus === "completed" ? "premium" : "outline"} onClick={() => setFeedbackExecutionStatus("completed")}>
                         已执行
                       </Button>
-                      <Button type="button" variant={feedbackExecuted === false ? "premium" : "outline"} onClick={() => setFeedbackExecuted(false)}>
-                        暂未执行
+                      <Button type="button" variant={feedbackExecutionStatus === "partial" ? "premium" : "outline"} onClick={() => setFeedbackExecutionStatus("partial")}>
+                        部分执行
+                      </Button>
+                      <Button type="button" variant={feedbackExecutionStatus === "not_started" ? "premium" : "outline"} onClick={() => setFeedbackExecutionStatus("not_started")}>
+                        未执行
                       </Button>
                     </div>
                   </div>
@@ -582,11 +648,19 @@ export default function ParentAgentPage() {
                   <div>
                     <p className="text-sm font-semibold text-slate-900">{currentResult?.feedbackPrompt ?? "提交反馈后，下一轮 follow-up 会自动带上这条记录。"}</p>
                     <p className="mt-1 text-sm text-slate-600">这条反馈会挂到当前干预卡上，并进入下一轮 follow-up 上下文。</p>
+                    {familyTaskReminder ? (
+                      <p className="mt-2 text-sm text-slate-600">当前提醒状态：{familyTaskReminder.status}</p>
+                    ) : null}
                   </div>
-                  <Button className="gap-2 rounded-xl" onClick={submitFeedback} disabled={!currentResult}>
-                    <CheckCircle2 className="h-4 w-4" />
-                    提交今晚反馈
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" className="rounded-xl" onClick={snoozeFamilyReminder}>
+                      稍后提醒
+                    </Button>
+                    <Button className="gap-2 rounded-xl" onClick={submitFeedback} disabled={!displayInterventionCard}>
+                      <CheckCircle2 className="h-4 w-4" />
+                      提交今晚反馈
+                    </Button>
+                  </div>
                 </div>
 
                   {feedbackStatus ? <p className="text-sm text-slate-600">{feedbackStatus}</p> : null}

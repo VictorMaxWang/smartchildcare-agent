@@ -22,7 +22,15 @@ export default function InterventionCardPanel({
           </Badge>
           {card.consultationMode ? <Badge variant="warning">会诊模式</Badge> : null}
           <Badge variant="secondary">对象：{card.targetChildId}</Badge>
-          <Badge variant={card.source === "ai" ? "success" : card.source === "mock" ? "info" : "secondary"}>
+          <Badge
+            variant={
+              card.source === "ai" || card.source === "vivo"
+                ? "success"
+                : card.source === "mock"
+                  ? "info"
+                  : "secondary"
+            }
+          >
             {card.source}
           </Badge>
           {card.model ? <Badge variant="secondary">{card.model}</Badge> : null}

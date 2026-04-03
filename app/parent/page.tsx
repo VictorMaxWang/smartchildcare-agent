@@ -26,10 +26,21 @@ const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
 });
 
 export default function ParentHomePage() {
-  const { getParentFeed, healthCheckRecords, mealRecords, growthRecords, guardianFeedbacks, taskCheckInRecords } = useApp();
+  const {
+    getParentFeed,
+    healthCheckRecords,
+    mealRecords,
+    growthRecords,
+    guardianFeedbacks,
+    taskCheckInRecords,
+    getChildInterventionCard,
+    getLatestConsultationForChild,
+  } = useApp();
   const feed = getParentFeed()[0];
   const viewModel = buildParentHomeViewModel(feed);
   const [previewResult, setPreviewResult] = useState<ParentAgentResult | null>(null);
+  const latestInterventionCard = feed ? getChildInterventionCard(feed.child.id) : undefined;
+  const latestConsultation = feed ? getLatestConsultationForChild(feed.child.id) : undefined;
 
   const previewContext = useMemo(() => {
     if (!feed) return null;
@@ -106,6 +117,11 @@ export default function ParentHomePage() {
 
   const agentHref = `/parent/agent?child=${feed.child.id}`;
   const primaryAgentLabel = previewResult ? "继续追问" : "进入 AI 助手";
+  const displayInterventionCard = latestInterventionCard ?? previewResult?.interventionCard;
+  const displayTonightTaskTitle = displayInterventionCard?.title ?? viewModel.tonightTask.title;
+  const displayTonightTaskDescription = displayInterventionCard?.tonightHomeAction ?? previewResult?.tonightTopAction ?? viewModel.tonightTask.description;
+  const displayWhyRecommended = latestConsultation?.summary ?? previewResult?.whyNow ?? "系统综合近 7 天观察、园内风险和家庭反馈，优先给出今晚最值得执行的一件事。";
+  const displayReviewIn48h = latestConsultation?.followUp48h?.[0] ?? displayInterventionCard?.reviewIn48h ?? "48 小时内继续观察今晚任务执行后的变化。";
 
   return (
     <RolePageShell
@@ -178,15 +194,17 @@ export default function ParentHomePage() {
               <SectionCard
                 title="今晚家庭任务"
                 description="今晚先做一件最适合当前状态的动作。"
-                actions={<Badge variant="info">{viewModel.tonightTask.tag}</Badge>}
+                actions={<Badge variant={latestConsultation ? "warning" : "info"}>{latestConsultation ? "会诊闭环任务" : viewModel.tonightTask.tag}</Badge>}
               >
                 <div className="rounded-3xl bg-sky-50 p-5">
                   <div className="flex items-start gap-3">
                     <MoonStar className="mt-0.5 h-5 w-5 text-sky-600" />
                     <div>
-                      <p className="text-base font-semibold text-slate-900">{previewResult?.interventionCard.title ?? viewModel.tonightTask.title}</p>
-                      <p className="mt-2 text-sm leading-7 text-slate-600">{previewResult?.tonightTopAction ?? viewModel.tonightTask.description}</p>
+                      <p className="text-base font-semibold text-slate-900">{displayTonightTaskTitle}</p>
+                      <p className="mt-2 text-sm leading-7 text-slate-600">{displayTonightTaskDescription}</p>
                       <p className="mt-3 text-sm font-medium text-sky-700">建议时长：{viewModel.tonightTask.durationText}</p>
+                      <p className="mt-3 text-sm leading-6 text-slate-600">为什么推荐：{displayWhyRecommended}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">48 小时内复查：{displayReviewIn48h}</p>
                       <Link href={`${agentHref}#intervention`} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-sky-700">
                         查看完整干预卡
                         <TrendingUp className="h-4 w-4" />
@@ -255,11 +273,11 @@ export default function ParentHomePage() {
               <Link href={`${agentHref}#intervention`} className="block rounded-3xl border border-slate-100 bg-white p-5 transition hover:bg-slate-50">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  <p className="text-sm font-semibold text-slate-900">{previewResult?.interventionCard.title ?? viewModel.interventionPreview.title}</p>
+                  <p className="text-sm font-semibold text-slate-900">{displayInterventionCard?.title ?? viewModel.interventionPreview.title}</p>
                 </div>
-                <p className="mt-3 text-sm leading-7 text-slate-600">{previewResult?.interventionCard.summary ?? viewModel.interventionPreview.description}</p>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{displayInterventionCard?.summary ?? viewModel.interventionPreview.description}</p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {previewResult?.interventionCard.observationPoints.slice(0, 2).map((item) => (
+                  {(displayInterventionCard?.observationPoints ?? []).slice(0, 2).map((item) => (
                     <Badge key={item} variant="secondary">{item}</Badge>
                   ))}
                 </div>

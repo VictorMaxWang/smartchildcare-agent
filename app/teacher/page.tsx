@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, BookOpenCheck, BrainCircuit, MessageSquareText, PencilLine, ShieldCheck, UsersRound } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, BrainCircuit, MessageSquareText, PencilLine, ShieldAlert, ShieldCheck, UsersRound } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import {
   AssistantEntryCard,
@@ -50,6 +50,7 @@ export default function TeacherHomePage() {
       description="教师首页只保留高频任务：异常儿童、未晨检、待复查、待沟通家长和快捷录入入口。移动端优先看任务，PC 端补充摘要。"
       actions={
         <>
+          <InlineLinkButton href="/teacher/high-risk-consultation" label="发起高风险会诊" variant="premium" />
           <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />
           <InlineLinkButton href="/teacher/agent?action=communication" label="一键生成家长沟通建议" />
         </>
@@ -139,7 +140,11 @@ export default function TeacherHomePage() {
             </SectionCard>
 
             <SectionCard title="快捷录入入口" description="保持业务主路径直达，不让老师来回找页面。">
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <Link href="/teacher/high-risk-consultation" className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-4 text-sm font-semibold text-slate-900 shadow-sm">
+                  <ShieldAlert className="mb-3 h-5 w-5 text-rose-500" />
+                  发起高风险会诊
+                </Link>
                 <Link href="/health" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
                   <ShieldCheck className="mb-3 h-5 w-5 text-sky-500" />
                   去晨检录入
@@ -158,6 +163,19 @@ export default function TeacherHomePage() {
         }
         aside={
           <div className="space-y-6">
+            <AssistantEntryCard
+              title="高风险儿童一键会诊"
+              description="适合比赛 demo 的主路径：自动带入晨检异常、待复查、近 7 天观察和家长反馈，直接输出园内动作、家庭任务和园长决策卡。"
+              href="/teacher/high-risk-consultation"
+              buttonLabel="发起高风险会诊"
+            >
+              <ul className="space-y-3 text-sm leading-6 text-slate-600">
+                <li>适用场景：晨检异常、反复待复查、家长反馈提示持续风险</li>
+                <li>输入方式：结构化上下文 + 图片占位 + 语音速记 + 教师补充</li>
+                <li>输出闭环：教师动作、家长今晚任务、园长优先级决策</li>
+              </ul>
+            </AssistantEntryCard>
+
             <AssistantEntryCard
               title="进入教师 AI 助手"
               description="老师进入后直接看到班级上下文、异常摘要和可一键生成的沟通建议。"

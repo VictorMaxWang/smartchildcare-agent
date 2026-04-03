@@ -3,8 +3,12 @@ import { executeSuggestion, getAiRuntimeOptions, isValidSuggestionPayload } from
 import type { AiSuggestionPayload, ChildSuggestionSnapshot } from "@/lib/ai/types";
 import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/input";
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
+import { forwardBrainRequest } from "@/lib/server/brain-client";
 
 export async function POST(request: Request) {
+  const proxied = await forwardBrainRequest(request, "/api/v1/agents/parent/suggestions");
+  if (proxied) return proxied;
+
   let payload: AiSuggestionPayload | null = null;
 
   try {

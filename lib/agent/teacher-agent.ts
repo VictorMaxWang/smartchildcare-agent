@@ -4,6 +4,9 @@ import type {
   AiSuggestionResponse,
   ChildSuggestionSnapshot,
   ConsultationResult,
+  MemoryContextEnvelope,
+  MemoryContextMeta,
+  PromptMemoryContext,
   RuleFallbackItem,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
@@ -14,6 +17,11 @@ import {
   buildInterventionCardFromSuggestion,
   type InterventionCard,
 } from "@/lib/agent/intervention-card";
+import {
+  buildContinuityNotes,
+  createEmptyMemoryMeta,
+  mergePromptMemoryContexts,
+} from "@/lib/memory/prompt-context";
 
 export type TeacherAgentWorkflowType = "communication" | "follow-up" | "weekly-summary";
 export type TeacherAgentMode = "class" | "child";
@@ -112,6 +120,8 @@ export interface TeacherAgentResult {
   consultationMode?: boolean;
   keyChildren?: string[];
   riskTypes?: string[];
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
   source: TeacherAgentResultSource;
   model?: string;
   generatedAt: string;
@@ -198,6 +208,32 @@ function takeRecentUnique(items: string[], limit: number) {
   }
 
   return result;
+}
+
+function mergeMemoryMeta(contexts: Array<MemoryContextEnvelope | null | undefined>): MemoryContextMeta | undefined {
+  const normalized = contexts.filter((item): item is MemoryContextEnvelope => Boolean(item));
+  if (normalized.length === 0) return undefined;
+
+  const usedSources = takeRecentUnique(normalized.flatMap((item) => item.meta.usedSources), 8);
+  const matchedSnapshotIds = takeRecentUnique(normalized.flatMap((item) => item.meta.matchedSnapshotIds), 8);
+  const matchedTraceIds = takeRecentUnique(normalized.flatMap((item) => item.meta.matchedTraceIds), 8);
+  const errors = takeRecentUnique(normalized.flatMap((item) => item.meta.errors), 6);
+
+  return createEmptyMemoryMeta({
+    backend: normalized.map((item) => item.meta.backend).find(Boolean) ?? "unknown",
+    degraded: normalized.some((item) => item.meta.degraded),
+    usedSources,
+    matchedSnapshotIds,
+    matchedTraceIds,
+    errors,
+  });
+}
+
+function buildChildContinuityNotes(
+  childName: string,
+  memoryContext?: MemoryContextEnvelope | null
+) {
+  return buildContinuityNotes(childName, memoryContext?.promptContext);
 }
 
 type RankedTeacherAgentActionItem = TeacherAgentActionItem & {
@@ -1082,6 +1118,148 @@ export function buildTeacherWeeklySummaryResult(params: {
     source: params.report.source as TeacherAgentResultSource,
     model: params.report.model,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+export function buildTeacherChildSuggestionSnapshotWithMemory(
+  context: TeacherAgentChildContext,
+  memoryContext?: MemoryContextEnvelope | null
+): ChildSuggestionSnapshot {
+  const snapshot = buildTeacherChildSuggestionSnapshot(context);
+  const continuityNotes = buildChildContinuityNotes(context.child.name, memoryContext);
+
+  return {
+    ...snapshot,
+    summary: {
+      ...snapshot.summary,
+      feedback: {
+        ...snapshot.summary.feedback,
+        keywords: takeRecentUnique(
+          [...snapshot.summary.feedback.keywords, ...(memoryContext?.promptContext.recentContinuitySignals ?? [])],
+          4
+        ),
+      },
+    },
+    memoryContext: memoryContext?.promptContext,
+    continuityNotes,
+    ruleFallback: [
+      ...snapshot.ruleFallback,
+      ...(memoryContext?.promptContext.openLoops[0]
+        ? [
+            {
+              title: "延续上次未闭环事项",
+              description: memoryContext.promptContext.openLoops[0],
+              level: "info" as const,
+              tags: ["memory", "continuity"],
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+export function buildTeacherCommunicationFollowUpPayloadWithMemory(
+  context: TeacherAgentChildContext,
+  memoryContext?: MemoryContextEnvelope | null
+): AiFollowUpPayload {
+  const payload = buildTeacherCommunicationFollowUpPayload(context);
+  return {
+    ...payload,
+    snapshot: buildTeacherChildSuggestionSnapshotWithMemory(context, memoryContext),
+    memoryContext: memoryContext?.promptContext,
+    continuityNotes: buildChildContinuityNotes(context.child.name, memoryContext),
+  };
+}
+
+export function buildTeacherWeeklyReportSnapshotWithMemory(
+  context: TeacherAgentClassContext,
+  memoryContexts: Array<MemoryContextEnvelope | null | undefined> = []
+): WeeklyReportSnapshot {
+  const snapshot = buildTeacherWeeklyReportSnapshot(context);
+  const promptMemoryContext = mergePromptMemoryContexts(memoryContexts.map((item) => item?.promptContext));
+  const continuityNotes = buildContinuityNotes(context.className, promptMemoryContext);
+
+  return {
+    ...snapshot,
+    highlights: takeRecentUnique([...snapshot.highlights, ...continuityNotes.slice(0, 2)], 4),
+    risks: takeRecentUnique([...snapshot.risks, ...promptMemoryContext.openLoops.slice(0, 2)], 4),
+    memoryContext: promptMemoryContext,
+    continuityNotes,
+  };
+}
+
+export function buildTeacherCommunicationResultWithMemory(params: {
+  context: TeacherAgentChildContext;
+  response: TeacherCommunicationModelResponse;
+  memoryContext?: MemoryContextEnvelope | null;
+}): TeacherAgentResult {
+  const result = buildTeacherCommunicationResult({
+    context: params.context,
+    response: params.response,
+  });
+  const continuityNotes = buildChildContinuityNotes(params.context.child.name, params.memoryContext);
+  const memoryMeta = mergeMemoryMeta([params.memoryContext]);
+
+  return {
+    ...result,
+    summary: continuityNotes[0] ? `${continuityNotes[0]} ${result.summary}` : result.summary,
+    highlights: takeRecentUnique([...continuityNotes, ...result.highlights], 4),
+    parentMessageDraft:
+      result.parentMessageDraft && continuityNotes[1]
+        ? `${continuityNotes[1]} ${result.parentMessageDraft}`
+        : result.parentMessageDraft,
+    tomorrowObservationPoint: params.memoryContext?.promptContext.openLoops[0] ?? result.tomorrowObservationPoint,
+    continuityNotes,
+    memoryMeta,
+  };
+}
+
+export function buildTeacherFollowUpResultWithMemory(params: {
+  classContext: TeacherAgentClassContext;
+  childContext: TeacherAgentChildContext | null;
+  suggestion?: TeacherSuggestionModelResponse;
+  memoryContext?: MemoryContextEnvelope | null;
+}): TeacherAgentResult {
+  const result = buildTeacherFollowUpResult({
+    classContext: params.classContext,
+    childContext: params.childContext,
+    suggestion: params.suggestion,
+  });
+  const continuityNotes = params.childContext
+    ? buildChildContinuityNotes(params.childContext.child.name, params.memoryContext)
+    : [];
+  const memoryMeta = mergeMemoryMeta([params.memoryContext]);
+
+  return {
+    ...result,
+    summary: continuityNotes[0] ? `${continuityNotes[0]} ${result.summary}` : result.summary,
+    highlights: takeRecentUnique([...continuityNotes, ...result.highlights], 5),
+    tomorrowObservationPoint: params.memoryContext?.promptContext.openLoops[0] ?? result.tomorrowObservationPoint,
+    continuityNotes,
+    memoryMeta,
+  };
+}
+
+export function buildTeacherWeeklySummaryResultWithMemory(params: {
+  classContext: TeacherAgentClassContext;
+  report: TeacherWeeklyModelResponse;
+  memoryContexts?: Array<MemoryContextEnvelope | null | undefined>;
+}): TeacherAgentResult {
+  const result = buildTeacherWeeklySummaryResult({
+    classContext: params.classContext,
+    report: params.report,
+  });
+  const promptMemoryContext = mergePromptMemoryContexts((params.memoryContexts ?? []).map((item) => item?.promptContext));
+  const continuityNotes = buildContinuityNotes(params.classContext.className, promptMemoryContext);
+  const memoryMeta = mergeMemoryMeta(params.memoryContexts ?? []);
+
+  return {
+    ...result,
+    summary: continuityNotes[0] ? `${continuityNotes[0]} ${result.summary}` : result.summary,
+    highlights: takeRecentUnique([...continuityNotes, ...result.highlights], 5),
+    tomorrowObservationPoint: promptMemoryContext.openLoops[0] ?? result.tomorrowObservationPoint,
+    continuityNotes,
+    memoryMeta,
   };
 }
 

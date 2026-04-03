@@ -47,3 +47,14 @@ artifacts/
 
 # local release gate secrets
 .env.release
+
+# python backend
+backend/.venv/
+backend/.pytest_cache/
+backend/.local/
+backend/**/__pycache__/
+backend/**/*.pyc
+
+# local Next startup logs from staging verification
+.tmp-next-start*.out
+.tmp-next-start*.err

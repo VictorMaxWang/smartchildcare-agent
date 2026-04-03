@@ -1,6 +1,6 @@
 import type { AiFollowUpResponse, AiRiskLevel, AiSuggestionResponse, ConsultationResult } from "@/lib/ai/types";
 
-export type InterventionCardSource = "ai" | "fallback" | "mock";
+export type InterventionCardSource = "ai" | "fallback" | "mock" | "vivo";
 
 export interface InterventionCard {
   id: string;
@@ -56,6 +56,13 @@ export interface InterventionCardFromCommunicationInput {
   generatedAt?: string;
 }
 
+export interface InterventionCardFromConsultationInput {
+  targetChildId: string;
+  childName: string;
+  consultation: ConsultationResult;
+  generatedAt?: string;
+}
+
 function sanitizeText(value: string | undefined, fallback: string) {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : fallback;
@@ -74,6 +81,10 @@ function uniqueItems(items: Array<string | undefined>, limit = 4) {
   }
 
   return result;
+}
+
+function mapConsultationSourceToCardSource(source: ConsultationResult["source"]): InterventionCardSource {
+  return source === "rule" ? "fallback" : source;
 }
 
 export function buildInterventionCardId(targetChildId: string, title: string, seed?: string) {
@@ -225,6 +236,36 @@ export function buildInterventionCardFromCommunication(
     reviewIn48h: input.reviewIn48h ?? input.familyActions?.[1] ?? "",
     source: input.source,
     model: input.model,
+    generatedAt: input.generatedAt,
+  });
+}
+
+export function buildInterventionCardFromConsultation(
+  input: InterventionCardFromConsultationInput
+): InterventionCard {
+  const consultation = input.consultation;
+
+  return finalizeInterventionCard({
+    childName: input.childName,
+    title: `${input.childName} 高风险家庭干预卡`,
+    riskLevel: consultation.riskLevel,
+    targetChildId: input.targetChildId,
+    triggerReason: consultation.triggerReasons[0] ?? consultation.triggerReason,
+    summary: consultation.summary,
+    todayInSchoolAction: consultation.todayInSchoolActions[0] ?? consultation.schoolAction,
+    tonightHomeAction: consultation.tonightAtHomeActions[0] ?? consultation.homeAction,
+    homeSteps: consultation.tonightAtHomeActions,
+    observationPoints: consultation.nextCheckpoints,
+    tomorrowObservationPoint: consultation.followUp48h[0] ?? consultation.reviewIn48h,
+    reviewIn48h: consultation.followUp48h[0] ?? consultation.reviewIn48h,
+    parentMessageDraft: consultation.parentMessageDraft,
+    consultationMode: true,
+    consultationId: consultation.consultationId,
+    consultationSummary: consultation.coordinatorSummary.finalConclusion,
+    participants: consultation.participants.map((item) => item.label),
+    shouldEscalateToAdmin: consultation.shouldEscalateToAdmin,
+    source: mapConsultationSourceToCardSource(consultation.source),
+    model: consultation.model,
     generatedAt: input.generatedAt,
   });
 }

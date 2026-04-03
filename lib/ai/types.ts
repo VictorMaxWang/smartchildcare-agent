@@ -12,7 +12,7 @@ export type ConsultationParticipantId =
   | "coparenting-agent"
   | "execution-agent"
   | "coordinator";
-export type ConsultationResultSource = "ai" | "fallback" | "mock" | "rule";
+export type ConsultationResultSource = "ai" | "fallback" | "mock" | "rule" | "vivo";
 export type MobileDraftType = "voice" | "ocr" | "feedback" | "observation";
 export type MobileDraftSyncStatus = "local_pending" | "synced" | "failed";
 export type ReminderType =
@@ -20,7 +20,69 @@ export type ReminderType =
   | "review-48h"
   | "admin-focus"
   | "draft-sync";
-export type ReminderStatus = "pending" | "acknowledged" | "done";
+export type ReminderStatus = "pending" | "acknowledged" | "done" | "snoozed";
+
+export interface PromptMemoryContext {
+  longTermTraits: string[];
+  recentContinuitySignals: string[];
+  lastConsultationTakeaways: string[];
+  openLoops: string[];
+}
+
+export interface MemoryContextMeta {
+  backend: string;
+  degraded: boolean;
+  usedSources: string[];
+  errors: string[];
+  matchedSnapshotIds: string[];
+  matchedTraceIds: string[];
+  [key: string]: unknown;
+}
+
+export interface MemoryContextSnapshotRecord {
+  id: string;
+  childId?: string;
+  sessionId?: string;
+  snapshotType: string;
+  inputSummary?: string;
+  snapshotJson: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface MemoryContextTraceRecord {
+  id: string;
+  traceId: string;
+  childId?: string;
+  sessionId?: string;
+  nodeName: string;
+  actionType: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  status: string;
+  metadataJson?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface MemoryContextProfileRecord {
+  id: string;
+  childId: string;
+  profileJson: Record<string, unknown>;
+  source?: string;
+  version?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MemoryContextEnvelope {
+  childId: string;
+  workflowType: string;
+  childProfile?: MemoryContextProfileRecord;
+  recentSnapshots: MemoryContextSnapshotRecord[];
+  recentConsultations: MemoryContextSnapshotRecord[];
+  relevantTraces: MemoryContextTraceRecord[];
+  promptContext: PromptMemoryContext;
+  meta: MemoryContextMeta;
+}
 
 export interface ConsultationTrigger {
   triggerType: ConsultationTriggerType;
@@ -44,6 +106,35 @@ export interface ConsultationFinding {
   evidence: string[];
 }
 
+export interface HighRiskAgentView {
+  role:
+    | "HealthObservationAgent"
+    | "DietBehaviorAgent"
+    | "ParentCommunicationAgent"
+    | "InSchoolActionAgent"
+    | "CoordinatorAgent";
+  title: string;
+  summary: string;
+  signals: string[];
+  actions: string[];
+  observationPoints: string[];
+  evidence: string[];
+}
+
+export interface DirectorDecisionCard {
+  title: string;
+  reason: string;
+  recommendedOwnerRole: "teacher" | "parent" | "admin";
+  recommendedOwnerName: string;
+  recommendedAt: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+export interface ExplainabilityItem {
+  label: string;
+  detail: string;
+}
+
 export interface ConsultationCoordinatorSummary {
   finalConclusion: string;
   riskLevel: AiRiskLevel;
@@ -55,24 +146,47 @@ export interface ConsultationCoordinatorSummary {
   shouldEscalateToAdmin: boolean;
 }
 
-export interface ConsultationResult {
+export interface HighRiskConsultationResult {
   consultationId: string;
   triggerReason: string;
   triggerType: ConsultationTriggerType[];
+  triggerReasons: string[];
   participants: ConsultationParticipant[];
   childId: string;
   riskLevel: AiRiskLevel;
   agentFindings: ConsultationFinding[];
+  summary: string;
+  keyFindings: string[];
+  healthAgentView: HighRiskAgentView;
+  dietBehaviorAgentView: HighRiskAgentView;
+  parentCommunicationAgentView: HighRiskAgentView;
+  inSchoolActionAgentView: HighRiskAgentView;
+  todayInSchoolActions: string[];
+  tonightAtHomeActions: string[];
+  followUp48h: string[];
+  parentMessageDraft: string;
+  directorDecisionCard: DirectorDecisionCard;
+  explainability: ExplainabilityItem[];
+  nextCheckpoints: string[];
   coordinatorSummary: ConsultationCoordinatorSummary;
   schoolAction: string;
   homeAction: string;
   observationPoints: string[];
   reviewIn48h: string;
   shouldEscalateToAdmin: boolean;
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
   source: ConsultationResultSource;
+  provider?: string;
   model?: string;
+  providerTrace?: Record<string, unknown>;
+  traceMeta?: Record<string, unknown>;
+  realProvider?: boolean;
+  fallback?: boolean;
   generatedAt: string;
 }
+
+export type ConsultationResult = HighRiskConsultationResult;
 
 export interface MobileDraft {
   draftId: string;
@@ -174,6 +288,8 @@ export interface ChildSuggestionSnapshot {
       content: string;
     }>;
   };
+  memoryContext?: PromptMemoryContext;
+  continuityNotes?: string[];
   ruleFallback: RuleFallbackItem[];
 }
 
@@ -236,6 +352,8 @@ export interface InstitutionSuggestionSnapshot {
     recommendedDeadline: string;
   }>;
   weeklyHighlights: string[];
+  memoryContext?: PromptMemoryContext;
+  continuityNotes?: string[];
   ruleFallback: RuleFallbackItem[];
 }
 
@@ -259,6 +377,8 @@ export interface AiSuggestionResponse {
   actionPlan?: AiActionPlan;
   consultation?: ConsultationResult;
   trendPrediction?: AiTrendPrediction;
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
   model?: string;
@@ -299,6 +419,8 @@ export interface AiFollowUpPayload {
     pendingDispatches?: InstitutionSuggestionSnapshot["pendingDispatches"];
     weeklyHighlights?: string[];
   };
+  memoryContext?: PromptMemoryContext;
+  continuityNotes?: string[];
 }
 
 export interface AiFollowUpMessage {
@@ -318,6 +440,8 @@ export interface AiFollowUpResponse {
   reviewIn48h?: string;
   recommendedQuestions?: string[];
   consultation?: ConsultationResult;
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
   model?: string;
@@ -351,6 +475,8 @@ export interface WeeklyReportSnapshot {
   }>;
   highlights: string[];
   risks: string[];
+  memoryContext?: PromptMemoryContext;
+  continuityNotes?: string[];
 }
 
 export interface WeeklyReportPayload {
@@ -363,6 +489,8 @@ export interface WeeklyReportResponse {
   risks: string[];
   nextWeekActions: string[];
   trendPrediction: AiTrendPrediction;
+  continuityNotes?: string[];
+  memoryMeta?: MemoryContextMeta;
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
   model?: string;

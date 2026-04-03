@@ -1,5 +1,4 @@
-import type { ReminderItem } from "@/lib/ai/types";
-import type { ConsultationResult } from "@/lib/ai/types";
+import type { ConsultationResult, ReminderItem } from "@/lib/ai/types";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
 
 function createReminderId(prefix: string, targetId: string) {
@@ -65,6 +64,7 @@ export function buildReminderItems(params: {
 
 export function getReminderStatusLabel(status: ReminderItem["status"]) {
   if (status === "done") return "已完成";
+  if (status === "snoozed") return "稍后提醒";
   if (status === "acknowledged") return "已确认";
   return "待提醒";
 }

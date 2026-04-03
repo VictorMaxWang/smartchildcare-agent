@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import ConsultationStoryCard from "@/components/consultation/ConsultationStoryCard";
 import {
   AgentWorkspaceCard,
   InlineLinkButton,
@@ -98,6 +99,7 @@ export default function AdminAgentPage() {
     getAdminBoardData,
     getWeeklyDietTrend,
     getSmartInsights,
+    getLatestConsultations,
   } = useApp();
   const [notificationEvents, setNotificationEvents] = useState<AdminDispatchEvent[]>([]);
   const [notificationError, setNotificationError] = useState<string | null>(null);
@@ -109,6 +111,9 @@ export default function AdminAgentPage() {
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const initializedRef = useRef(false);
+  const latestConsultations = getLatestConsultations()
+    .filter((item) => item.shouldEscalateToAdmin)
+    .slice(0, 4);
 
   const payload = useMemo<AdminAgentRequestPayload>(
     () => ({
@@ -543,6 +548,61 @@ export default function AdminAgentPage() {
                 )}
               </div>
             </AgentWorkspaceCard>
+
+            <SectionCard
+              title="会诊驱动的园长决策卡"
+              description="把高风险儿童一键会诊结果直接转成园长处理优先级。"
+            >
+              <div className="space-y-4">
+                {latestConsultations.length > 0 ? (
+                  latestConsultations.map((item) => {
+                    const child = visibleChildren.find((entry) => entry.id === item.childId);
+                    return (
+                      <div key={item.consultationId} className="rounded-3xl border border-amber-100 bg-amber-50/70 p-5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="warning">{item.riskLevel === "high" ? "P1" : item.riskLevel === "medium" ? "P2" : "P3"}</Badge>
+                          <Badge variant="secondary">
+                            {item.directorDecisionCard.status === "completed"
+                              ? "已完成"
+                              : item.directorDecisionCard.status === "in_progress"
+                                ? "跟进中"
+                                : "待分派"}
+                          </Badge>
+                          <Badge variant="outline">{child?.className ?? "当前班级"}</Badge>
+                        </div>
+                        <p className="mt-3 text-base font-semibold text-slate-900">{child?.name ?? item.childId}</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{item.directorDecisionCard.reason}</p>
+                        <ConsultationStoryCard result={item} className="mt-4" />
+                        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                          <div className="rounded-2xl bg-white p-4 text-sm text-slate-600">
+                            <p className="font-semibold text-slate-900">建议负责人</p>
+                            <p className="mt-2">{item.directorDecisionCard.recommendedOwnerName}</p>
+                          </div>
+                          <div className="rounded-2xl bg-white p-4 text-sm text-slate-600">
+                            <p className="font-semibold text-slate-900">建议时间</p>
+                            <p className="mt-2">{item.directorDecisionCard.recommendedAt}</p>
+                          </div>
+                          <div className="rounded-2xl bg-white p-4 text-sm text-slate-600">
+                            <p className="font-semibold text-slate-900">当前状态</p>
+                            <p className="mt-2">
+                              {item.directorDecisionCard.status === "completed"
+                                ? "已完成"
+                                : item.directorDecisionCard.status === "in_progress"
+                                  ? "跟进中"
+                                  : "待分派"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                    当前还没有教师侧同步过来的高风险会诊卡。
+                  </div>
+                )}
+              </div>
+            </SectionCard>
 
             <SectionCard
               title="结构化行动建议"

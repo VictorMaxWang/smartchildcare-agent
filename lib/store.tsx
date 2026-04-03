@@ -176,6 +176,7 @@ export interface GuardianFeedback {
   content: string;
   interventionCardId?: string;
   sourceWorkflow?: "parent-agent" | "teacher-agent" | "manual";
+  executionStatus?: "completed" | "partial" | "not_started";
   executed?: boolean;
   childReaction?: string;
   improved?: boolean | "unknown";
@@ -328,6 +329,8 @@ interface AppContextType {
   updateReminderStatus: (reminderId: string, status: ReminderItem["status"]) => void;
   getChildInterventionCard: (childId: string) => InterventionCard | undefined;
   getConsultationsForChild: (childId: string) => ConsultationResult[];
+  getLatestConsultationForChild: (childId: string) => ConsultationResult | undefined;
+  getLatestConsultations: () => ConsultationResult[];
 
   getTodayMealRecords: (childIds?: string[]) => MealRecord[];
   getWeeklyDietTrend: (childId?: string) => WeeklyDietTrend;
@@ -3083,6 +3086,16 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
   }, [consultations]);
 
+  const getLatestConsultationForChild = useCallback((childId: string) => {
+    return consultations
+      .filter((item) => item.childId === childId)
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt))[0];
+  }, [consultations]);
+
+  const getLatestConsultations = useCallback(() => {
+    return [...consultations].sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  }, [consultations]);
+
   const getTodayHealthCheck = useCallback((childId: string) => {
     return todayHealthCheckMap.get(childId);
   }, [todayHealthCheckMap]);
@@ -3373,6 +3386,8 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     updateReminderStatus,
     getChildInterventionCard,
     getConsultationsForChild,
+    getLatestConsultationForChild,
+    getLatestConsultations,
     getTodayMealRecords,
     getWeeklyDietTrend,
     getSmartInsights,
@@ -3425,6 +3440,8 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     updateReminderStatus,
     getChildInterventionCard,
     getConsultationsForChild,
+    getLatestConsultationForChild,
+    getLatestConsultations,
     getTodayMealRecords,
     getWeeklyDietTrend,
     getSmartInsights,
