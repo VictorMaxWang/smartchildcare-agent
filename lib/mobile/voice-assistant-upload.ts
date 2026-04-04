@@ -1,3 +1,5 @@
+import { normalizeTeacherVoiceMimeType } from "@/lib/mobile/teacher-voice-audio";
+
 export type VoiceCaptureStatus = "uploaded" | "mocked" | "processing" | "failed";
 
 export interface VoiceUploadRequest {
@@ -87,12 +89,18 @@ function isVoiceUploadResponse(value: unknown): value is VoiceUploadResponse {
 export async function uploadTeacherVoiceCapture(
   request: VoiceUploadRequest
 ): Promise<VoiceUploadResponse> {
+  const attachmentName = request.file.name || "teacher-voice-note.webm";
+  const normalizedMimeType = normalizeTeacherVoiceMimeType({
+    mimeType: request.mimeType,
+    attachmentName,
+  });
   const formData = new FormData();
   formData.set("audio", request.file);
+  formData.set("attachmentName", attachmentName);
   formData.set("targetRole", request.targetRole);
   formData.set("scene", request.scene);
   formData.set("durationMs", String(request.durationMs));
-  formData.set("mimeType", request.mimeType);
+  formData.set("mimeType", normalizedMimeType);
 
   if (request.childId) {
     formData.set("childId", request.childId);
@@ -120,13 +128,15 @@ export async function uploadTeacherVoiceCapture(
     return responseJson;
   } catch {
     return buildMockVoiceUploadResponse({
-      attachmentName: request.file.name,
+      attachmentName,
       fallbackText: request.fallbackText,
       provider: "mock-asr-client-fallback",
       raw: {
+        attachmentName,
         childId: request.childId,
         durationMs: request.durationMs,
-        mimeType: request.mimeType,
+        mimeType: normalizedMimeType,
+        originalMimeType: request.mimeType,
         scene: request.scene,
         size: request.file.size,
       },

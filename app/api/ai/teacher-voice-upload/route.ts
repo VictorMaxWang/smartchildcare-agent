@@ -20,7 +20,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing audio file" }, { status: 400 });
   }
 
-  const attachmentName = audio.name || "teacher-voice-note.webm";
+  const attachmentName =
+    (typeof formData.get("attachmentName") === "string"
+      ? String(formData.get("attachmentName")).trim()
+      : "") ||
+    audio.name ||
+    "teacher-voice-note.webm";
   const fallbackText =
     typeof formData.get("fallbackText") === "string"
       ? String(formData.get("fallbackText")).trim()

@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  getTeacherVoiceFallbackMimeType,
+  getTeacherVoiceMimeTypeCandidates,
+  inferTeacherVoiceExtension,
+  normalizeTeacherVoiceMimeType,
+  type TeacherVoiceRecorderPlatform,
+} from "@/lib/mobile/teacher-voice-audio";
 
 export type VoiceRecorderSupportState = "checking" | "supported" | "unsupported";
 export type VoiceRecorderPermissionState = "unknown" | "granted" | "denied";
@@ -13,20 +20,28 @@ export interface VoiceRecordingResult {
   size: number;
 }
 
-const MIME_TYPE_CANDIDATES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/mp4",
-  "audio/mpeg",
-] as const;
+function getRecorderPlatform(): TeacherVoiceRecorderPlatform {
+  if (typeof navigator === "undefined") {
+    return "default";
+  }
 
-function resolveSupportedMimeType() {
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const maxTouchPoints = typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+  const isIosDevice =
+    /iPad|iPhone|iPod/i.test(userAgent) ||
+    (/Mac/i.test(platform) && maxTouchPoints > 1);
+
+  return isIosDevice ? "ios-webkit" : "default";
+}
+
+function resolveSupportedMimeType(platform: TeacherVoiceRecorderPlatform) {
   if (typeof window === "undefined" || typeof window.MediaRecorder === "undefined") {
     return "";
   }
 
   const mediaRecorderConstructor = window.MediaRecorder;
-  const supportedMimeType = MIME_TYPE_CANDIDATES.find((candidate) =>
+  const supportedMimeType = getTeacherVoiceMimeTypeCandidates(platform).find((candidate) =>
     typeof mediaRecorderConstructor.isTypeSupported === "function"
       ? mediaRecorderConstructor.isTypeSupported(candidate)
       : false
@@ -35,13 +50,30 @@ function resolveSupportedMimeType() {
   return supportedMimeType ?? "";
 }
 
+function resolveNormalizedMimeType(params: {
+  platform: TeacherVoiceRecorderPlatform;
+  mimeType?: string;
+  attachmentName?: string;
+}) {
+  return normalizeTeacherVoiceMimeType({
+    mimeType: params.mimeType,
+    attachmentName: params.attachmentName,
+    fallbackMimeType: getTeacherVoiceFallbackMimeType(params.platform),
+  });
+}
+
 function createRecordingFile(blob: Blob, fileNameBase: string, mimeType: string) {
   const safeFileNameBase = fileNameBase.trim() || "teacher-voice-note";
-  const extension =
-    mimeType.includes("mp4") ? "m4a" : mimeType.includes("mpeg") ? "mp3" : "webm";
+  const normalizedMimeType = normalizeTeacherVoiceMimeType({
+    mimeType,
+  });
+  const extension = inferTeacherVoiceExtension(normalizedMimeType);
 
   return new File([blob], `${safeFileNameBase}.${extension}`, {
-    type: mimeType || blob.type || "audio/webm",
+    type:
+      normalizedMimeType ||
+      normalizeTeacherVoiceMimeType({ mimeType: blob.type }) ||
+      "audio/webm",
     lastModified: Date.now(),
   });
 }
@@ -68,6 +100,10 @@ function toRecorderErrorMessage(error: unknown) {
     return "microphone_not_readable";
   }
 
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "voice_recorder_aborted";
+  }
+
   if (error instanceof Error) {
     return error.message;
   }
@@ -89,12 +125,18 @@ function getInitialSupportState(): VoiceRecorderSupportState {
 }
 
 export function useVoiceRecorder() {
+  const [recorderPlatform] = useState<TeacherVoiceRecorderPlatform>(() => getRecorderPlatform());
   const [supportState] = useState<VoiceRecorderSupportState>(getInitialSupportState);
   const [permissionState, setPermissionState] = useState<VoiceRecorderPermissionState>("unknown");
   const [isRecording, setIsRecording] = useState(false);
   const [durationMs, setDurationMs] = useState(0);
   const [mimeType, setMimeType] = useState(() =>
-    typeof window === "undefined" ? "" : resolveSupportedMimeType()
+    typeof window === "undefined"
+      ? ""
+      : resolveNormalizedMimeType({
+          platform: recorderPlatform,
+          mimeType: resolveSupportedMimeType(recorderPlatform),
+        })
   );
   const [lastError, setLastError] = useState<string | null>(null);
 
@@ -106,6 +148,7 @@ export function useVoiceRecorder() {
   const pendingFileNameRef = useRef("teacher-voice-note");
   const stopResolverRef = useRef<((result: VoiceRecordingResult | null) => void) | null>(null);
   const discardOnStopRef = useRef(false);
+  const cleanupTrackListenersRef = useRef<(() => void) | null>(null);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -114,13 +157,49 @@ export function useVoiceRecorder() {
     }
   }, []);
 
+  const clearTrackListeners = useCallback(() => {
+    cleanupTrackListenersRef.current?.();
+    cleanupTrackListenersRef.current = null;
+  }, []);
+
+  const interruptRecording = useCallback(
+    (reason: string) => {
+      setLastError(reason);
+
+      const activeRecorder = mediaRecorderRef.current;
+      if (!activeRecorder || activeRecorder.state === "inactive") {
+        return;
+      }
+
+      try {
+        activeRecorder.stop();
+      } catch {
+        stopResolverRef.current?.(null);
+        stopResolverRef.current = null;
+        clearTrackListeners();
+        clearTimer();
+        mediaRecorderRef.current = null;
+        chunksRef.current = [];
+        startedAtRef.current = 0;
+        discardOnStopRef.current = false;
+        setDurationMs(0);
+        setIsRecording(false);
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+    },
+    [clearTimer, clearTrackListeners]
+  );
+
   const releaseMediaStream = useCallback(() => {
+    clearTrackListeners();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaStreamRef.current = null;
-  }, []);
+  }, [clearTrackListeners]);
 
   const resetRecorderState = useCallback(() => {
     clearTimer();
+    clearTrackListeners();
     mediaRecorderRef.current = null;
     chunksRef.current = [];
     startedAtRef.current = 0;
@@ -128,7 +207,31 @@ export function useVoiceRecorder() {
     setDurationMs(0);
     setIsRecording(false);
     releaseMediaStream();
-  }, [clearTimer, releaseMediaStream]);
+  }, [clearTimer, clearTrackListeners, releaseMediaStream]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        interruptRecording("voice_recorder_page_hidden");
+      }
+    };
+
+    const handlePageHide = () => {
+      interruptRecording("voice_recorder_page_hidden");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [interruptRecording]);
 
   useEffect(() => {
     return () => {
@@ -167,13 +270,38 @@ export function useVoiceRecorder() {
         mediaStreamRef.current = stream;
         setPermissionState("granted");
 
-        const nextMimeType = resolveSupportedMimeType();
+        const detachTrackListeners = () => {
+          stream.getTracks().forEach((track) => {
+            track.removeEventListener("ended", handleTrackEnded);
+            track.removeEventListener("mute", handleTrackMuted);
+          });
+        };
+        const handleTrackEnded = () => {
+          interruptRecording("microphone_interrupted");
+        };
+        const handleTrackMuted = () => {
+          interruptRecording("microphone_interrupted");
+        };
+        stream.getTracks().forEach((track) => {
+          track.addEventListener("ended", handleTrackEnded);
+          track.addEventListener("mute", handleTrackMuted);
+        });
+        cleanupTrackListenersRef.current = detachTrackListeners;
+
+        const nextMimeType = resolveSupportedMimeType(recorderPlatform);
         const recorder = nextMimeType
           ? new MediaRecorder(stream, { mimeType: nextMimeType })
           : new MediaRecorder(stream);
+        const fallbackMimeType = getTeacherVoiceFallbackMimeType(recorderPlatform);
 
         mediaRecorderRef.current = recorder;
-        setMimeType(recorder.mimeType || nextMimeType || "audio/webm");
+        setMimeType(
+          resolveNormalizedMimeType({
+            platform: recorderPlatform,
+            mimeType: recorder.mimeType || nextMimeType,
+            attachmentName: `${fileNameBase}.${inferTeacherVoiceExtension(fallbackMimeType)}`,
+          })
+        );
 
         recorder.ondataavailable = (event) => {
           if (event.data.size > 0) {
@@ -187,8 +315,13 @@ export function useVoiceRecorder() {
 
         recorder.onstop = () => {
           const elapsedMs = startedAtRef.current ? Date.now() - startedAtRef.current : durationMs;
+          const resolvedMimeType = resolveNormalizedMimeType({
+            platform: recorderPlatform,
+            mimeType: recorder.mimeType || nextMimeType || chunksRef.current[0]?.type,
+            attachmentName: pendingFileNameRef.current,
+          });
           const mergedBlob = new Blob(chunksRef.current, {
-            type: recorder.mimeType || nextMimeType || "audio/webm",
+            type: resolvedMimeType || fallbackMimeType,
           });
           const shouldDiscard = discardOnStopRef.current || mergedBlob.size === 0;
 
@@ -199,10 +332,14 @@ export function useVoiceRecorder() {
                 file: createRecordingFile(
                   mergedBlob,
                   pendingFileNameRef.current,
-                  recorder.mimeType || nextMimeType || "audio/webm"
+                  resolvedMimeType || fallbackMimeType
                 ),
                 durationMs: elapsedMs,
-                mimeType: recorder.mimeType || nextMimeType || "audio/webm",
+                mimeType: resolveNormalizedMimeType({
+                  platform: recorderPlatform,
+                  mimeType: mergedBlob.type || recorder.mimeType || nextMimeType,
+                  attachmentName: pendingFileNameRef.current,
+                }),
                 size: mergedBlob.size,
               } satisfies VoiceRecordingResult;
 
@@ -230,7 +367,7 @@ export function useVoiceRecorder() {
         throw new Error(nextError);
       }
     },
-    [durationMs, releaseMediaStream, resetRecorderState, supportState]
+    [durationMs, interruptRecording, recorderPlatform, releaseMediaStream, resetRecorderState, supportState]
   );
 
   const stopRecording = useCallback(async () => {

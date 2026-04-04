@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { VoiceUploadResponse } from "@/lib/mobile/voice-assistant-upload";
+import type { TeacherVoiceGlueResult } from "@/lib/mobile/teacher-voice-understand";
 import { cn } from "@/lib/utils";
 
 export type VoiceAssistantFabStatus =
@@ -42,11 +42,11 @@ export interface VoiceAssistantFabChildOption {
 }
 
 export interface VoiceAssistantFabResult {
-  response: VoiceUploadResponse;
-  durationMs: number;
-  fileName: string;
-  mimeType: string;
-  size: number;
+  upload: TeacherVoiceGlueResult["upload"];
+  understanding: TeacherVoiceGlueResult["understanding"];
+  understandingError: TeacherVoiceGlueResult["understandingError"];
+  uiHintNextAction: TeacherVoiceGlueResult["uiHintNextAction"];
+  recordingMeta: TeacherVoiceGlueResult["recordingMeta"];
 }
 
 interface VoiceAssistantFABProps {
@@ -54,12 +54,15 @@ interface VoiceAssistantFABProps {
   durationMs: number;
   statusLabel: string;
   statusHint: string;
+  degradedHint?: string | null;
+  cancelOnRelease?: boolean;
   disabled?: boolean;
   result: VoiceAssistantFabResult | null;
   childOptions: VoiceAssistantFabChildOption[];
   selectedChildId: string;
   onSelectedChildChange: (childId: string) => void;
   onPointerStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerEnd: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onKeyboardToggle: () => void;
@@ -86,7 +89,7 @@ function formatFileSize(bytes: number) {
   return `${bytes} B`;
 }
 
-function getNextActionLabel(nextAction: VoiceUploadResponse["nextAction"]) {
+function getNextActionLabel(nextAction: TeacherVoiceGlueResult["uiHintNextAction"]) {
   if (nextAction === "teacher-agent") {
     return "保存并前往教师 AI 助手";
   }
@@ -139,12 +142,15 @@ export default function VoiceAssistantFAB({
   durationMs,
   statusLabel,
   statusHint,
+  degradedHint,
+  cancelOnRelease,
   disabled,
   result,
   childOptions,
   selectedChildId,
   onSelectedChildChange,
   onPointerStart,
+  onPointerMove,
   onPointerEnd,
   onPointerCancel,
   onKeyboardToggle,
@@ -153,10 +159,13 @@ export default function VoiceAssistantFAB({
   onSaveDraft,
   onSaveAndContinue,
 }: VoiceAssistantFABProps) {
-  const nextActionLabel = getNextActionLabel(result?.response.nextAction);
+  const nextActionLabel = getNextActionLabel(result?.uiHintNextAction);
   const canContinue =
-    result?.response.nextAction === "teacher-agent" ||
-    result?.response.nextAction === "high-risk-consultation";
+    result?.uiHintNextAction === "teacher-agent" ||
+    result?.uiHintNextAction === "high-risk-consultation";
+  const understanding = result?.understanding ?? null;
+  const previewItems = understanding?.draft_items.slice(0, 2) ?? [];
+  const warnings = understanding?.warnings ?? [];
 
   return (
     <>
@@ -165,7 +174,9 @@ export default function VoiceAssistantFAB({
           <div className="flex items-center gap-2">
             <Badge
               variant={
-                status === "error"
+                degradedHint && status !== "error"
+                  ? "warning"
+                  : status === "error"
                   ? "warning"
                   : status === "success"
                     ? "success"
@@ -181,6 +192,11 @@ export default function VoiceAssistantFAB({
             <p className="truncate text-sm font-semibold text-slate-900">{statusLabel}</p>
           </div>
           <p className="mt-2 text-xs leading-5 text-slate-500">{statusHint}</p>
+          {degradedHint ? (
+            <div className="mt-2">
+              <Badge variant="warning">Best-effort fallback</Badge>
+            </div>
+          ) : null}
         </div>
 
         {status === "error" ? (
@@ -202,12 +218,13 @@ export default function VoiceAssistantFAB({
           className={cn(
             "voice-assistant-fab pointer-events-auto relative flex h-[5.5rem] w-[5.5rem] items-center justify-center overflow-hidden rounded-full border transition-all duration-300",
             getButtonTone(status),
+            cancelOnRelease ? "scale-[1.04] ring-4 ring-amber-200/75" : "",
             disabled ? "cursor-not-allowed opacity-90" : "cursor-pointer"
           )}
           disabled={disabled}
           onPointerDown={onPointerStart}
+          onPointerMove={onPointerMove}
           onPointerUp={onPointerEnd}
-          onPointerLeave={status === "recording" ? onPointerCancel : undefined}
           onPointerCancel={onPointerCancel}
           onKeyDown={(event) => {
             if (event.repeat) return;
@@ -227,7 +244,9 @@ export default function VoiceAssistantFAB({
           <span className="relative z-10 flex flex-col items-center justify-center gap-1">
             {renderFabIcon(status)}
             <span className="text-[11px] font-semibold tracking-[0.08em] text-white/95">
-              {status === "recording" ||
+              {cancelOnRelease && (status === "press_arming" || status === "requesting_permission" || status === "recording")
+                ? "松手取消"
+                : status === "recording" ||
               status === "stopping" ||
               status === "uploading" ||
               status === "processing"
@@ -254,29 +273,34 @@ export default function VoiceAssistantFAB({
                 <DialogHeader>
                   <DialogTitle className="text-xl text-slate-950">语音采集已完成</DialogTitle>
                   <DialogDescription className="mt-2 text-sm leading-6 text-slate-600">
-                    当前只打通“采集 + 上传 + 草稿入口”，后续可直接衔接教师 Agent 或高风险会诊流。
+                    当前已打通“采集 + 上传 + 结构化理解 + 草稿入口”，后续可直接衔接教师 Agent 或高风险会诊流。
                   </DialogDescription>
                 </DialogHeader>
               </div>
 
               <div className="space-y-5 px-6 pt-5">
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant={result.response.source === "mock" ? "warning" : "success"}>
-                    {result.response.source === "mock" ? "Mock Fallback" : "Upload API"}
+                  <Badge variant={result.upload.source === "mock" ? "warning" : "success"}>
+                    {result.upload.source === "mock" ? "Mock Fallback" : "Upload API"}
                   </Badge>
                   <Badge
                     variant={
-                      result.response.status === "processing"
+                      result.upload.status === "processing"
                         ? "info"
-                        : result.response.status === "failed"
+                        : result.upload.status === "failed"
                           ? "warning"
                           : "success"
                     }
                   >
-                    状态：{result.response.status}
+                    状态：{result.upload.status}
                   </Badge>
-                  {result.response.provider ? (
-                    <Badge variant="secondary">Provider：{result.response.provider}</Badge>
+                  {result.upload.provider ? (
+                    <Badge variant="secondary">Provider：{result.upload.provider}</Badge>
+                  ) : null}
+                  {understanding ? (
+                    <Badge variant={understanding.trace.fallback ? "warning" : "success"}>
+                      {understanding.trace.fallback ? "T4 Fallback" : "T4 Structured"}
+                    </Badge>
                   ) : null}
                 </div>
 
@@ -286,20 +310,39 @@ export default function VoiceAssistantFAB({
                       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                         文件
                       </p>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">{result.fileName}</p>
-                      <p className="mt-1 text-xs text-slate-500">{result.mimeType}</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {result.recordingMeta.fileName}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {result.recordingMeta.mimeType}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                         录音信息
                       </p>
                       <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {formatDuration(result.durationMs)}
+                        {formatDuration(result.recordingMeta.durationMs)}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">{formatFileSize(result.size)}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatFileSize(result.recordingMeta.size)}
+                      </p>
                     </div>
                   </div>
                 </div>
+
+                {result.upload.source === "mock" || understanding?.trace.fallback ? (
+                  <div className="rounded-[24px] border border-amber-200 bg-amber-50/80 p-4">
+                    <p className="text-sm font-semibold text-amber-900">Fallback 提示</p>
+                    <p className="mt-2 text-sm leading-6 text-amber-800">
+                      {result.upload.source === "mock" && understanding?.trace.fallback
+                        ? "当前上传与结构化理解都已进入 best-effort fallback，更适合比赛演示与草稿，不代表 live upstream 已完成验收。"
+                        : result.upload.source === "mock"
+                          ? "当前上传链路已进入本地 best-effort fallback，结果适合比赛演示与草稿。"
+                          : "当前结构化理解已进入本地 rule fallback，结果适合比赛演示与草稿。"}
+                    </p>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-slate-900">归属儿童</p>
@@ -321,17 +364,64 @@ export default function VoiceAssistantFAB({
                   <p className="text-sm font-semibold text-slate-900">转写 / 草稿预览</p>
                   <div className="rounded-[24px] border border-indigo-100 bg-indigo-50/70 p-4">
                     <p className="text-sm leading-7 text-slate-700">
-                      {result.response.transcript ?? result.response.draftContent}
+                      {understanding?.transcript.text ??
+                        result.upload.transcript ??
+                        result.upload.draftContent}
                     </p>
                   </div>
                 </div>
 
                 <div className="rounded-[24px] border border-white/70 bg-white p-4 shadow-sm">
-                  <p className="text-sm font-semibold text-slate-900">后续接口占位</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    已保留 `assetId / transcript / nextAction`，后续可直接接到教师 Agent
-                    的流式结果回流。
-                  </p>
+                  <p className="text-sm font-semibold text-slate-900">结构化理解预览</p>
+                  {understanding ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="info">
+                          主分类：{understanding.router_result.primary_category}
+                        </Badge>
+                        <Badge variant="secondary">
+                          草稿项：{understanding.draft_items.length}
+                        </Badge>
+                      </div>
+                      {previewItems.length > 0 ? (
+                        <div className="space-y-2">
+                          {previewItems.map((item) => (
+                            <div
+                              key={`${item.category}-${item.raw_excerpt}`}
+                              className="rounded-2xl border border-slate-100 bg-slate-50/80 p-3"
+                            >
+                              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                {item.category}
+                              </p>
+                              <p className="mt-1 text-sm leading-6 text-slate-700">{item.summary}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm leading-6 text-slate-600">
+                          当前没有可预览的 draft item，但理解链路已返回结构化结果。
+                        </p>
+                      )}
+                      {warnings.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {warnings.map((warning) => (
+                            <Badge key={warning} variant="warning">
+                              {warning}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-sm leading-6 text-slate-600">
+                        T4 结构化理解暂未完成，本次仍可先保存上传结果为草稿。
+                      </p>
+                      {result.understandingError ? (
+                        <Badge variant="warning">{result.understandingError}</Badge>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-3 pb-1">
@@ -345,7 +435,9 @@ export default function VoiceAssistantFAB({
                       className="min-h-12 rounded-2xl"
                       onClick={() =>
                         onSaveAndContinue(
-                          result.response.nextAction as "teacher-agent" | "high-risk-consultation"
+                          result.uiHintNextAction as
+                            | "teacher-agent"
+                            | "high-risk-consultation"
                         )
                       }
                     >

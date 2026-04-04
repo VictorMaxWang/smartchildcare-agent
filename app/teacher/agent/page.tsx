@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useSearchParams } from "next/navigation";
 import { BellRing, BrainCircuit, Mic, ScanSearch, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import TeacherDraftConfirmationPanel from "@/components/teacher/TeacherDraftConfirmationPanel";
 import TeacherAgentHistoryList, { type TeacherAgentHistoryListItem } from "@/components/teacher/TeacherAgentHistoryList";
 import TeacherAgentResultCard from "@/components/teacher/TeacherAgentResultCard";
 import {
@@ -13,6 +14,7 @@ import {
   RoleSplitLayout,
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -25,10 +27,25 @@ import {
   type TeacherAgentResult,
   type TeacherAgentWorkflowType,
 } from "@/lib/agent/teacher-agent";
-import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
+import type { MobileDraft } from "@/lib/ai/types";
+import { buildTeacherVoiceUnderstandFallback } from "@/lib/ai/teacher-voice-understand";
+import {
+  createMobileDraft,
+  getDraftSyncStatusLabel,
+} from "@/lib/mobile/local-draft-cache";
 import { buildReminderItems, getReminderStatusLabel } from "@/lib/mobile/reminders";
 import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
-import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
+import {
+  buildTeacherDraftRecordsFromSource,
+  createTeacherDraftPersistAdapter,
+  isTeacherDraftSourceType,
+  readTeacherDraftConfirmationState,
+} from "@/lib/mobile/teacher-draft-records";
+import {
+  buildMockVoiceDraft,
+  createTeacherVoiceDraftPayload,
+  readTeacherVoiceDraftPayload,
+} from "@/lib/mobile/voice-input";
 import { useApp } from "@/lib/store";
 
 const ACTION_LABELS: Record<TeacherAgentWorkflowType, string> = {
@@ -39,6 +56,16 @@ const ACTION_LABELS: Record<TeacherAgentWorkflowType, string> = {
 
 type HistoryItem = TeacherAgentHistoryListItem & {
   workflow: TeacherAgentWorkflowType;
+};
+
+type TeacherVoiceSourceDraftItem = {
+  draft: MobileDraft;
+  payload: NonNullable<ReturnType<typeof readTeacherVoiceDraftPayload>>;
+  pendingCount: number;
+  confirmedCount: number;
+  discardedCount: number;
+  childName: string;
+  previewSummary?: string;
 };
 
 function isWorkflow(value: string | null): value is TeacherAgentWorkflowType {
@@ -58,6 +85,7 @@ export default function TeacherAgentPage() {
     reminders,
     saveMobileDraft,
     markMobileDraftSyncStatus,
+    persistAppSnapshotNow,
     upsertReminder,
   } = useApp();
   const [scope, setScope] = useState<TeacherAgentMode>("child");
@@ -67,6 +95,14 @@ export default function TeacherAgentPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [, startTransition] = useTransition();
   const preloadHandledRef = useRef<string | null>(null);
+  const queryChildHandledRef = useRef<string | null>(null);
+  const sourceDraftChildHandledRef = useRef<string | null>(null);
+  const [selectedSourceDraftId, setSelectedSourceDraftId] = useState<string | null>(
+    null
+  );
+  const preloadAction = searchParams.get("action");
+  const queryDraftId = searchParams.get("draftId");
+  const queryChildId = searchParams.get("childId");
 
   const classContext = useMemo(
     () =>
@@ -91,12 +127,53 @@ export default function TeacherAgentPage() {
     [classContext, defaultChildId, selectedChildId]
   );
   const latestResult = history.at(-1)?.result ?? null;
+  const teacherRoleDrafts = useMemo(
+    () => mobileDrafts.filter((draft) => draft.targetRole === "teacher"),
+    [mobileDrafts]
+  );
   const teacherDrafts = useMemo(
     () =>
-      mobileDrafts.filter(
+      teacherRoleDrafts.filter(
         (draft) => draft.targetRole === "teacher" && (!selectedChildContext || draft.childId === selectedChildContext.child.id)
       ),
-    [mobileDrafts, selectedChildContext]
+    [selectedChildContext, teacherRoleDrafts]
+  );
+  const sortedTeacherDrafts = useMemo(
+    () =>
+      [...teacherDrafts].sort((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt)
+      ),
+    [teacherDrafts]
+  );
+  const teacherVoiceSourceDrafts = useMemo<TeacherVoiceSourceDraftItem[]>(
+    () =>
+      teacherRoleDrafts
+        .flatMap((draft) => {
+          const payload = readTeacherVoiceDraftPayload(draft.structuredPayload);
+          if (!payload) {
+            return [];
+          }
+
+          const records = buildTeacherDraftRecordsFromSource({ sourceDraft: draft });
+          const childName =
+            payload.childName ??
+            visibleChildren.find((child) => child.id === draft.childId)?.name ??
+            "未识别幼儿";
+
+          return [
+            {
+              draft,
+              payload,
+              pendingCount: records.filter((record) => record.status === "pending").length,
+              confirmedCount: records.filter((record) => record.status === "confirmed").length,
+              discardedCount: records.filter((record) => record.status === "discarded").length,
+              childName,
+              previewSummary: records[0]?.editedSummary?.trim() || records[0]?.summary,
+            } satisfies TeacherVoiceSourceDraftItem,
+          ];
+        })
+        .sort((left, right) => right.draft.updatedAt.localeCompare(left.draft.updatedAt)),
+    [teacherRoleDrafts, visibleChildren]
   );
   const teacherReminders = useMemo(
     () =>
@@ -107,7 +184,6 @@ export default function TeacherAgentPage() {
       ),
     [reminders, selectedChildContext]
   );
-  const preloadAction = searchParams.get("action");
 
   const createVoiceDraft = useCallback(() => {
     if (!selectedChildContext) return;
@@ -132,11 +208,297 @@ export default function TeacherAgentPage() {
     );
   }, [saveMobileDraft, selectedChildContext]);
 
+  const handleCreateMockUnderstandingDraft = useCallback(
+    (transcript: string) => {
+      if (!selectedChildContext) return;
+
+      const understanding = buildTeacherVoiceUnderstandFallback({
+        transcript,
+        childId: selectedChildContext.child.id,
+        childName: selectedChildContext.child.name,
+        attachmentName: "mock-understanding-note.txt",
+        scene: "teacher-agent-t5a-demo",
+        inputMode: "json",
+        asrProvider: "mock-asr",
+        asrMode: "teacher-agent-page-demo",
+        asrSource: "mock",
+        asrConfidence: null,
+        asrFallback: true,
+      });
+
+      saveMobileDraft(
+        createMobileDraft({
+          childId: selectedChildContext.child.id,
+          draftType: "voice",
+          targetRole: "teacher",
+          content: transcript,
+          attachmentName: "mock-understanding-note.txt",
+          syncStatus: "local_pending",
+          structuredPayload: createTeacherVoiceDraftPayload({
+            childName: selectedChildContext.child.name,
+            transcript: understanding.transcript.text,
+            upload: {
+              draftContent: transcript,
+              transcript: understanding.transcript.text,
+              source: "mock",
+              status: "mocked",
+              nextAction: "teacher-agent",
+              raw: {
+                mode: "teacher-draft-confirmation-demo",
+              },
+            },
+            understanding,
+          }),
+        })
+      );
+    },
+    [saveMobileDraft, selectedChildContext]
+  );
+
+  const selectedStructuredDraftSource = useMemo(() => {
+    if (selectedSourceDraftId) {
+      const selectedSource = teacherVoiceSourceDrafts.find(
+        (item) => item.draft.draftId === selectedSourceDraftId
+      );
+      if (selectedSource) {
+        return selectedSource;
+      }
+    }
+
+    if (queryDraftId) {
+      const querySource = teacherVoiceSourceDrafts.find(
+        (item) => item.draft.draftId === queryDraftId
+      );
+      if (querySource) {
+        return querySource;
+      }
+    }
+
+    return (
+      teacherVoiceSourceDrafts.find((item) => item.pendingCount > 0) ??
+      teacherVoiceSourceDrafts[0] ??
+      null
+    );
+  }, [queryDraftId, selectedSourceDraftId, teacherVoiceSourceDrafts]);
+
+  const fallbackTeacherSourceDraft = useMemo(() => {
+    if (selectedStructuredDraftSource) {
+      return null;
+    }
+
+    return (
+      sortedTeacherDrafts.find(
+        (draft) =>
+          isTeacherDraftSourceType(draft.draftType) && draft.content.trim().length > 0
+      ) ?? null
+    );
+  }, [selectedStructuredDraftSource, sortedTeacherDrafts]);
+
+  const fallbackUnderstanding = useMemo(() => {
+    if (!fallbackTeacherSourceDraft) {
+      return null;
+    }
+
+    return buildTeacherVoiceUnderstandFallback({
+      transcript: fallbackTeacherSourceDraft.content,
+      childId: fallbackTeacherSourceDraft.childId,
+      childName:
+        selectedChildContext?.child.id === fallbackTeacherSourceDraft.childId
+          ? selectedChildContext.child.name
+          : undefined,
+      attachmentName: fallbackTeacherSourceDraft.attachmentName,
+      scene: "teacher-agent-t5a-fallback",
+      inputMode: "json",
+      asrProvider: "mock-asr",
+      asrMode:
+        fallbackTeacherSourceDraft.draftType === "ocr"
+          ? "ocr-text-fallback"
+          : "voice-text-fallback",
+      asrSource: "mock",
+      asrConfidence: null,
+      asrFallback: true,
+    });
+  }, [fallbackTeacherSourceDraft, selectedChildContext]);
+
+  const fallbackStructuredPayload = useMemo(() => {
+    if (!fallbackTeacherSourceDraft || !fallbackUnderstanding) {
+      return null;
+    }
+
+    return createTeacherVoiceDraftPayload({
+      childName:
+        selectedChildContext?.child.id === fallbackTeacherSourceDraft.childId
+          ? selectedChildContext.child.name
+          : undefined,
+      transcript: fallbackUnderstanding.transcript.text,
+      upload: {
+        draftContent: fallbackTeacherSourceDraft.content,
+        transcript: fallbackUnderstanding.transcript.text,
+        source: "mock",
+        status: "mocked",
+        nextAction: "teacher-agent",
+        raw: {
+          sourceDraftId: fallbackTeacherSourceDraft.draftId,
+          sourceDraftType: fallbackTeacherSourceDraft.draftType,
+          mode: "teacher-draft-confirmation-fallback",
+        },
+      },
+      understanding: fallbackUnderstanding,
+    });
+  }, [fallbackTeacherSourceDraft, fallbackUnderstanding, selectedChildContext]);
+
+  const draftPayloadOverrides = useMemo(() => {
+    if (!fallbackTeacherSourceDraft || !fallbackStructuredPayload) {
+      return undefined;
+    }
+
+    return {
+      [fallbackTeacherSourceDraft.draftId]: fallbackStructuredPayload,
+    };
+  }, [fallbackStructuredPayload, fallbackTeacherSourceDraft]);
+
+  const teacherDraftPersistAdapter = useMemo(
+    () =>
+      createTeacherDraftPersistAdapter({
+        drafts: mobileDrafts,
+        saveDraft: saveMobileDraft,
+        persistNow: (nextDrafts) =>
+          persistAppSnapshotNow({
+            mobileDrafts: nextDrafts,
+          }),
+        structuredPayloadOverrides: draftPayloadOverrides,
+      }),
+    [
+      draftPayloadOverrides,
+      mobileDrafts,
+      persistAppSnapshotNow,
+      saveMobileDraft,
+    ]
+  );
+
+  const draftConfirmationSource = useMemo(() => {
+    if (selectedStructuredDraftSource) {
+      return {
+        draft: selectedStructuredDraftSource.draft,
+        seed: selectedStructuredDraftSource.payload.t5Seed,
+        transcript:
+          selectedStructuredDraftSource.payload.transcript ||
+          selectedStructuredDraftSource.payload.t5Seed.transcript,
+        childName: selectedStructuredDraftSource.childName,
+        sourceDraftLabel: `${selectedStructuredDraftSource.draft.draftType.toUpperCase()} 草稿`,
+        sourceModeLabel: "已结构化 Seed",
+        sourceSyncStatusLabel: getDraftSyncStatusLabel(
+          selectedStructuredDraftSource.draft.syncStatus
+        ),
+        initialExpandedRecordId: readTeacherDraftConfirmationState(
+          selectedStructuredDraftSource.payload
+        )?.activeRecordId,
+      };
+    }
+
+    if (fallbackTeacherSourceDraft && fallbackStructuredPayload) {
+      return {
+        draft: fallbackTeacherSourceDraft,
+        seed: fallbackStructuredPayload.t5Seed,
+        transcript:
+          fallbackStructuredPayload.transcript || fallbackStructuredPayload.t5Seed.transcript,
+        childName:
+          visibleChildren.find((child) => child.id === fallbackTeacherSourceDraft.childId)?.name ??
+          selectedChildContext?.child.name,
+        sourceDraftLabel: `${fallbackTeacherSourceDraft.draftType.toUpperCase()} 草稿`,
+        sourceModeLabel: "本地 Fallback Understanding",
+        sourceSyncStatusLabel: getDraftSyncStatusLabel(
+          fallbackTeacherSourceDraft.syncStatus
+        ),
+        initialExpandedRecordId: readTeacherDraftConfirmationState(
+          fallbackStructuredPayload
+        )?.activeRecordId,
+      };
+    }
+
+    return null;
+  }, [
+    fallbackStructuredPayload,
+    fallbackTeacherSourceDraft,
+    selectedChildContext?.child.name,
+    selectedStructuredDraftSource,
+    visibleChildren,
+  ]);
+
+  const mockDraftPresets = useMemo(() => {
+    const childName = selectedChildContext?.child.name ?? "当前幼儿";
+
+    return [
+      {
+        id: "health-observation",
+        label: "健康观察",
+        hint: "HEALTH + DIET",
+        transcript: `${childName} 今天午睡前体温 37.6 度，精神一般，喝水偏少，老师先记成重点观察，离园前再复查一次。`,
+      },
+      {
+        id: "emotion-soothing",
+        label: "情绪安抚",
+        hint: "EMOTION + SLEEP",
+        transcript: `${childName} 今天入园后一直哭闹，老师安抚后好一些，但午睡前还需要陪伴，先整理成情绪观察草稿。`,
+      },
+      {
+        id: "leave-follow-up",
+        label: "离园请假",
+        hint: "LEAVE + HEALTH",
+        transcript: `${childName} 下午因为咳嗽提前离园，家长表示今晚会在家观察，明早再反馈是否返园。`,
+      },
+    ];
+  }, [selectedChildContext]);
+
   useEffect(() => {
+    if (queryDraftId) {
+      setSelectedSourceDraftId(queryDraftId);
+    }
+  }, [queryDraftId]);
+
+  useEffect(() => {
+    if (
+      queryChildId &&
+      queryChildHandledRef.current !== queryChildId &&
+      visibleChildren.some((child) => child.id === queryChildId)
+    ) {
+      queryChildHandledRef.current = queryChildId;
+      setSelectedChildId(queryChildId);
+      return;
+    }
+
     if (!selectedChildId || !visibleChildren.some((child) => child.id === selectedChildId)) {
       setSelectedChildId(defaultChildId);
     }
-  }, [defaultChildId, selectedChildId, visibleChildren]);
+  }, [defaultChildId, queryChildId, selectedChildId, visibleChildren]);
+
+  useEffect(() => {
+    const sourceDraft = selectedStructuredDraftSource?.draft ?? fallbackTeacherSourceDraft;
+    if (!sourceDraft?.draftId || !sourceDraft.childId) {
+      return;
+    }
+
+    if (sourceDraftChildHandledRef.current === sourceDraft.draftId) {
+      return;
+    }
+
+    if (!visibleChildren.some((child) => child.id === sourceDraft.childId)) {
+      return;
+    }
+
+    sourceDraftChildHandledRef.current = sourceDraft.draftId;
+    setSelectedChildId(sourceDraft.childId);
+  }, [fallbackTeacherSourceDraft, selectedStructuredDraftSource, visibleChildren]);
+
+  const handleSelectSourceDraft = useCallback(
+    (draft: MobileDraft) => {
+      setSelectedSourceDraftId(draft.draftId);
+      if (draft.childId && visibleChildren.some((child) => child.id === draft.childId)) {
+        setSelectedChildId(draft.childId);
+      }
+    },
+    [visibleChildren]
+  );
 
   const runWorkflow = useCallback(async (workflow: TeacherAgentWorkflowType) => {
     const nextScope: TeacherAgentMode = workflow === "weekly-summary" ? "class" : "child";
@@ -376,13 +738,47 @@ export default function TeacherAgentPage() {
                   </Button>
                 </div>
                 <div className="grid gap-3 lg:grid-cols-2">
-                  {teacherDrafts.length > 0 ? (
-                    teacherDrafts.slice(0, 4).map((draft) => (
+                  {sortedTeacherDrafts.length > 0 ? (
+                    sortedTeacherDrafts.slice(0, 4).map((draft) => (
                       <div key={draft.draftId} className="rounded-3xl border border-slate-100 bg-white p-4">
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-sm font-semibold text-slate-900">{draft.draftType.toUpperCase()} 草稿</p>
                           <span className="text-xs text-slate-500">{getDraftSyncStatusLabel(draft.syncStatus)}</span>
                         </div>
+                        {(() => {
+                          const voicePayload = readTeacherVoiceDraftPayload(draft.structuredPayload);
+                          if (!voicePayload) {
+                            return null;
+                          }
+
+                          return (
+                            <div className="mt-3 space-y-2">
+                              <div className="flex flex-wrap gap-2">
+                                <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-sky-700">
+                                  已结构化
+                                </span>
+                                {voicePayload.understanding?.router_result.primary_category ? (
+                                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
+                                    {voicePayload.understanding.router_result.primary_category}
+                                  </span>
+                                ) : null}
+                                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">
+                                  草稿项 {voicePayload.t5Seed.draft_items.length}
+                                </span>
+                              </div>
+                              {voicePayload.t5Seed.draft_items[0] ? (
+                                <p className="text-xs leading-5 text-slate-500">
+                                  {voicePayload.t5Seed.draft_items[0].summary}
+                                </p>
+                              ) : null}
+                              {voicePayload.t5Seed.warnings.length > 0 ? (
+                                <p className="text-xs leading-5 text-amber-600">
+                                  Warnings: {voicePayload.t5Seed.warnings.join(" / ")}
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                         <p className="mt-2 text-sm leading-6 text-slate-600">{draft.content}</p>
                       </div>
                     ))
@@ -393,6 +789,82 @@ export default function TeacherAgentPage() {
                   )}
                 </div>
               </div>
+            </SectionCard>
+
+            <SectionCard
+              title="草稿确认流"
+              description="先把 understanding 产出的 draft_items 变成逐条确认卡片，再通过 persist adapter 回写到同一个 mobile draft。"
+            >
+              {teacherVoiceSourceDrafts.length > 0 ? (
+                <div className="mb-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">草稿源 {teacherVoiceSourceDrafts.length} 条</Badge>
+                    <Badge variant="warning">
+                      待处理{" "}
+                      {teacherVoiceSourceDrafts.reduce(
+                        (total, item) => total + item.pendingCount,
+                        0
+                      )}{" "}
+                      条
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3">
+                    {teacherVoiceSourceDrafts.map((item) => {
+                      const isSelected =
+                        draftConfirmationSource?.draft.draftId === item.draft.draftId;
+
+                      return (
+                        <button
+                          key={item.draft.draftId}
+                          type="button"
+                          onClick={() => handleSelectSourceDraft(item.draft)}
+                          className={`rounded-3xl border p-4 text-left transition ${
+                            isSelected
+                              ? "border-indigo-200 bg-indigo-50/70"
+                              : "border-slate-100 bg-white hover:border-slate-200"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={isSelected ? "info" : "secondary"}>
+                              {isSelected ? "当前草稿源" : "可切换草稿源"}
+                            </Badge>
+                            <Badge variant="outline">{item.childName}</Badge>
+                            <Badge variant="warning">待确认 {item.pendingCount}</Badge>
+                            <Badge variant="success">已确认 {item.confirmedCount}</Badge>
+                            {item.discardedCount > 0 ? (
+                              <Badge variant="secondary">
+                                已丢弃 {item.discardedCount}
+                              </Badge>
+                            ) : null}
+                            <Badge variant="outline">
+                              {getDraftSyncStatusLabel(item.draft.syncStatus)}
+                            </Badge>
+                          </div>
+                          {item.previewSummary ? (
+                            <p className="mt-3 text-sm leading-6 text-slate-600">
+                              {item.previewSummary}
+                            </p>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <TeacherDraftConfirmationPanel
+                childName={draftConfirmationSource?.childName}
+                sourceDraftId={draftConfirmationSource?.draft.draftId}
+                sourceDraftLabel={draftConfirmationSource?.sourceDraftLabel}
+                sourceModeLabel={draftConfirmationSource?.sourceModeLabel}
+                sourceSyncStatusLabel={draftConfirmationSource?.sourceSyncStatusLabel}
+                sourceTranscript={draftConfirmationSource?.transcript}
+                seed={draftConfirmationSource?.seed ?? null}
+                persistAdapter={teacherDraftPersistAdapter}
+                initialExpandedRecordId={draftConfirmationSource?.initialExpandedRecordId}
+                mockPresets={draftConfirmationSource ? [] : mockDraftPresets}
+                onCreateMockDraft={handleCreateMockUnderstandingDraft}
+              />
             </SectionCard>
 
             <AgentWorkspaceCard

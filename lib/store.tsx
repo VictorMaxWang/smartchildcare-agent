@@ -275,6 +275,13 @@ export interface AddGrowthRecordInput {
   selectedIndicators?: string[];
 }
 
+export interface PersistAppSnapshotResult {
+  status: "saved" | "local_only" | "failed";
+  message: string;
+  persistedAt: string;
+  error?: string;
+}
+
 interface AppContextType {
   demoAccounts: DemoAccount[];
   currentUser: User;
@@ -325,6 +332,9 @@ interface AppContextType {
   upsertConsultation: (consultation: ConsultationResult) => void;
   saveMobileDraft: (draft: MobileDraft) => void;
   markMobileDraftSyncStatus: (draftId: string, syncStatus: MobileDraftSyncStatus) => void;
+  persistAppSnapshotNow: (
+    override?: Partial<AppStateSnapshot>
+  ) => Promise<PersistAppSnapshotResult>;
   upsertReminder: (reminder: ReminderItem) => void;
   updateReminderStatus: (reminderId: string, status: ReminderItem["status"]) => void;
   getChildInterventionCard: (childId: string) => InterventionCard | undefined;
@@ -2511,7 +2521,12 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
   const isAuthenticated = currentUser.id !== UNAUTHENTICATED_USER.id;
   const isDemoUser = isAuthenticated && currentUser.accountKind === "demo";
   const isNormalUser = isAuthenticated && currentUser.accountKind === "normal";
-  const currentStorageNamespace = isNormalUser && currentUser.institutionId ? currentUser.institutionId : null;
+  const currentStorageNamespace =
+    isNormalUser && currentUser.institutionId
+      ? currentUser.institutionId
+      : isDemoUser
+        ? `demo:${currentUser.id}`
+        : null;
 
   const applySnapshot = useCallback((snapshot: AppStateSnapshot) => {
     setChildrenList(snapshot.children);
@@ -2527,31 +2542,38 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     setReminders(snapshot.reminders);
   }, []);
 
-  const remoteSnapshot = useMemo<AppStateSnapshot>(() => ({
-    children: childrenList,
-    attendance: attendanceRecords,
-    meals: mealRecords,
-    growth: growthRecords,
-    feedback: guardianFeedbacks,
-    health: healthCheckRecords,
-    taskCheckIns: taskCheckInRecords,
-    interventionCards,
-    consultations,
-    mobileDrafts,
-    reminders,
-    updatedAt: new Date().toISOString(),
-  }), [
-    childrenList,
-    attendanceRecords,
-    mealRecords,
-    growthRecords,
-    guardianFeedbacks,
-    healthCheckRecords,
-    taskCheckInRecords,
-    interventionCards,
-    consultations,
-    mobileDrafts,
-    reminders,
+  const buildSnapshotWithOverride = useCallback(
+    (override?: Partial<AppStateSnapshot>): AppStateSnapshot => ({
+      children: override?.children ?? childrenList,
+      attendance: override?.attendance ?? attendanceRecords,
+      meals: override?.meals ?? mealRecords,
+      growth: override?.growth ?? growthRecords,
+      feedback: override?.feedback ?? guardianFeedbacks,
+      health: override?.health ?? healthCheckRecords,
+      taskCheckIns: override?.taskCheckIns ?? taskCheckInRecords,
+      interventionCards: override?.interventionCards ?? interventionCards,
+      consultations: override?.consultations ?? consultations,
+      mobileDrafts: override?.mobileDrafts ?? mobileDrafts,
+      reminders: override?.reminders ?? reminders,
+      updatedAt: override?.updatedAt ?? new Date().toISOString(),
+    }),
+    [
+      childrenList,
+      attendanceRecords,
+      mealRecords,
+      growthRecords,
+      guardianFeedbacks,
+      healthCheckRecords,
+      taskCheckInRecords,
+      interventionCards,
+      consultations,
+      mobileDrafts,
+      reminders,
+    ]
+  );
+
+  const remoteSnapshot = useMemo<AppStateSnapshot>(() => buildSnapshotWithOverride(), [
+    buildSnapshotWithOverride,
   ]);
 
   const remoteSnapshotKey = useMemo(() => JSON.stringify(remoteSnapshot), [remoteSnapshot]);
@@ -2626,7 +2648,12 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
 
       if (isDemoUser) {
         lastSyncedSnapshotKeyRef.current = null;
-        applySnapshot(buildFreshDemoSnapshot(getLocalToday()));
+        applySnapshot(
+          readScopedSnapshot(
+            currentStorageNamespace ?? `demo:${currentUser.id}`,
+            buildFreshDemoSnapshot(getLocalToday())
+          )
+        );
         if (active) {
           setDataLoading(false);
         }
@@ -2680,15 +2707,80 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [authLoading, applySnapshot, currentStorageNamespace, isAuthenticated, isDemoUser, isSnapshotEffectivelyEmpty]);
+  }, [authLoading, applySnapshot, currentStorageNamespace, currentUser.id, isAuthenticated, isDemoUser, isSnapshotEffectivelyEmpty]);
+
+  const persistAppSnapshotNow = useCallback(
+    async (override?: Partial<AppStateSnapshot>): Promise<PersistAppSnapshotResult> => {
+      const snapshot = buildSnapshotWithOverride(override);
+      const snapshotKey = JSON.stringify(snapshot);
+      const persistedAt = new Date().toISOString();
+
+      if (currentStorageNamespace) {
+        writeScopedSnapshot(currentStorageNamespace, snapshot);
+      }
+
+      if (!isNormalUser) {
+        return {
+          status: "local_only",
+          message: isDemoUser
+            ? "当前账号仅做本地 fallback 保存。"
+            : "当前账号仅保留本地状态。",
+          persistedAt,
+        };
+      }
+
+      try {
+        const response = await fetch("/api/state", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshot }),
+        });
+
+        if (response.ok) {
+          lastSyncedSnapshotKeyRef.current = snapshotKey;
+          return {
+            status: "saved",
+            message: "已确认并保存。",
+            persistedAt,
+          };
+        }
+
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        return {
+          status: "failed",
+          message: "远端保存失败，已保留本地。",
+          persistedAt,
+          error: data?.error ?? "remote_snapshot_save_failed",
+        };
+      } catch (error) {
+        return {
+          status: "failed",
+          message: "远端保存失败，已保留本地。",
+          persistedAt,
+          error:
+            error instanceof Error
+              ? error.message
+              : "remote_snapshot_save_failed",
+        };
+      }
+    },
+    [
+      buildSnapshotWithOverride,
+      currentStorageNamespace,
+      isDemoUser,
+      isNormalUser,
+    ]
+  );
 
   useEffect(() => {
-    if (authLoading || dataLoading || !isNormalUser || !currentStorageNamespace) {
+    if (authLoading || dataLoading || !currentStorageNamespace) {
       return;
     }
 
     writeScopedSnapshot(currentStorageNamespace, remoteSnapshot);
-  }, [authLoading, currentStorageNamespace, dataLoading, isNormalUser, remoteSnapshot]);
+  }, [authLoading, currentStorageNamespace, dataLoading, remoteSnapshot]);
 
   useEffect(() => {
     if (authLoading || dataLoading || !isNormalUser || lastSyncedSnapshotKeyRef.current === remoteSnapshotKey) {
@@ -3382,6 +3474,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     upsertConsultation,
     saveMobileDraft,
     markMobileDraftSyncStatus,
+    persistAppSnapshotNow,
     upsertReminder,
     updateReminderStatus,
     getChildInterventionCard,
@@ -3436,6 +3529,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     upsertConsultation,
     saveMobileDraft,
     markMobileDraftSyncStatus,
+    persistAppSnapshotNow,
     upsertReminder,
     updateReminderStatus,
     getChildInterventionCard,
