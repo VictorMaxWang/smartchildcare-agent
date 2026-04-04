@@ -4,8 +4,8 @@ import type { WeeklyReportPayload } from "@/lib/ai/types";
 import { forwardBrainRequest } from "@/lib/server/brain-client";
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/agents/reports/weekly");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/reports/weekly");
+  if (brainForward.response) return brainForward.response;
 
   let payload: WeeklyReportPayload | null = null;
 

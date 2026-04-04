@@ -173,6 +173,14 @@ def _build_provider_trace(scaffold: dict[str, Any], provider_result: ProviderTex
     existing = safe_dict(scaffold.get("providerTrace"))
     llm_mode = "real" if provider_result.source == "vivo" and not provider_result.fallback else "mock"
     model = provider_result.model or _coerce_text(safe_dict(provider_result.meta).get("attempted_model")) or settings.vivo_llm_model
+    consultation_source = first_non_empty(
+        [
+            _coerce_text(existing.get("consultationSource")),
+            _coerce_text(scaffold.get("source")),
+        ],
+        "",
+    )
+    fallback_reason = _coerce_text(safe_dict(provider_result.meta).get("reason"))
     return {
         **existing,
         "llm": provider_result.provider or "unknown-llm",
@@ -180,6 +188,11 @@ def _build_provider_trace(scaffold: dict[str, Any], provider_result: ProviderTex
         "source": provider_result.source,
         "model": model,
         "requestId": provider_result.request_id,
+        "transport": "fastapi-brain",
+        "transportSource": "fastapi-brain",
+        "consultationSource": consultation_source,
+        "fallbackReason": fallback_reason,
+        "brainProvider": settings.brain_provider.strip().lower(),
         "fallback": provider_result.fallback,
         "realProvider": provider_result.source == "vivo" and not provider_result.fallback,
         "meta": provider_result.meta or {},
@@ -219,6 +232,11 @@ def _apply_narrative(
         "source": provider_trace["source"],
         "model": provider_trace["model"],
         "requestId": provider_trace["requestId"],
+        "transport": provider_trace["transport"],
+        "transportSource": provider_trace["transportSource"],
+        "consultationSource": provider_trace["consultationSource"],
+        "fallbackReason": provider_trace["fallbackReason"],
+        "brainProvider": provider_trace["brainProvider"],
         "fallback": provider_trace["fallback"],
         "realProvider": provider_trace["realProvider"],
         "memory": result.get("memoryMeta"),
@@ -257,7 +275,7 @@ def _enrich_multimodal_notes(payload: dict[str, Any], result: dict[str, Any]) ->
 
 def _generate_narrative(payload: dict[str, Any], scaffold: dict[str, Any], settings: Settings) -> tuple[dict[str, Any], ProviderTextResult, dict[str, Any]]:
     sections = _memory_sections(payload, scaffold)
-    text_provider = resolve_text_provider(settings, prefer_vivo=True)
+    text_provider = resolve_text_provider(settings)
     prompt = _build_narrative_prompt(payload, scaffold, sections)
     provider_result = text_provider.summarize(prompt=prompt, fallback=_coerce_text(scaffold.get("summary")))
     narrative = first_non_empty(
@@ -313,11 +331,16 @@ async def stream_high_risk_consultation(payload: dict[str, Any], trace_id: str) 
     scaffold = build_mock_high_risk_bundle({**payload, "workflow": "high-risk-consultation"})
     memory_meta = safe_dict(scaffold.get("memoryMeta"))
     sections = _memory_sections(payload, scaffold)
-    prefers_vivo = can_use_vivo_text_provider(settings, prefer_vivo=True)
+    prefers_vivo = can_use_vivo_text_provider(settings)
     provider_preview = {
         "provider": "vivo-llm" if prefers_vivo else "mock-brain",
         "source": "vivo" if prefers_vivo else "mock",
         "model": settings.vivo_llm_model,
+        "transport": "fastapi-brain",
+        "transportSource": "fastapi-brain",
+        "consultationSource": _coerce_text(scaffold.get("source")),
+        "fallbackReason": "",
+        "brainProvider": settings.brain_provider.strip().lower(),
         "fallback": not prefers_vivo,
         "realProvider": prefers_vivo,
     }

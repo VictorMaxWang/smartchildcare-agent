@@ -5,16 +5,20 @@ import {
   type HighRiskConsultationRequestPayload,
 } from "@/lib/agent/high-risk-consultation";
 import { buildInterventionCardFromConsultation } from "@/lib/agent/intervention-card";
-import { buildTeacherChildSuggestionSnapshotWithMemory } from "@/lib/agent/teacher-agent";
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
 import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/input";
+import { buildTeacherChildSuggestionSnapshotWithMemory } from "@/lib/agent/teacher-agent";
 import {
   resolveAsrProvider,
   resolveLlmProvider,
   resolveOcrProvider,
   resolveTtsProvider,
 } from "@/lib/ai/providers";
-import { forwardBrainRequest } from "@/lib/server/brain-client";
+import {
+  createBrainTransportHeaders,
+  forwardBrainRequest,
+  type BrainForwardResult,
+} from "@/lib/server/brain-client";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
 function isRecordArray(value: unknown) {
@@ -37,9 +41,33 @@ function isValidPayload(payload: unknown): payload is HighRiskConsultationReques
   );
 }
 
+function resolveNextLlmSource(provider: string, mode: "mock" | "real") {
+  if (provider === "mock-llm" || mode === "mock") return "mock";
+  if (provider === "dashscope-llm") return "dashscope";
+  return provider.replace(/-llm$/u, "") || "unknown";
+}
+
+function resolveNextLlmModel(provider: string, mode: "mock" | "real") {
+  if (provider === "mock-llm" || mode === "mock") return "mock-local-llm";
+  if (provider === "dashscope-llm") {
+    return process.env.AI_MODEL || process.env.BAILIAN_MODEL || "qwen-plus";
+  }
+  return "";
+}
+
+function buildLocalFallbackHeaders(brainForward: BrainForwardResult) {
+  return createBrainTransportHeaders({
+    transport: "next-json-fallback",
+    targetPath: brainForward.targetPath,
+    upstreamHost: brainForward.upstreamHost,
+    fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
+  });
+}
+
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/agents/consultations/high-risk");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/consultations/high-risk");
+  if (brainForward.response) return brainForward.response;
+  const localFallbackHeaders = buildLocalFallbackHeaders(brainForward);
 
   let payload: HighRiskConsultationRequestPayload | null = null;
 
@@ -47,16 +75,22 @@ export async function POST(request: Request) {
     payload = (await request.json()) as HighRiskConsultationRequestPayload;
   } catch (error) {
     console.error("[AI] Invalid high-risk consultation payload", error);
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400, headers: localFallbackHeaders });
   }
 
   if (!isValidPayload(payload)) {
-    return NextResponse.json({ error: "Invalid high-risk consultation payload" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid high-risk consultation payload" },
+      { status: 400, headers: localFallbackHeaders }
+    );
   }
 
   const { classContext, childContext } = resolveHighRiskConsultationContexts(payload);
   if (!childContext) {
-    return NextResponse.json({ error: "No visible child available for consultation" }, { status: 400 });
+    return NextResponse.json(
+      { error: "No visible child available for consultation" },
+      { status: 400, headers: localFallbackHeaders }
+    );
   }
 
   const autoContext = buildHighRiskConsultationAutoContext({
@@ -69,8 +103,18 @@ export async function POST(request: Request) {
   const ttsProvider = resolveTtsProvider();
 
   const [ocrResult, asrResult] = await Promise.all([
-    payload.imageInput ? ocrProvider.extract({ attachmentName: payload.imageInput.attachmentName, fallbackText: payload.imageInput.content }) : null,
-    payload.voiceInput ? asrProvider.transcribe({ attachmentName: payload.voiceInput.attachmentName, fallbackText: payload.voiceInput.content }) : null,
+    payload.imageInput
+      ? ocrProvider.extract({
+          attachmentName: payload.imageInput.attachmentName,
+          fallbackText: payload.imageInput.content,
+        })
+      : null,
+    payload.voiceInput
+      ? asrProvider.transcribe({
+          attachmentName: payload.voiceInput.attachmentName,
+          fallbackText: payload.voiceInput.content,
+        })
+      : null,
   ]);
 
   const teacherSignals = [
@@ -78,14 +122,15 @@ export async function POST(request: Request) {
     ocrResult?.output.text,
     asrResult?.output.transcript,
   ].filter((item): item is string => Boolean(item));
+
   const memoryContext = await buildMemoryContextForPrompt({
     childId: childContext.child.id,
     workflowType: "high-risk-consultation",
     query: [...autoContext.focusReasons, ...teacherSignals].join(" "),
     request,
   });
-  const suggestionSnapshot = buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext);
 
+  const suggestionSnapshot = buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext);
   const consultationInput = buildConsultationInputFromSnapshot({
     snapshot: suggestionSnapshot,
     latestFeedback: childContext.latestFeedback
@@ -104,14 +149,17 @@ export async function POST(request: Request) {
     priorityHint: {
       level: "P1",
       score: 92,
-      reason: "教师主动发起高风险会诊，需进入闭环评估。",
+      reason: "老师主动发起高风险会诊，需要进入闭环评估。",
     },
     memoryContext,
   });
 
   const consultation = await maybeRunHighRiskConsultation(consultationInput);
   if (!consultation) {
-    return NextResponse.json({ error: "Failed to generate consultation result" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to generate consultation result" },
+      { status: 500, headers: localFallbackHeaders }
+    );
   }
 
   const llmResult = await llmProvider.generateHighRiskConsultationNarrative({
@@ -152,6 +200,7 @@ export async function POST(request: Request) {
       },
     ],
   };
+
   const interventionCard = buildInterventionCardFromConsultation({
     targetChildId: childContext.child.id,
     childName: childContext.child.name,
@@ -159,23 +208,41 @@ export async function POST(request: Request) {
     generatedAt: nextConsultation.generatedAt,
   });
 
+  const llmSource = resolveNextLlmSource(llmResult.provider, llmResult.mode);
+  const llmModel = resolveNextLlmModel(llmResult.provider, llmResult.mode);
+  const providerTrace = {
+    llm: llmResult.provider,
+    provider: llmResult.provider,
+    source: llmSource,
+    model: llmModel,
+    requestId: "",
+    transport: "next-json-fallback",
+    transportSource: "next-server",
+    consultationSource: String(nextConsultation.source ?? ""),
+    fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
+    realProvider: false,
+    fallback: true,
+    ocr: ocrResult?.provider ?? "unused",
+    asr: asrResult?.provider ?? "unused",
+    tts: ttsResult.provider,
+    modes: {
+      llm: llmResult.mode,
+      ocr: ocrResult?.mode ?? "mock",
+      asr: asrResult?.mode ?? "mock",
+      tts: ttsResult.mode,
+    },
+  };
+
   return NextResponse.json(
     {
       ...nextConsultation,
       interventionCard,
       autoContext,
-      providerTrace: {
-        llm: llmResult.provider,
-        ocr: ocrResult?.provider ?? "unused",
-        asr: asrResult?.provider ?? "unused",
-        tts: ttsResult.provider,
-        modes: {
-          llm: llmResult.mode,
-          ocr: ocrResult?.mode ?? "mock",
-          asr: asrResult?.mode ?? "mock",
-          tts: ttsResult.mode,
-        },
-      },
+      provider: providerTrace.provider,
+      model: providerTrace.model,
+      realProvider: false,
+      fallback: true,
+      providerTrace,
       audioNarrationScript: ttsResult.output.script,
       multimodalNotes: {
         imageText: ocrResult?.output.text,
@@ -183,6 +250,6 @@ export async function POST(request: Request) {
         teacherNote: payload.teacherNote?.trim() || "",
       },
     },
-    { status: 200 }
+    { status: 200, headers: localFallbackHeaders }
   );
 }

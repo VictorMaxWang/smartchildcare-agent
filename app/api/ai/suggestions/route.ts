@@ -6,8 +6,8 @@ import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinat
 import { forwardBrainRequest } from "@/lib/server/brain-client";
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/agents/parent/suggestions");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/parent/suggestions");
+  if (brainForward.response) return brainForward.response;
 
   let payload: AiSuggestionPayload | null = null;
 

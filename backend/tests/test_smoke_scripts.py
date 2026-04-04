@@ -41,21 +41,33 @@ def build_result(**overrides):
 
 
 def test_validate_strict_accepts_real_vivo_result():
-    passed, reason = vivo_smoke.validate_strict(build_result())
+    passed, reason = vivo_smoke.validate_strict(build_result(), brain_provider="vivo")
     assert passed is True
     assert reason == ""
 
 
 def test_validate_strict_rejects_mock_fallback():
-    passed, reason = vivo_smoke.validate_strict(build_result(source="mock", fallback=True))
+    passed, reason = vivo_smoke.validate_strict(
+        build_result(source="mock", fallback=True),
+        brain_provider="vivo",
+    )
     assert passed is False
     assert "source=vivo" in reason
 
 
 def test_validate_strict_rejects_missing_upstream_markers():
-    passed, reason = vivo_smoke.validate_strict(build_result(usage=None, raw={}))
+    passed, reason = vivo_smoke.validate_strict(
+        build_result(usage=None, raw={}),
+        brain_provider="vivo",
+    )
     assert passed is False
     assert "missing upstream vivo markers" in reason
+
+
+def test_validate_strict_rejects_non_vivo_brain_provider():
+    passed, reason = vivo_smoke.validate_strict(build_result(), brain_provider="mock")
+    assert passed is False
+    assert "brain_provider='vivo'" in reason
 
 
 def build_stream_events():
@@ -75,7 +87,14 @@ def build_stream_events():
                 "traceId": "trace-123",
                 "realProvider": True,
                 "fallback": False,
-                "providerTrace": {"source": "vivo", "model": "Volc-DeepSeek-V3.2"},
+                "providerTrace": {
+                    "source": "vivo",
+                    "model": "Volc-DeepSeek-V3.2",
+                    "requestId": "req-123",
+                    "transport": "fastapi-brain",
+                    "transportSource": "fastapi-brain",
+                    "brainProvider": "vivo",
+                },
                 "memoryMeta": {
                     "memory_context_used": True,
                     "usedSources": ["agent_state_snapshots", "agent_trace_log"],
@@ -109,6 +128,10 @@ def test_summarize_events_extracts_provider_and_memory_fields():
     ]
     assert summary["provider_source"] == "vivo"
     assert summary["provider_model"] == "Volc-DeepSeek-V3.2"
+    assert summary["request_id"] == "req-123"
+    assert summary["transport"] == "fastapi-brain"
+    assert summary["transport_source"] == "fastapi-brain"
+    assert summary["brain_provider"] == "vivo"
     assert summary["real_provider"] is True
     assert summary["fallback"] is False
     assert summary["memory_context_used"] is True
@@ -127,7 +150,12 @@ def test_summarize_events_rejects_missing_required_stage():
 def test_evaluate_provider_requires_real_vivo_when_requested():
     issues = consultation_smoke.evaluate_provider(
         {
+            "brain_provider": "mock",
             "provider_source": "mock",
+            "provider_model": "",
+            "request_id": "",
+            "transport": "next-stream-fallback",
+            "transport_source": "next-server",
             "real_provider": False,
             "fallback": True,
         },
@@ -135,7 +163,11 @@ def test_evaluate_provider_requires_real_vivo_when_requested():
     )
 
     assert issues == [
+        "expected brain_provider='vivo', got 'mock'",
         "expected provider_source='vivo', got 'mock'",
+        "expected provider_model to be non-empty",
+        "expected request_id to be non-empty",
+        "expected transport_source='fastapi-brain' or transport='fastapi-brain'",
         "expected real_provider=true",
         "expected fallback=false",
     ]

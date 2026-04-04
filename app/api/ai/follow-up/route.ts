@@ -7,8 +7,8 @@ import { forwardBrainRequest } from "@/lib/server/brain-client";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/agents/parent/follow-up");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/parent/follow-up");
+  if (brainForward.response) return brainForward.response;
 
   let payload: AiFollowUpPayload | null = null;
 

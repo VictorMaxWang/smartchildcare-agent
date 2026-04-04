@@ -95,11 +95,15 @@ def read_health(base_url: str, timeout: float) -> dict[str, Any]:
                 "url": url,
                 "environment": data.get("environment"),
                 "providers": data.get("providers"),
+                "brain_provider": data.get("brain_provider"),
+                "llm_provider_selected": data.get("llm_provider_selected"),
+                "provider_assertion_scope": data.get("provider_assertion_scope"),
                 "configured_memory_backend": data.get("configured_memory_backend"),
                 "memory_backend": data.get("memory_backend"),
                 "degraded": data.get("degraded"),
                 "degradation_reasons": data.get("degradation_reasons"),
                 "vivo_configured": data.get("vivo_configured"),
+                "vivo_credentials_configured": data.get("vivo_credentials_configured"),
             }
         except Exception as error:
             errors.append(f"{path}:{error}")
@@ -174,6 +178,12 @@ def normalize_provider_trace(done_data: dict[str, Any]) -> dict[str, Any]:
     provider_trace = as_dict(done_data.get("providerTrace"))
     source = as_string(first_present(provider_trace, "source")) or "unknown"
     model = as_string(first_present(provider_trace, "model"))
+    request_id = as_string(first_present(provider_trace, "requestId", "request_id"))
+    transport = as_string(first_present(provider_trace, "transport"))
+    transport_source = as_string(first_present(provider_trace, "transportSource")) or transport
+    consultation_source = as_string(first_present(provider_trace, "consultationSource"))
+    fallback_reason = as_string(first_present(provider_trace, "fallbackReason"))
+    brain_provider = as_string(first_present(provider_trace, "brainProvider"))
     real_provider = bool(first_present(done_data, "realProvider", "real_provider"))
     if "realProvider" not in done_data and "real_provider" not in done_data:
         real_provider = bool(first_present(provider_trace, "realProvider", "real_provider"))
@@ -183,6 +193,12 @@ def normalize_provider_trace(done_data: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider_source": source,
         "provider_model": model,
+        "request_id": request_id,
+        "transport": transport,
+        "transport_source": transport_source,
+        "consultation_source": consultation_source,
+        "fallback_reason": fallback_reason,
+        "brain_provider": brain_provider,
         "real_provider": real_provider,
         "fallback": fallback,
     }
@@ -248,8 +264,18 @@ def evaluate_provider(summary: dict[str, Any], *, require_real_provider: bool) -
         return []
 
     issues: list[str] = []
+    if summary.get("brain_provider") != "vivo":
+        issues.append(f"expected brain_provider='vivo', got {summary.get('brain_provider')!r}")
     if summary.get("provider_source") != "vivo":
         issues.append(f"expected provider_source='vivo', got {summary.get('provider_source')!r}")
+    if not summary.get("provider_model"):
+        issues.append("expected provider_model to be non-empty")
+    if not summary.get("request_id"):
+        issues.append("expected request_id to be non-empty")
+    if summary.get("transport") != "fastapi-brain" and summary.get("transport_source") != "fastapi-brain":
+        issues.append(
+            "expected transport_source='fastapi-brain' or transport='fastapi-brain'"
+        )
     if not summary.get("real_provider"):
         issues.append("expected real_provider=true")
     if summary.get("fallback"):
@@ -323,6 +349,7 @@ def main() -> int:
 
         first_run = summarize_events(first_events)
         second_run = summarize_events(second_events)
+        second_run["brain_provider"] = second_run["brain_provider"] or as_string(health.get("brain_provider"))
 
         memory_context_payload: dict[str, Any] | None = None
         memory_context_error: str | None = None
@@ -353,6 +380,12 @@ def main() -> int:
             "stage_sequence": second_run["stage_sequence"],
             "provider_source": second_run["provider_source"],
             "provider_model": second_run["provider_model"],
+            "request_id": second_run["request_id"],
+            "transport": second_run["transport"],
+            "transport_source": second_run["transport_source"],
+            "consultation_source": second_run["consultation_source"],
+            "fallback_reason": second_run["fallback_reason"],
+            "brain_provider": second_run["brain_provider"],
             "real_provider": second_run["real_provider"],
             "fallback": second_run["fallback"],
             "memory_check": memory_result["memory_check"],

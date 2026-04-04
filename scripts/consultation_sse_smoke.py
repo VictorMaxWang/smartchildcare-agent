@@ -15,10 +15,11 @@ def print_wrapper_help() -> int:
     print(
         "\n".join(
             [
-                "Usage: python scripts/consultation_sse_smoke.py [--runner docker|local-source] [--env-file PATH] [-- ...backend args]",
+                "Usage: python scripts/consultation_sse_smoke.py [--runner docker|local-source] [--compose-service NAME] [--env-file PATH] [-- ...backend args]",
                 "",
                 "Wrapper options:",
                 "  --runner docker|local-source   Default: docker",
+                "  --compose-service NAME         Default: backend",
                 "  --env-file PATH                Only applied for --runner local-source",
                 "",
                 "All other arguments are forwarded to backend/scripts/consultation_sse_smoke.py.",
@@ -30,9 +31,10 @@ def print_wrapper_help() -> int:
     return 0
 
 
-def split_args(argv: list[str]) -> tuple[str, str | None, list[str]]:
+def split_args(argv: list[str]) -> tuple[str, str | None, str, list[str]]:
     runner = "docker"
     env_file: str | None = None
+    compose_service = os.environ.get("DOCKER_SERVICE") or os.environ.get("SMARTCHILDCARE_DOCKER_SERVICE") or "backend"
     forwarded: list[str] = []
 
     index = 0
@@ -55,6 +57,12 @@ def split_args(argv: list[str]) -> tuple[str, str | None, list[str]]:
             runner = argv[index + 1]
             index += 2
             continue
+        if current == "--compose-service":
+            if index + 1 >= len(argv):
+                raise SystemExit("--compose-service requires a value")
+            compose_service = argv[index + 1]
+            index += 2
+            continue
         if current == "--env-file":
             if index + 1 >= len(argv):
                 raise SystemExit("--env-file requires a value")
@@ -67,7 +75,7 @@ def split_args(argv: list[str]) -> tuple[str, str | None, list[str]]:
     if runner not in {"docker", "local-source"}:
         raise SystemExit(f"unsupported runner: {runner}")
 
-    return runner, env_file, forwarded
+    return runner, env_file, compose_service, forwarded
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -81,20 +89,20 @@ def load_env_file(path: Path) -> dict[str, str]:
     return env_updates
 
 
-def build_command(runner: str, forwarded: list[str]) -> list[str]:
+def build_command(runner: str, forwarded: list[str], compose_service: str) -> list[str]:
     if runner == "docker":
-        return ["docker", "compose", "exec", "-T", "brain", "python", DOCKER_SCRIPT, *forwarded]
+        return ["docker", "compose", "exec", "-T", compose_service, "python", DOCKER_SCRIPT, *forwarded]
     return [sys.executable, str(BACKEND_SCRIPT), *forwarded]
 
 
 def main() -> int:
-    runner, env_file, forwarded = split_args(sys.argv[1:])
+    runner, env_file, compose_service, forwarded = split_args(sys.argv[1:])
     env = os.environ.copy()
 
     if env_file and runner == "local-source":
         env.update(load_env_file((REPO_ROOT / env_file).resolve() if not Path(env_file).is_absolute() else Path(env_file)))
 
-    command = build_command(runner, forwarded)
+    command = build_command(runner, forwarded, compose_service)
     completed = subprocess.run(command, cwd=REPO_ROOT, env=env, check=False)
     return completed.returncode
 

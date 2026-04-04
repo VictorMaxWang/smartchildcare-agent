@@ -49,8 +49,8 @@ function isValidPayload(payload: unknown): payload is TeacherAgentRequestPayload
 }
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/agents/teacher/run");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/teacher/run");
+  if (brainForward.response) return brainForward.response;
 
   let payload: TeacherAgentRequestPayload | null = null;
 

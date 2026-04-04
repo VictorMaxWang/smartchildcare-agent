@@ -48,6 +48,11 @@ export interface ConsultationProviderTrace {
   source?: string;
   model?: string;
   requestId?: string;
+  transport?: string;
+  transportSource?: string;
+  consultationSource?: string;
+  fallbackReason?: string;
+  brainProvider?: string;
   realProvider?: boolean;
   fallback?: boolean;
   [key: string]: unknown;

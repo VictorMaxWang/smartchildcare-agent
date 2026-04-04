@@ -22,8 +22,12 @@ def test_health():
     assert body["status"] == "ok"
     assert body["service"] == "SmartChildcare Agent Brain"
     assert body["providers"]["llm"] in {"mock", "vivo"}
+    assert body["brain_provider"] in {"mock", "vivo"}
+    assert body["llm_provider_selected"] in {"mock-brain", "vivo-llm"}
+    assert body["provider_assertion_scope"] == "configuration_only"
     assert body["providers"]["ocr"] == "mock"
     assert body["memory_backend"] in {"sqlite", "memory", "mysql"}
+    assert isinstance(body["vivo_credentials_configured"], bool)
 
 
 def test_root_health_alias():
@@ -32,6 +36,7 @@ def test_root_health_alias():
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "SmartChildcare Agent Brain"
+    assert body["provider_assertion_scope"] == "configuration_only"
 
 
 def test_health_falls_back_from_mysql_to_sqlite_when_mysql_url_missing(tmp_path, monkeypatch):

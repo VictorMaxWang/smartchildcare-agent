@@ -4,7 +4,7 @@
 
 - 服务器：腾讯云香港轻量服务器 Linux VPS
 - 公网 IP：`150.109.77.178`
-- 域名：`api-staging.smartchildcare.cn`
+- 域名：`api-staging.smartchildcareagent.cn`
 - 拓扑：`docker-compose.yml` + `Caddyfile`
 - 前端：继续留在 Vercel 或现有前端部署平台
 
@@ -27,7 +27,7 @@ staging 只启动两个容器：
 
 1. 浏览器继续访问前端站点。
 2. 前端服务端桥接仍走 `BRAIN_API_BASE_URL`。
-3. `BRAIN_API_BASE_URL` 指向 `https://api-staging.smartchildcare.cn`。
+3. `BRAIN_API_BASE_URL` 指向 `https://api-staging.smartchildcareagent.cn`。
 4. Caddy 反代到容器网络内的 `backend:8000`。
 
 为什么保持这条路径：
@@ -68,7 +68,7 @@ ssh ubuntu@150.109.77.178
 
 新增 A 记录：
 
-- `api-staging.smartchildcare.cn -> 150.109.77.178`
+- `api-staging.smartchildcareagent.cn -> 150.109.77.178`
 
 注意：
 
@@ -128,7 +128,7 @@ MYSQL_URL=
 前端桥接相关变量也放在同一份根目录 `.env.release`：
 
 ```env
-BRAIN_API_BASE_URL=https://api-staging.smartchildcare.cn
+BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn
 NEXT_PUBLIC_BACKEND_BASE_URL=
 BRAIN_API_TIMEOUT_MS=20000
 ```
@@ -197,7 +197,7 @@ docker compose down
 外部检查：
 
 ```bash
-curl https://api-staging.smartchildcare.cn/api/v1/health
+curl https://api-staging.smartchildcareagent.cn/api/v1/health
 ```
 
 容器内检查：
@@ -253,7 +253,7 @@ python3 scripts/consultation_sse_smoke.py --runner docker --base-url http://127.
 
 ```bash
 curl -N -H "Accept: text/event-stream" -H "Content-Type: application/json" \
-  -X POST https://api-staging.smartchildcare.cn/api/v1/agents/consultations/high-risk/stream \
+-X POST https://api-staging.smartchildcareagent.cn/api/v1/agents/consultations/high-risk/stream \
   -d '{
     "targetChildId":"stage-demo-child",
     "teacherNote":"need stream verification on staging",
@@ -289,7 +289,7 @@ curl -N -H "Accept: text/event-stream" -H "Content-Type: application/json" \
 前端部署平台至少设置：
 
 ```env
-BRAIN_API_BASE_URL=https://api-staging.smartchildcare.cn
+BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn
 ```
 
 保持为空，除非你明确需要 UI 上显示 backend 源：
@@ -301,7 +301,7 @@ NEXT_PUBLIC_BACKEND_BASE_URL=
 重要提醒：
 
 - 只测前端页面不够，因为 Next.js 有 fallback 逻辑。
-- backend 真正可用，必须直接测 `api-staging.smartchildcare.cn` 的 health 和 consultation SSE。
+- backend 真正可用，必须直接测 `api-staging.smartchildcareagent.cn` 的 health 和 consultation SSE。
 
 ## 11. SQLite / Memory Fallback 风险
 
@@ -349,7 +349,7 @@ docker compose up -d --build
 docker compose ps
 docker compose logs -f backend
 docker compose logs -f caddy
-curl https://api-staging.smartchildcare.cn/api/v1/health
+curl https://api-staging.smartchildcareagent.cn/api/v1/health
 python3 scripts/vivo_llm_smoke.py --runner docker --strict
 python3 scripts/consultation_sse_smoke.py --runner docker --base-url http://127.0.0.1:8000 --memory-check best-effort
 ```
@@ -357,6 +357,6 @@ python3 scripts/consultation_sse_smoke.py --runner docker --base-url http://127.
 ## 13. 仍需人工完成
 
 - 腾讯云安全组或防火墙开放 `22`、`80`、`443`
-- `api-staging.smartchildcare.cn` 的 A 记录指向 `150.109.77.178`
+- `api-staging.smartchildcareagent.cn` 的 A 记录指向 `150.109.77.178`
 - 服务器根目录 `.env.release` 填入真实 `VIVO_APP_ID` / `VIVO_APP_KEY`
-- 前端部署平台设置 `BRAIN_API_BASE_URL=https://api-staging.smartchildcare.cn`
+- 前端部署平台设置 `BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn`

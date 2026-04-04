@@ -11,6 +11,7 @@ TIMEOUT="${TIMEOUT:-20}"
 MEMORY_CHECK="${MEMORY_CHECK:-best-effort}"
 REQUIRE_REAL_PROVIDER="${REQUIRE_REAL_PROVIDER:-1}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+DOCKER_SERVICE="${DOCKER_SERVICE:-backend}"
 BASE_URL="${BASE_URL%/}"
 
 health_output="$(mktemp)"
@@ -64,6 +65,7 @@ health_status="fail"
 vivo_status="fail"
 consultation_status="fail"
 memory_status="unknown"
+transport_status="unknown"
 overall_status=0
 
 print_header "1. health"
@@ -87,7 +89,7 @@ fi
 print_output "$health_output"
 
 print_header "2. vivo_llm strict"
-if "$PYTHON_BIN" scripts/vivo_llm_smoke.py --runner docker --strict >"$vivo_output" 2>&1; then
+if "$PYTHON_BIN" scripts/vivo_llm_smoke.py --runner docker --compose-service "$DOCKER_SERVICE" --strict >"$vivo_output" 2>&1; then
   vivo_status="real"
 else
   overall_status=1
@@ -103,6 +105,8 @@ consultation_args=(
   "scripts/consultation_sse_smoke.py"
   "--runner"
   "docker"
+  "--compose-service"
+  "$DOCKER_SERVICE"
   "--base-url"
   "$BASE_URL"
   "--child-id"
@@ -125,6 +129,7 @@ else
   overall_status=1
 fi
 memory_status="$(read_json_field "$consultation_output" "memory_check")"
+transport_status="$(read_json_field "$consultation_output" "transport")"
 print_output "$consultation_output"
 
 print_header "4. teacher walkthrough"
@@ -134,6 +139,7 @@ print_header "Summary"
 printf '%s\n' "health: $health_status"
 printf '%s\n' "vivo_strict: $vivo_status"
 printf '%s\n' "consultation_sse: $consultation_status"
+printf '%s\n' "transport: $transport_status"
 printf '%s\n' "memory: $memory_status"
 
 exit "$overall_status"

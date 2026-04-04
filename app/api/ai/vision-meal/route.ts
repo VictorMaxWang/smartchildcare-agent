@@ -21,8 +21,8 @@ function buildFallbackFoods(): VisionDetectedFood[] {
 }
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/multimodal/vision-meal");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/multimodal/vision-meal");
+  if (brainForward.response) return brainForward.response;
 
   const configuredModel = process.env.AI_VISION_MODEL || "qwen3-vl-plus";
   let payload: VisionMealPayload | null = null;

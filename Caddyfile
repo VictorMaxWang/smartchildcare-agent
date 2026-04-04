@@ -17,7 +17,7 @@
 	}
 }
 
-api-staging.smartchildcare.cn {
+api-staging.smartchildcareagent.cn {
 	import backend_proxy
 }
 

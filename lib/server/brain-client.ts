@@ -1,13 +1,109 @@
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+export const SMARTCHILDCARE_TRANSPORT_HEADER = "x-smartchildcare-transport";
+export const SMARTCHILDCARE_TARGET_HEADER = "x-smartchildcare-target";
+export const SMARTCHILDCARE_FALLBACK_REASON_HEADER = "x-smartchildcare-fallback-reason";
+export const SMARTCHILDCARE_UPSTREAM_HOST_HEADER = "x-smartchildcare-upstream-host";
+
+export type BrainTransport =
+  | "remote-brain-proxy"
+  | "next-json-fallback"
+  | "next-stream-fallback";
+
+export interface BrainForwardResult {
+  response: Response | null;
+  targetPath: string;
+  upstreamHost: string | null;
+  fallbackReason: string | null;
+}
+
 function normalizeBaseUrl(value?: string | null) {
   const trimmed = value?.trim();
   if (!trimmed) return null;
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
+function sanitizeReasonToken(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return normalized.replace(/^-+|-+$/g, "") || "unknown";
+}
+
+function resolveUpstreamHost(baseUrl: string | null) {
+  if (!baseUrl) return null;
+
+  try {
+    return new URL(baseUrl).host || null;
+  } catch {
+    return null;
+  }
+}
+
+function fallbackReasonFromError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "brain-proxy-timeout";
+  }
+  if (error instanceof Error) {
+    return `brain-fetch-${sanitizeReasonToken(error.name || "error")}`;
+  }
+  return "brain-fetch-error";
+}
+
+function buildTransportHeaders({
+  transport,
+  targetPath,
+  upstreamHost,
+  fallbackReason,
+}: {
+  transport: BrainTransport;
+  targetPath: string;
+  upstreamHost?: string | null;
+  fallbackReason?: string | null;
+}) {
+  const headers = new Headers();
+  headers.set(SMARTCHILDCARE_TRANSPORT_HEADER, transport);
+  headers.set(SMARTCHILDCARE_TARGET_HEADER, targetPath);
+  if (upstreamHost) headers.set(SMARTCHILDCARE_UPSTREAM_HOST_HEADER, upstreamHost);
+  if (fallbackReason) headers.set(SMARTCHILDCARE_FALLBACK_REASON_HEADER, fallbackReason);
+  return headers;
+}
+
+function mergeHeaders(base: HeadersInit, extra?: HeadersInit) {
+  const headers = new Headers(base);
+  if (!extra) return headers;
+
+  new Headers(extra).forEach((value, key) => {
+    headers.set(key, value);
+  });
+  return headers;
+}
+
 export function getBrainBaseUrl() {
-  return normalizeBaseUrl(process.env.BRAIN_API_BASE_URL ?? process.env.NEXT_PUBLIC_BACKEND_BASE_URL);
+  return normalizeBaseUrl(
+    process.env.BRAIN_API_BASE_URL ?? process.env.NEXT_PUBLIC_BACKEND_BASE_URL
+  );
+}
+
+export function createBrainTransportHeaders({
+  transport,
+  targetPath,
+  upstreamHost,
+  fallbackReason,
+}: {
+  transport: BrainTransport;
+  targetPath: string;
+  upstreamHost?: string | null;
+  fallbackReason?: string | null;
+}) {
+  return buildTransportHeaders({ transport, targetPath, upstreamHost, fallbackReason });
+}
+
+export function readBrainTransportHeaders(headers: Headers) {
+  return {
+    transport: headers.get(SMARTCHILDCARE_TRANSPORT_HEADER),
+    targetPath: headers.get(SMARTCHILDCARE_TARGET_HEADER),
+    upstreamHost: headers.get(SMARTCHILDCARE_UPSTREAM_HOST_HEADER),
+    fallbackReason: headers.get(SMARTCHILDCARE_FALLBACK_REASON_HEADER),
+  };
 }
 
 function getBrainTimeoutMs() {
@@ -43,12 +139,31 @@ function buildForwardHeaders(request: Request) {
 }
 
 function shouldFallback(response: Response) {
-  return response.status === 404 || response.status === 405 || response.status === 501 || response.status >= 500;
+  return (
+    response.status === 404 ||
+    response.status === 405 ||
+    response.status === 501 ||
+    response.status >= 500
+  );
 }
 
-export async function forwardBrainRequest(request: Request, targetPath: string) {
+export async function forwardBrainRequest(
+  request: Request,
+  targetPath: string
+): Promise<BrainForwardResult> {
   const baseUrl = getBrainBaseUrl();
-  if (!baseUrl) return null;
+  const upstreamHost = resolveUpstreamHost(baseUrl);
+  if (!baseUrl) {
+    console.warn(
+      `[BRAIN_PROXY] Falling back for ${targetPath}: BRAIN_API_BASE_URL is not configured.`
+    );
+    return {
+      response: null,
+      targetPath,
+      upstreamHost,
+      fallbackReason: "brain-base-url-missing",
+    };
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), getBrainTimeoutMs());
@@ -58,16 +173,25 @@ export async function forwardBrainRequest(request: Request, targetPath: string) 
     const proxiedResponse = await fetch(`${baseUrl}${targetPath}`, {
       method,
       headers: buildForwardHeaders(request),
-      body: method === "GET" || method === "HEAD" ? undefined : await request.clone().arrayBuffer(),
+      body:
+        method === "GET" || method === "HEAD"
+          ? undefined
+          : await request.clone().arrayBuffer(),
       cache: "no-store",
       signal: controller.signal,
     });
 
     if (shouldFallback(proxiedResponse)) {
+      const fallbackReason = `brain-status-${proxiedResponse.status}`;
       console.warn(
-        `[BRAIN_PROXY] Falling back to Next handler for ${targetPath} after backend returned ${proxiedResponse.status}.`
+        `[BRAIN_PROXY] Falling back for ${targetPath}: backend returned ${proxiedResponse.status} (${fallbackReason}).`
       );
-      return null;
+      return {
+        response: null,
+        targetPath,
+        upstreamHost,
+        fallbackReason,
+      };
     }
 
     const responseHeaders = new Headers();
@@ -77,27 +201,57 @@ export async function forwardBrainRequest(request: Request, targetPath: string) 
     const cacheControl = proxiedResponse.headers.get("cache-control");
     if (cacheControl) responseHeaders.set("cache-control", cacheControl);
 
-    return new Response(proxiedResponse.body, {
-      status: proxiedResponse.status,
-      statusText: proxiedResponse.statusText,
-      headers: responseHeaders,
+    const transportHeaders = buildTransportHeaders({
+      transport: "remote-brain-proxy",
+      targetPath,
+      upstreamHost,
     });
+    transportHeaders.forEach((value, key) => {
+      responseHeaders.set(key, value);
+    });
+
+    console.info(
+      `[BRAIN_PROXY] Remote brain proxy succeeded for ${targetPath} via ${upstreamHost ?? "unknown-upstream"}.`
+    );
+
+    return {
+      response: new Response(proxiedResponse.body, {
+        status: proxiedResponse.status,
+        statusText: proxiedResponse.statusText,
+        headers: responseHeaders,
+      }),
+      targetPath,
+      upstreamHost,
+      fallbackReason: null,
+    };
   } catch (error) {
-    console.warn(`[BRAIN_PROXY] Failed to reach backend for ${targetPath}.`, error);
-    return null;
+    const fallbackReason = fallbackReasonFromError(error);
+    console.warn(
+      `[BRAIN_PROXY] Falling back for ${targetPath}: ${fallbackReason}.`,
+      error
+    );
+    return {
+      response: null,
+      targetPath,
+      upstreamHost,
+      fallbackReason,
+    };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function createSseResponse(body: ReadableStream<Uint8Array>) {
+function createSseResponse(body: ReadableStream<Uint8Array>, extraHeaders?: HeadersInit) {
   return new Response(body, {
     status: 200,
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
+    headers: mergeHeaders(
+      {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+      extraHeaders
+    ),
   });
 }
 
@@ -119,6 +273,11 @@ export function createMockBrainStreamResponse() {
           }, index * 80);
         });
       },
+    }),
+    buildTransportHeaders({
+      transport: "next-stream-fallback",
+      targetPath: "/api/v1/stream/agent",
+      fallbackReason: "brain-stream-mock-fallback",
     })
   );
 }

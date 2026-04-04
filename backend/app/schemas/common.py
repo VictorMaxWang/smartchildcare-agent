@@ -29,11 +29,15 @@ class HealthResponse(BaseModel):
     version: str
     environment: str
     providers: dict[str, str] = Field(default_factory=dict)
+    brain_provider: str | None = None
+    llm_provider_selected: str | None = None
+    provider_assertion_scope: Literal["configuration_only"] = "configuration_only"
     configured_memory_backend: str | None = None
     memory_backend: str | None = None
     degraded: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
     vivo_configured: bool = False
+    vivo_credentials_configured: bool = False
 
 
 class StreamEvent(BaseModel):

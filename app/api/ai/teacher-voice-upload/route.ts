@@ -10,8 +10,8 @@ function toNumber(value: FormDataEntryValue | null) {
 }
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/agents/teacher/voice-upload");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/teacher/voice-upload");
+  if (brainForward.response) return brainForward.response;
 
   const formData = await request.formData();
   const audio = formData.get("audio");

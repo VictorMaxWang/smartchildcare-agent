@@ -36,10 +36,13 @@ export default function ProviderTraceBadge({
   const provider = getTraceValue(resolvedTrace.provider);
   const model = getTraceValue(resolvedTrace.model);
   const requestId = getTraceValue(resolvedTrace.requestId);
+  const transport =
+    getTraceValue(resolvedTrace.transport) ||
+    getTraceValue(resolvedTrace.transportSource);
   const primaryLabel = source || provider;
   const modeLabel = getModeLabel(resolvedTrace);
 
-  if (!primaryLabel && !provider && !model && !requestId && !modeLabel) {
+  if (!primaryLabel && !provider && !model && !requestId && !transport && !modeLabel) {
     return null;
   }
 
@@ -51,6 +54,7 @@ export default function ProviderTraceBadge({
         </Badge>
       ) : null}
       {!compact && provider && provider !== primaryLabel ? <Badge variant="outline">{provider}</Badge> : null}
+      {transport ? <Badge variant="outline">{transport}</Badge> : null}
       {model ? <Badge variant="outline">{model}</Badge> : null}
       {modeLabel ? <Badge variant={resolvedTrace.realProvider ? "success" : "warning"}>{modeLabel}</Badge> : null}
       {(showRequestId || !compact) && requestId ? <Badge variant="outline">{requestId}</Badge> : null}

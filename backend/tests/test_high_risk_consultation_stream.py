@@ -124,7 +124,11 @@ def test_high_risk_consultation_stream_uses_memory_and_sse(tmp_path, monkeypatch
     assert "agent_state_snapshots" in done_data["memoryMeta"]["usedSources"]
     assert done_data["providerTrace"]["source"] in {"mock", "vivo"}
     assert "model" in done_data["providerTrace"]
+    assert done_data["providerTrace"]["transport"] == "fastapi-brain"
+    assert done_data["providerTrace"]["transportSource"] == "fastapi-brain"
+    assert done_data["providerTrace"]["brainProvider"] in {"mock", "vivo"}
     assert done_data["result"]["traceMeta"]["memory"]["usedSources"]
+    assert done_data["result"]["traceMeta"]["transport"] == "fastapi-brain"
     assert done_data["result"]["consultationId"]
 
 

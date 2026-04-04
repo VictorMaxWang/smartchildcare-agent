@@ -107,8 +107,8 @@ function buildFallbackEvaluation(input: DietEvaluationInput): DietEvaluationResu
 }
 
 export async function POST(request: Request) {
-  const proxied = await forwardBrainRequest(request, "/api/v1/multimodal/diet-evaluation");
-  if (proxied) return proxied;
+  const brainForward = await forwardBrainRequest(request, "/api/v1/multimodal/diet-evaluation");
+  if (brainForward.response) return brainForward.response;
 
   const configuredModel = process.env.AI_DIET_MODEL || process.env.AI_MODEL || "qwen-turbo";
   let payload: DietEvaluationPayload | null = null;
