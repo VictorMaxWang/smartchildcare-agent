@@ -169,6 +169,16 @@ class MySQLMemoryHubStore:
                     self._pool = await aiomysql.create_pool(**_build_pool_kwargs(self.settings))
         return self._pool
 
+    async def close(self) -> None:
+        pool = self._pool
+        if pool is None:
+            return
+
+        self._pool = None
+        self._schema_ready = False
+        pool.close()
+        await pool.wait_closed()
+
     async def ensure_schema(self) -> None:
         if self._schema_ready:
             return

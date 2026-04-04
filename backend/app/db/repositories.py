@@ -144,6 +144,11 @@ class RepositoryBundle:
     degraded: bool = False
     errors: tuple[str, ...] = ()
 
+    async def close(self) -> None:
+        close = getattr(self.adapter, "close", None)
+        if callable(close):
+            await close()
+
     async def _run(self, operation: str, factory):
         try:
             return await factory()
@@ -370,6 +375,11 @@ def build_repository_bundle() -> RepositoryBundle:
         settings.resolved_mysql_url,
         settings.resolved_brain_memory_sqlite_path,
     )
+
+
+async def close_repository_bundle() -> None:
+    bundle = build_repository_bundle()
+    await bundle.close()
 
 
 def reset_repository_bundle_cache() -> None:

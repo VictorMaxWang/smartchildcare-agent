@@ -16,7 +16,13 @@ from app.agents.high_risk_consultation import (
 from app.agents.parent_agent import run_parent_follow_up, run_parent_suggestions
 from app.agents.teacher_agent import run_teacher_agent
 from app.core.config import get_settings
-from app.db.repositories import RepositoryBundle, RepositoryError, build_repository_bundle, reset_repository_bundle_cache
+from app.db.repositories import (
+    RepositoryBundle,
+    RepositoryError,
+    build_repository_bundle,
+    close_repository_bundle,
+    reset_repository_bundle_cache,
+)
 from app.memory.session_memory import SessionMemory
 from app.memory.vector_store import SimpleVectorStore
 from app.providers.mock import build_mock_diet_evaluation, build_mock_vision_meal
@@ -565,3 +571,10 @@ def reset_orchestrator_runtime() -> None:
     _get_shared_session_memory.cache_clear()
     _get_shared_vector_store.cache_clear()
     _get_shared_memory_service.cache_clear()
+
+
+async def shutdown_orchestrator_runtime() -> None:
+    try:
+        await close_repository_bundle()
+    finally:
+        reset_orchestrator_runtime()

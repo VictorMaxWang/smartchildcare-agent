@@ -48,16 +48,6 @@ const EMPTY_MEMORY_META: MemoryContextMeta = {
   memory_context_used: false,
 };
 
-const DEGRADED_MEMORY_META: MemoryContextMeta = {
-  backend: "memory",
-  degraded: true,
-  usedSources: ["teacher_context"],
-  errors: ["memory context fallback to in-memory backend"],
-  matchedSnapshotIds: [],
-  matchedTraceIds: [],
-  memory_context_used: true,
-};
-
 const BASE_INTERVENTION_CARD: InterventionCard = {
   id: "card-demo-001",
   title: "小满 高风险家庭干预卡",
@@ -273,10 +263,10 @@ export function buildConsultationTraceFixture(
         providerTrace: FALLBACK_PROVIDER_TRACE,
         realProvider: false,
         fallback: true,
-        memoryMeta: DEGRADED_MEMORY_META,
-        traceMeta: { memory: DEGRADED_MEMORY_META },
+        memoryMeta: BASE_MEMORY_META,
+        traceMeta: { memory: BASE_MEMORY_META },
       },
-      memoryMeta: DEGRADED_MEMORY_META,
+      memoryMeta: BASE_MEMORY_META,
       providerTrace: FALLBACK_PROVIDER_TRACE,
       receivedAnyEvent: true,
       receivedDone: true,

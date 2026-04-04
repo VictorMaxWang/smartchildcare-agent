@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { BrainCircuit, Camera, CheckCircle2, Clock3, Mic, ShieldAlert, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
+import ConsultationQaPanel from "@/components/consultation/ConsultationQaPanel";
 import ConsultationTracePanel from "../../../components/consultation/ConsultationTracePanel";
 import { RolePageShell, RoleSplitLayout, SectionCard, InlineLinkButton } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
@@ -481,36 +482,13 @@ export default function TeacherHighRiskConsultationPage() {
   }
 
   const traceHeaderActions = (
-    <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-      <div className="grid grid-cols-2 gap-2 sm:flex">
-        <Button asChild variant={traceMode === "demo" ? "premium" : "outline"} size="sm" className="rounded-full">
-          <Link href="/teacher/high-risk-consultation">演示态</Link>
-        </Button>
-        <Button asChild variant={traceMode === "debug" ? "premium" : "outline"} size="sm" className="rounded-full">
-          <Link href="/teacher/high-risk-consultation?trace=debug">调试态</Link>
-        </Button>
-      </div>
-      {traceMode === "debug" ? (
-        <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
-          {[
-            ["空记忆", "empty-memory"],
-            ["fallback", "fallback"],
-            ["后端错误", "error"],
-            ["SSE 中断", "partial"],
-            ["结果缺字段", "invalid-result"],
-          ].map(([label, value]) => (
-            <Button
-              key={value}
-              asChild
-              variant={traceCase === value ? "secondary" : "outline"}
-              size="sm"
-              className="rounded-full px-3"
-            >
-              <Link href={`/teacher/high-risk-consultation?trace=debug&traceCase=${value}`}>{label}</Link>
-            </Button>
-          ))}
-        </div>
-      ) : null}
+    <div className="grid grid-cols-2 gap-2 sm:flex">
+      <Button asChild variant={traceMode === "demo" ? "premium" : "outline"} size="sm" className="rounded-full">
+        <Link href="/teacher/high-risk-consultation">演示态</Link>
+      </Button>
+      <Button asChild variant={traceMode === "debug" ? "premium" : "outline"} size="sm" className="rounded-full">
+        <Link href="/teacher/high-risk-consultation?trace=debug">调试态</Link>
+      </Button>
     </div>
   );
 
@@ -618,7 +596,10 @@ export default function TeacherHighRiskConsultationPage() {
               description="这里是比赛录屏最关键的一段。"
               actions={activeStage ? <Badge variant="info">{getConsultationStageLabel(activeStage)}</Badge> : <Badge variant="outline">待启动</Badge>}
             >
-              <ConsultationTracePanel viewModel={traceViewModel} headerActions={traceHeaderActions} />
+              <div className="space-y-4">
+                {traceMode === "debug" ? <ConsultationQaPanel viewModel={traceViewModel} activeCase={traceCase} /> : null}
+                <ConsultationTracePanel viewModel={traceViewModel} headerActions={traceHeaderActions} />
+              </div>
             </SectionCard>
 
             {result ? (

@@ -20,6 +20,7 @@ from app.providers.resolver import can_use_vivo_text_provider, resolve_text_prov
 
 DEFAULT_PROMPT = "Please return one concise Chinese sentence for the SmartChildcare vivo LLM smoke test."
 DEFAULT_FALLBACK = "smoke fallback triggered"
+STRICT_CONFIG_ERROR = "strict smoke requires BRAIN_PROVIDER=vivo and both VIVO_APP_ID/VIVO_APP_KEY."
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +62,14 @@ def build_output(result: Any, *, include_raw: bool) -> dict[str, Any]:
     return output
 
 
+def build_error_output(*, error: str, kind: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": error,
+        "kind": kind,
+    }
+
+
 def validate_strict(result: Any) -> tuple[bool, str]:
     raw = result.raw if isinstance(result.raw, dict) else {}
     has_upstream_markers = bool(result.usage) or raw.get("id") is not None or raw.get("created") is not None
@@ -81,16 +90,7 @@ def main() -> int:
     settings = get_settings().model_copy(update={"enable_mock_provider": False} if args.strict else {})
 
     if args.strict and not can_use_vivo_text_provider(settings):
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": "strict smoke requires BRAIN_PROVIDER=vivo and both VIVO_APP_ID/VIVO_APP_KEY.",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(build_error_output(error=STRICT_CONFIG_ERROR, kind="config"), ensure_ascii=False, indent=2))
         return 1
 
     provider = resolve_text_provider(settings)
@@ -98,30 +98,10 @@ def main() -> int:
     try:
         result = provider.summarize(prompt=args.prompt, fallback=args.fallback)
     except ProviderConfigurationError as exc:
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": str(exc),
-                    "kind": "config",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(build_error_output(error=str(exc), kind="config"), ensure_ascii=False, indent=2))
         return 1
     except ProviderAuthenticationError as exc:
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": str(exc),
-                    "kind": "auth",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(build_error_output(error=str(exc), kind="auth"), ensure_ascii=False, indent=2))
         return 1
     except ProviderResponseError as exc:
         message = str(exc).lower()
@@ -130,17 +110,7 @@ def main() -> int:
             kind = "timeout"
         elif "network" in message or "connection" in message:
             kind = "network"
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": str(exc),
-                    "kind": kind,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(build_error_output(error=str(exc), kind=kind), ensure_ascii=False, indent=2))
         return 1
 
     output = build_output(result, include_raw=args.include_raw)
