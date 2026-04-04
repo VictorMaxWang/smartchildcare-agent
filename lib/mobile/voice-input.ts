@@ -1,5 +1,6 @@
 import type { MobileDraft } from "@/lib/ai/types";
 import { createMobileDraft } from "@/lib/mobile/local-draft-cache";
+import type { VoiceUploadResponse } from "@/lib/mobile/voice-assistant-upload";
 
 export function buildMockVoiceDraft(params: {
   childId: string;
@@ -25,3 +26,42 @@ export function buildMockVoiceDraft(params: {
   });
 }
 
+export function buildVoiceDraftFromUpload(params: {
+  childId: string;
+  childName?: string;
+  targetRole: MobileDraft["targetRole"];
+  response: VoiceUploadResponse;
+  recordingMeta: {
+    durationMs: number;
+    mimeType: string;
+    fileName: string;
+    size: number;
+    scene: "teacher-global-fab";
+  };
+}) {
+  const transcript = params.response.transcript?.trim() || params.response.draftContent.trim();
+
+  return createMobileDraft({
+    childId: params.childId,
+    draftType: "voice",
+    targetRole: params.targetRole,
+    content: params.response.draftContent,
+    attachmentName: params.response.attachmentName,
+    structuredPayload: {
+      transcript,
+      childName: params.childName,
+      assetId: params.response.assetId,
+      provider: params.response.provider,
+      source: params.response.source,
+      uploadStatus: params.response.status,
+      nextAction: params.response.nextAction ?? "none",
+      recordingMeta: params.recordingMeta,
+    },
+  });
+}
+
+export function getVoiceDraftSyncStatus(response: VoiceUploadResponse) {
+  if (response.status === "failed") return "failed" as const;
+  if (response.status === "processing") return "local_pending" as const;
+  return "synced" as const;
+}

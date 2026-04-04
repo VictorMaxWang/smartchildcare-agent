@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from app.schemas.react_tools import ReactRunRequest, ReactRunResponse
 from app.services.orchestrator import Orchestrator, build_orchestrator
 
 router = APIRouter(tags=["agents"])
@@ -32,6 +33,12 @@ async def teacher_run(payload: dict[str, Any], orchestrator: Orchestrator = Depe
 @router.post("/agents/admin/run")
 async def admin_run(payload: dict[str, Any], orchestrator: Orchestrator = Depends(get_orchestrator)):
     return await orchestrator.admin_run(payload)
+
+
+@router.post("/agents/react/run", response_model=ReactRunResponse)
+async def react_run(payload: ReactRunRequest, orchestrator: Orchestrator = Depends(get_orchestrator)):
+    result = await orchestrator.react_run(payload.model_dump(mode="json", by_alias=True))
+    return ReactRunResponse.model_validate(result)
 
 
 @router.post("/agents/reports/weekly")

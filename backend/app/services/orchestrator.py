@@ -27,8 +27,10 @@ from app.memory.session_memory import SessionMemory
 from app.memory.vector_store import SimpleVectorStore
 from app.providers.mock import build_mock_diet_evaluation, build_mock_vision_meal
 from app.services.memory_service import MemoryService
+from app.services.react_runner import ReactRunner
 from app.services.streaming import encode_sse, mock_agent_stream
 from app.schemas.memory import MemoryContextBuildOptions
+from app.schemas.react_tools import ReactRunRequest
 
 
 logger = logging.getLogger(__name__)
@@ -532,6 +534,12 @@ class Orchestrator:
             metadata_json={"task": "diet-evaluation", "source": result.get("source"), "model": result.get("model")},
         )
         return result
+
+    async def react_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        request = ReactRunRequest.model_validate(payload)
+        runner = ReactRunner(repositories=self.repositories, memory=self.memory)
+        result = await runner.run(request)
+        return result.model_dump(mode="json", by_alias=True)
 
     async def stream_agent(self, task: str, payload: dict[str, Any]):
         return mock_agent_stream(task, payload)
