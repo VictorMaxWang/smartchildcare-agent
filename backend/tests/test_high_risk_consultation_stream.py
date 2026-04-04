@@ -106,6 +106,7 @@ def test_high_risk_consultation_stream_uses_memory_and_sse(tmp_path, monkeypatch
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.startswith(": stream-open")
 
     events = parse_sse(response.text)
     assert [item["event"] for item in events[:3]] == ["status", "text", "ui"]
@@ -146,5 +147,6 @@ def test_high_risk_consultation_json_route_supports_sse_accept_header():
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.startswith(": stream-open")
     assert "event: status" in response.text
     assert "event: done" in response.text

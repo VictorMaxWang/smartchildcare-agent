@@ -407,20 +407,26 @@ class Orchestrator:
         )
 
     async def stream_high_risk_consultation(self, payload: dict[str, Any]) -> AsyncIterator[str]:
-        effective_payload = await self._prepare_payload_with_memory("high-risk-consultation", payload)
         trace_id = (
-            _coerce_string(effective_payload.get("trace_id"))
-            or _coerce_string(effective_payload.get("traceId"))
+            _coerce_string(payload.get("trace_id"))
+            or _coerce_string(payload.get("traceId"))
             or _create_trace_id("high-risk-consultation")
         )
         started_at = perf_counter()
 
         async def event_source() -> AsyncIterator[str]:
+            effective_payload = dict(payload)
             child_id = _extract_child_id(effective_payload)
             session_id = _extract_session_id(effective_payload)
             final_result: dict[str, Any] | None = None
 
             try:
+                # Force an immediate frame so proxy/TLS smoke checks can prove the
+                # stream is alive before memory hydration and provider work finish.
+                yield ": stream-open\n\n"
+                effective_payload = await self._prepare_payload_with_memory("high-risk-consultation", effective_payload)
+                child_id = _extract_child_id(effective_payload)
+                session_id = _extract_session_id(effective_payload)
                 async for event, data in run_high_risk_consultation_stream(effective_payload, trace_id):
                     if event == "done":
                         result = data.get("result")

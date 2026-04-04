@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from typing import Any
 
 import requests
@@ -9,6 +10,8 @@ import requests
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_CHILD_ID = "stage-demo-child"
+DEFAULT_FIRST_EVENT_TIMEOUT = 20.0
+DEFAULT_STREAM_TIMEOUT = 45.0
 EXPECTED_EVENTS = ("status", "text", "ui", "done")
 EXPECTED_STAGES = ("long_term_profile", "recent_context", "current_recommendation")
 
@@ -17,7 +20,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Smoke-test backend health, consultation SSE, and memory context.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Backend base URL, for example http://127.0.0.1:8000")
     parser.add_argument("--child-id", default=DEFAULT_CHILD_ID, help="Child id used for the smoke payload.")
-    parser.add_argument("--timeout", type=float, default=20.0, help="Request timeout in seconds.")
+    parser.add_argument(
+        "--first-event-timeout",
+        type=float,
+        default=DEFAULT_FIRST_EVENT_TIMEOUT,
+        help="Fail if the first SSE frame does not arrive within this many seconds.",
+    )
+    parser.add_argument(
+        "--stream-timeout",
+        type=float,
+        default=DEFAULT_STREAM_TIMEOUT,
+        help="Read timeout for the remainder of the SSE stream once the first frame arrives.",
+    )
+    parser.add_argument("--timeout", type=float, help=argparse.SUPPRESS)
     parser.add_argument(
         "--memory-check",
         choices=("off", "best-effort", "required"),
@@ -29,7 +44,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail when the consultation run reports fallback or a non-vivo provider source.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.timeout is not None:
+        args.first_event_timeout = args.timeout
+        args.stream_timeout = args.timeout
+    return args
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -79,62 +98,125 @@ def build_payload(child_id: str, teacher_note: str) -> dict[str, Any]:
     }
 
 
+def extract_health_summary(data: dict[str, Any], url: str) -> dict[str, Any]:
+    return {
+        "url": url,
+        "environment": data.get("environment"),
+        "providers": data.get("providers"),
+        "brain_provider": data.get("brain_provider"),
+        "llm_provider_selected": data.get("llm_provider_selected"),
+        "provider_assertion_scope": data.get("provider_assertion_scope"),
+        "configured_memory_backend": data.get("configured_memory_backend"),
+        "memory_backend": data.get("memory_backend"),
+        "degraded": data.get("degraded"),
+        "degradation_reasons": data.get("degradation_reasons"),
+        "vivo_configured": data.get("vivo_configured"),
+        "vivo_credentials_configured": data.get("vivo_credentials_configured"),
+    }
+
+
+def evaluate_health_summary(health: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    providers = health.get("providers")
+    if health.get("provider_assertion_scope") != "configuration_only":
+        issues.append(
+            f"expected provider_assertion_scope='configuration_only', got {health.get('provider_assertion_scope')!r}"
+        )
+    if not health.get("brain_provider"):
+        issues.append("expected brain_provider to be non-empty")
+    if not health.get("llm_provider_selected"):
+        issues.append("expected llm_provider_selected to be non-empty")
+    if health.get("environment") == "development":
+        issues.append("expected environment to not be 'development'")
+    if not isinstance(providers, dict) or "llm" not in providers:
+        issues.append("expected providers.llm to be present")
+    elif providers.get("llm") == "mock":
+        issues.append("expected providers.llm to not be 'mock'")
+    return issues
+
+
 def read_health(base_url: str, timeout: float) -> dict[str, Any]:
-    base_url = base_url.rstrip("/")
-    errors: list[str] = []
+    url = f"{base_url.rstrip('/')}/api/v1/health"
+    try:
+        response = requests.get(url, timeout=timeout)
+    except requests.RequestException as error:
+        raise RuntimeError(f"health request failed: {error}") from error
 
-    for path in ("/health", "/api/v1/health"):
-        url = f"{base_url}{path}"
-        try:
-            response = requests.get(url, timeout=timeout)
-            response.raise_for_status()
-            data = response.json()
-            if data.get("status") != "ok":
-                raise RuntimeError(f"{path} did not return status=ok")
-            return {
-                "url": url,
-                "environment": data.get("environment"),
-                "providers": data.get("providers"),
-                "brain_provider": data.get("brain_provider"),
-                "llm_provider_selected": data.get("llm_provider_selected"),
-                "provider_assertion_scope": data.get("provider_assertion_scope"),
-                "configured_memory_backend": data.get("configured_memory_backend"),
-                "memory_backend": data.get("memory_backend"),
-                "degraded": data.get("degraded"),
-                "degradation_reasons": data.get("degradation_reasons"),
-                "vivo_configured": data.get("vivo_configured"),
-                "vivo_credentials_configured": data.get("vivo_credentials_configured"),
-            }
-        except Exception as error:
-            errors.append(f"{path}:{error}")
+    preview = response.text[:200]
+    if not response.ok:
+        raise RuntimeError(f"health HTTP {response.status_code}: {preview or response.reason}")
 
-    raise RuntimeError(f"health check failed for all known paths: {' | '.join(errors)}")
+    try:
+        data = response.json()
+    except ValueError as error:
+        raise RuntimeError(f"health returned non-JSON body: {preview}") from error
+
+    if data.get("status") != "ok":
+        raise RuntimeError("/api/v1/health did not return status=ok")
+    return extract_health_summary(data, url)
 
 
-def collect_sse_events(base_url: str, payload: dict[str, Any], timeout: float) -> list[dict[str, Any]]:
-    with requests.post(
-        f"{base_url.rstrip('/')}/api/v1/agents/consultations/high-risk/stream",
-        headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
-        json=payload,
-        stream=True,
-        timeout=(timeout, timeout),
-    ) as response:
-        response.raise_for_status()
+def _set_stream_read_timeout(response: requests.Response, timeout: float) -> None:
+    try:
+        response.raw._fp.fp.raw._sock.settimeout(timeout)
+    except Exception:
+        return
+
+
+def collect_sse_events(
+    base_url: str,
+    payload: dict[str, Any],
+    *,
+    first_event_timeout: float,
+    stream_timeout: float,
+) -> dict[str, Any]:
+    url = f"{base_url.rstrip('/')}/api/v1/agents/consultations/high-risk/stream"
+    started_at = time.perf_counter()
+
+    try:
+        response = requests.post(
+            url,
+            headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
+            json=payload,
+            stream=True,
+            timeout=(first_event_timeout, first_event_timeout),
+        )
+    except requests.RequestException as error:
+        raise RuntimeError(f"sse request failed before response: {error}") from error
+
+    with response:
+        header_elapsed = round(time.perf_counter() - started_at, 3)
+        preview = response.text[:200] if not response.ok else ""
+        if not response.ok:
+            raise RuntimeError(f"sse HTTP {response.status_code}: {preview or response.reason}")
 
         events: list[dict[str, Any]] = []
         event_name = ""
         data_lines: list[str] = []
+        first_frame_seconds: float | None = None
+        first_event_seconds: float | None = None
 
         for raw_line in response.iter_lines(decode_unicode=True):
             line = raw_line if isinstance(raw_line, str) else ""
+            now = round(time.perf_counter() - started_at, 3)
+
+            if line != "" and first_frame_seconds is None:
+                first_frame_seconds = now
+                _set_stream_read_timeout(response, stream_timeout)
+
             if line == "":
                 if event_name and data_lines:
                     payload_data = json.loads("\n".join(data_lines))
                     events.append({"event": event_name, "data": payload_data})
+                    if first_event_seconds is None:
+                        first_event_seconds = now
                     if event_name == "done":
                         break
                 event_name = ""
                 data_lines = []
+                continue
+
+            if line.startswith(":"):
                 continue
             if line.startswith("event: "):
                 event_name = line.removeprefix("event: ").strip()
@@ -142,9 +224,20 @@ def collect_sse_events(base_url: str, payload: dict[str, Any], timeout: float) -
             if line.startswith("data: "):
                 data_lines.append(line.removeprefix("data: ").strip())
 
-    if not events:
-        raise RuntimeError("no SSE events were received")
-    return events
+        if first_frame_seconds is None:
+            raise RuntimeError("no SSE frames were received before the first-event deadline")
+        if not events:
+            raise RuntimeError("no SSE events were received before the stream finished")
+
+        return {
+            "url": url,
+            "http_status": response.status_code,
+            "content_type": response.headers.get("content-type"),
+            "header_elapsed_seconds": header_elapsed,
+            "first_frame_seconds": first_frame_seconds,
+            "first_event_seconds": first_event_seconds,
+            "events": events,
+        }
 
 
 def extract_stage_sequence(events: list[dict[str, Any]]) -> list[str]:
@@ -229,6 +322,16 @@ def summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def summarize_stream_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    summary = summarize_events(trace["events"])
+    summary["first_frame_seconds"] = trace.get("first_frame_seconds")
+    summary["first_event_seconds"] = trace.get("first_event_seconds")
+    summary["http_status"] = trace.get("http_status")
+    summary["content_type"] = trace.get("content_type")
+    summary["header_elapsed_seconds"] = trace.get("header_elapsed_seconds")
+    return summary
+
+
 def read_memory_context(base_url: str, child_id: str, timeout: float) -> dict[str, Any]:
     response = requests.post(
         f"{base_url.rstrip('/')}/api/v1/memory/context",
@@ -273,9 +376,7 @@ def evaluate_provider(summary: dict[str, Any], *, require_real_provider: bool) -
     if not summary.get("request_id"):
         issues.append("expected request_id to be non-empty")
     if summary.get("transport") != "fastapi-brain" and summary.get("transport_source") != "fastapi-brain":
-        issues.append(
-            "expected transport_source='fastapi-brain' or transport='fastapi-brain'"
-        )
+        issues.append("expected transport_source='fastapi-brain' or transport='fastapi-brain'")
     if not summary.get("real_provider"):
         issues.append("expected real_provider=true")
     if summary.get("fallback"):
@@ -334,28 +435,31 @@ def main() -> int:
     base_url = str(args.base_url).rstrip("/")
 
     try:
-        health = read_health(base_url, args.timeout)
+        health = read_health(base_url, args.first_event_timeout)
+        health_issues = evaluate_health_summary(health)
 
-        first_events = collect_sse_events(
+        first_trace = collect_sse_events(
             base_url,
             build_payload(args.child_id, "first smoke run should write consultation trace and snapshot state"),
-            args.timeout,
+            first_event_timeout=args.first_event_timeout,
+            stream_timeout=args.stream_timeout,
         )
-        second_events = collect_sse_events(
+        second_trace = collect_sse_events(
             base_url,
             build_payload(args.child_id, "second smoke run should read the prior trace and snapshot state"),
-            args.timeout,
+            first_event_timeout=args.first_event_timeout,
+            stream_timeout=args.stream_timeout,
         )
 
-        first_run = summarize_events(first_events)
-        second_run = summarize_events(second_events)
+        first_run = summarize_stream_trace(first_trace)
+        second_run = summarize_stream_trace(second_trace)
         second_run["brain_provider"] = second_run["brain_provider"] or as_string(health.get("brain_provider"))
 
         memory_context_payload: dict[str, Any] | None = None
         memory_context_error: str | None = None
         if args.memory_check != "off":
             try:
-                memory_context_payload = read_memory_context(base_url, args.child_id, args.timeout)
+                memory_context_payload = read_memory_context(base_url, args.child_id, args.stream_timeout)
             except Exception as error:
                 memory_context_error = str(error)
 
@@ -367,17 +471,20 @@ def main() -> int:
             endpoint_error=memory_context_error,
         )
         provider_issues = evaluate_provider(second_run, require_real_provider=args.require_real_provider)
-        warnings = merge_unique(provider_issues, memory_result["warnings"])
+        warnings = merge_unique(health_issues, provider_issues, memory_result["warnings"])
         matched_snapshot_ids = merge_unique(second_run["matched_snapshot_ids"], memory_context["matched_snapshot_ids"])
         matched_trace_ids = merge_unique(second_run["matched_trace_ids"], memory_context["matched_trace_ids"])
 
         output = {
-            "ok": not provider_issues and memory_result["ok"],
+            "ok": not health_issues and not provider_issues and memory_result["ok"],
             "health": health,
+            "health_issues": health_issues,
             "first_run": first_run,
             "second_run": second_run,
             "event_sequence": second_run["event_sequence"],
             "stage_sequence": second_run["stage_sequence"],
+            "first_frame_seconds": second_run["first_frame_seconds"],
+            "first_event_seconds": second_run["first_event_seconds"],
             "provider_source": second_run["provider_source"],
             "provider_model": second_run["provider_model"],
             "request_id": second_run["request_id"],

@@ -21,6 +21,7 @@ def load_module(name: str, relative_path: str):
 
 
 vivo_smoke = load_module("vivo_llm_smoke", "backend/scripts/vivo_llm_smoke.py")
+vivo_asr_smoke = load_module("vivo_asr_smoke", "backend/scripts/vivo_asr_smoke.py")
 consultation_smoke = load_module("consultation_sse_smoke", "backend/scripts/consultation_sse_smoke.py")
 
 
@@ -35,6 +36,33 @@ def build_result(**overrides):
         "meta": {"finish_reason": "stop"},
         "raw": {"id": "chatcmpl-123", "created": 1712300000},
         "content": "真实返回",
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def build_asr_result(**overrides):
+    output = {
+        "transcript": "小明今天体温37.6度，需要继续观察。",
+        "confidence": None,
+        "segments": [SimpleNamespace(text="小明今天体温37.6度，需要继续观察。", start_ms=0, end_ms=1200)],
+        "meta": {
+            "audio_id": "audio-1",
+            "task_id": "task-1",
+            "transport": "vivo-lasr-http",
+        },
+        "raw": {
+            "transport": "vivo-lasr-http",
+            "stages": {"result": {"sid": "sid-result"}},
+        },
+        "fallback": False,
+    }
+    defaults = {
+        "provider": "vivo-asr",
+        "source": "vivo",
+        "model": "fileasrrecorder",
+        "request_id": "req-asr-123",
+        "output": SimpleNamespace(**output),
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -68,6 +96,33 @@ def test_validate_strict_rejects_non_vivo_brain_provider():
     passed, reason = vivo_smoke.validate_strict(build_result(), brain_provider="mock")
     assert passed is False
     assert "brain_provider='vivo'" in reason
+
+
+def test_asr_validate_strict_accepts_real_vivo_result():
+    passed, reason = vivo_asr_smoke.validate_strict(build_asr_result(), brain_provider="vivo")
+    assert passed is True
+    assert reason == ""
+
+
+def test_asr_validate_strict_rejects_mock_fallback():
+    failed_result = build_asr_result(source="mock")
+    failed_result.output.fallback = True
+
+    passed, reason = vivo_asr_smoke.validate_strict(failed_result, brain_provider="vivo")
+
+    assert passed is False
+    assert "source='vivo'" in reason or "fallback=false" in reason
+
+
+def test_asr_validate_strict_rejects_missing_transport_markers():
+    failed_result = build_asr_result()
+    failed_result.output.meta = {}
+    failed_result.output.raw = {}
+
+    passed, reason = vivo_asr_smoke.validate_strict(failed_result, brain_provider="vivo")
+
+    assert passed is False
+    assert "raw.transport" in reason or "audio_id/task_id" in reason
 
 
 def build_stream_events():
@@ -140,6 +195,26 @@ def test_summarize_events_extracts_provider_and_memory_fields():
     assert summary["matched_trace_ids"] == ["trace-row-1"]
 
 
+def test_summarize_stream_trace_preserves_timing_fields():
+    summary = consultation_smoke.summarize_stream_trace(
+        {
+            "http_status": 200,
+            "content_type": "text/event-stream; charset=utf-8",
+            "header_elapsed_seconds": 0.021,
+            "first_frame_seconds": 0.123,
+            "first_event_seconds": 0.456,
+            "events": build_stream_events(),
+        }
+    )
+
+    assert summary["http_status"] == 200
+    assert summary["content_type"] == "text/event-stream; charset=utf-8"
+    assert summary["header_elapsed_seconds"] == 0.021
+    assert summary["first_frame_seconds"] == 0.123
+    assert summary["first_event_seconds"] == 0.456
+    assert summary["transport"] == "fastapi-brain"
+
+
 def test_summarize_events_rejects_missing_required_stage():
     broken_events = [event for event in build_stream_events() if event["data"].get("stage") != "recent_context"]
 
@@ -170,6 +245,27 @@ def test_evaluate_provider_requires_real_vivo_when_requested():
         "expected transport_source='fastapi-brain' or transport='fastapi-brain'",
         "expected real_provider=true",
         "expected fallback=false",
+    ]
+
+
+def test_evaluate_health_summary_rejects_old_runtime_markers():
+    issues = consultation_smoke.evaluate_health_summary(
+        {
+            "status": "ok",
+            "environment": "development",
+            "providers": {"llm": "mock"},
+            "brain_provider": "",
+            "llm_provider_selected": "",
+            "provider_assertion_scope": None,
+        }
+    )
+
+    assert issues == [
+        "expected provider_assertion_scope='configuration_only', got None",
+        "expected brain_provider to be non-empty",
+        "expected llm_provider_selected to be non-empty",
+        "expected environment to not be 'development'",
+        "expected providers.llm to not be 'mock'",
     ]
 
 

@@ -1,4 +1,12 @@
 (backend_proxy) {
+	header {
+		X-SmartChildcare-Gateway "caddy-staging-s1"
+		defer
+	}
+
+	@consultation_sse path /api/v1/agents/consultations/high-risk/stream
+	header @consultation_sse X-SmartChildcare-SSE "unbuffered"
+
 	# Consultation SSE must flush incrementally instead of being buffered.
 	reverse_proxy backend:8000 {
 		flush_interval -1

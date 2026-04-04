@@ -1,51 +1,42 @@
-# SmartChildcare Agent 腾讯云香港 VPS Staging 部署
+# SmartChildcare Agent 腾讯云香港 VPS Staging 部署与修复 Runbook
 
-本文件只覆盖本轮主线部署方案：
+本文件只覆盖 S1 范围：
 
 - 服务器：腾讯云香港轻量服务器 Linux VPS
 - 公网 IP：`150.109.77.178`
 - 域名：`api-staging.smartchildcareagent.cn`
-- 拓扑：`docker-compose.yml` + `Caddyfile`
-- 前端：继续留在 Vercel 或现有前端部署平台
+- 拓扑：[`docker-compose.yml`](C:/Users/12804/Desktop/smartchildcare-agent/childcare-smart/docker-compose.yml) + [`Caddyfile`](C:/Users/12804/Desktop/smartchildcare-agent/childcare-smart/Caddyfile)
+- 前端：继续部署在 Vercel 或现有前端平台，通过 `BRAIN_API_BASE_URL` 走 remote brain proxy
 
-本轮边界：
+边界：
 
 - 不修改 consultation 叙事逻辑。
-- 不修改 SSE contract 字段名和事件语义。
-- 不修改 backend 业务路由。
-- 不在任何代码、文档、日志、示例里写入真实 `VIVO_APP_ID` / `VIVO_APP_KEY`。
-- 凡是涉及 vivo 接入事实，以官方文档为准：[vivo 官方文档](https://aigc.vivo.com.cn/#/document/index?id=1746)。
+- 不修改 SSE 事件名、阶段顺序、业务 contract。
+- 不在任何代码、文档、日志、截图、示例里写入真实 `VIVO_APP_ID` / `VIVO_APP_KEY`。
+- 凡是涉及 vivo 接入事实，以 [vivo 官方文档](https://aigc.vivo.com.cn/#/document/index?id=1746) 为准。
 
-## 1. 部署结构
+## 1. 目标状态
 
-staging 只启动两个容器：
+S1 完成时必须同时满足：
 
-- `backend`：FastAPI backend，镜像来自 `backend/Dockerfile`
-- `caddy`：公网入口、HTTPS 终止、SSE 友好的反向代理
-
-流量路径：
-
-1. 浏览器继续访问前端站点。
-2. 前端服务端桥接仍走 `BRAIN_API_BASE_URL`。
-3. `BRAIN_API_BASE_URL` 指向 `https://api-staging.smartchildcareagent.cn`。
-4. Caddy 反代到容器网络内的 `backend:8000`。
-
-为什么保持这条路径：
-
-- 不需要改现有前端 `/api/ai/*` 调用方式。
-- 不会碰 consultation 业务逻辑。
-- 方便直接对 backend 域名做 health、provider、SSE、memory 校验。
+1. `https://api-staging.smartchildcareagent.cn/api/v1/health` TLS 正常。
+2. 外部 health 返回当前仓库的新 schema。
+3. health 不再暴露明显旧环境特征：
+   - `environment=development`
+   - `providers.llm=mock`
+4. raw consultation SSE 在 20 秒内至少收到首帧，最终走到 `done`。
+5. 前端 release debug 页面能证明请求真的走了 remote brain proxy，而不是 Next fallback。
 
 ## 2. 服务器准备
 
 部署前确认：
 
-- 可 SSH 登录服务器。
+- 可以 SSH 登录服务器。
 - 安全组或防火墙已开放 `22`、`80`、`443`。
 - 服务器已安装 Docker 与 Docker Compose。
 - 仓库实际工作根目录为 `childcare-smart/`。
 
-可选安装检查：
+基础检查：
 
 ```bash
 docker --version
@@ -64,19 +55,23 @@ ssh root@150.109.77.178
 ssh ubuntu@150.109.77.178
 ```
 
-## 3. 域名 A 记录
+## 3. 域名与入口原则
 
-新增 A 记录：
+DNS 必须满足：
 
 - `api-staging.smartchildcareagent.cn -> 150.109.77.178`
 
-注意：
+入口原则：
 
-- Caddy 自动 HTTPS 依赖 DNS 正常解析到服务器。
-- `http://150.109.77.178` 只用于手工排障。
-- 前端正式环境不要依赖 IP 地址，仍只依赖域名。
+- `http://150.109.77.178` 只用于临时排障。
+- 所有 release / staging 正式联调都只认域名，不认 IP。
+- 前端服务端桥接只认：
 
-## 4. 仓库与根目录 `.env.release`
+```env
+BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn
+```
+
+## 4. 服务器 `.env.release`
 
 部署目录示例：
 
@@ -92,171 +87,187 @@ cd smartchildcare-agent/childcare-smart
 - 使用：`./.env.release`
 - 不使用：`backend/.env.release`
 
-如果服务器上还没有根目录 `.env.release`，先复制：
+首次部署：
 
 ```bash
 cp .env.release.example .env.release
+vim .env.release
 ```
 
-至少补齐这些 backend 运行变量：
+至少要确认这些值是 staging 真实值，而不是默认占位：
 
 ```env
-APP_NAME=SmartChildcare Agent Brain
-APP_VERSION=0.1.0
 ENVIRONMENT=staging
-LOG_LEVEL=INFO
-API_V1_PREFIX=/api/v1
-APP_HOST=0.0.0.0
-APP_PORT=8000
-PORT=8000
-ALLOW_ORIGINS=https://your-vercel-staging.vercel.app,https://your-frontend.example.com
 ENABLE_MOCK_PROVIDER=false
 BRAIN_PROVIDER=vivo
-BRAIN_TIMEOUT_MS=20000
-REQUEST_TIMEOUT_SECONDS=20
+BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn
+BRAIN_API_TIMEOUT_MS=45000
+BRAIN_TIMEOUT_MS=45000
+REQUEST_TIMEOUT_SECONDS=45
+ALLOW_ORIGINS=https://<real-release-domain>,https://<real-preview-domain>
 VIVO_APP_ID=replace-on-server-only
 VIVO_APP_KEY=replace-on-server-only
-VIVO_BASE_URL=https://api-ai.vivo.com.cn
-VIVO_LLM_MODEL=Volc-DeepSeek-V3.2
-VIVO_OCR_PATH=/ocr/general_recognition
-VIVO_EMBEDDING_MODEL=m3e-base
-BRAIN_MEMORY_BACKEND=sqlite
-BRAIN_MEMORY_SQLITE_PATH=/data/agent-memory.db
-MYSQL_URL=
-```
-
-前端桥接相关变量也放在同一份根目录 `.env.release`：
-
-```env
-BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn
-NEXT_PUBLIC_BACKEND_BASE_URL=
-BRAIN_API_TIMEOUT_MS=20000
 ```
 
 说明：
 
-- `ALLOW_ORIGINS` 填真实前端域名，不要只保留占位值。
-- `RELEASE_BASE_URL`、`RELEASE_ADMIN_COOKIE`、`CRON_SECRET` 这类 release gate 变量如果服务器不用远程校验，可以先保留占位；backend 容器不会依赖它们启动。
-- 真实 vivo 密钥只写服务器本地 `.env.release`，不要提交 git。
+- `ALLOW_ORIGINS` 必须改成真实前端域名，不能原样保留示例占位。
+- 真实 vivo 密钥只允许存在于服务器本地 `.env.release`。
+- 不要把 `.env.release` 提交到 git。
 
-## 5. 启动 Staging
+## 5. 先定位，再修复
 
-先做静态展开检查：
+不要先 `docker compose down && up`。先确认你改的是对的目录、对的 compose、对的 Caddy 配置。
+
+### 5.1 目录、版本、配置指纹
 
 ```bash
+cd ~/apps/smartchildcare-agent/childcare-smart
+pwd
+git rev-parse HEAD
+sha256sum Caddyfile docker-compose.yml .env.release
 docker compose config
 ```
 
-启动：
+如果这里的路径、SHA、compose 展开结果不符合预期，先修目录和版本，不要继续。
 
-```bash
-docker compose up -d --build
-```
-
-查看状态：
+### 5.2 当前运行中的容器
 
 ```bash
 docker compose ps
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}'
 ```
 
-预期服务：
+预期至少看到：
 
 - `smartchildcare-backend-staging`
 - `smartchildcare-caddy-staging`
 
-## 6. 查看日志
+### 5.3 backend 内部 health
 
-backend 日志：
-
-```bash
-docker compose logs -f backend
-```
-
-caddy 日志：
+先验证容器内 backend 是不是新代码：
 
 ```bash
-docker compose logs -f caddy
+docker compose exec backend python - <<'PY'
+import json, urllib.request
+payload = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5))
+print(json.dumps(payload, ensure_ascii=False, indent=2))
+PY
 ```
 
-重新构建并重启：
+必须满足：
+
+- `status == ok`
+- `provider_assertion_scope == "configuration_only"`
+- `brain_provider` 非空
+- `llm_provider_selected` 非空
+- `environment != "development"`
+- `providers.llm != "mock"`
+
+再确认 env 真的是 staging：
 
 ```bash
-docker compose up -d --build
+docker compose exec backend sh -lc 'printenv | egrep "^(ENVIRONMENT|BRAIN_PROVIDER|ENABLE_MOCK_PROVIDER|ALLOW_ORIGINS|BRAIN_MEMORY_BACKEND|BRAIN_API_BASE_URL)="'
 ```
 
-停止：
+如果这里已经不对，优先修 `.env.release` 或 backend 容器，不要先怪 TLS。
+
+### 5.4 Caddy 实载配置
+
+确认远端运行中的 Caddy 真加载了当前文件：
 
 ```bash
-docker compose down
+docker compose exec caddy sh -lc 'cat /etc/caddy/Caddyfile'
+docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+docker compose exec caddy caddy adapt --config /etc/caddy/Caddyfile --pretty
 ```
 
-## 7. Health 检查
+至少确认：
 
-部署文档统一使用 `/api/v1/health` 作为健康检查路径。
+- host matcher 是 `api-staging.smartchildcareagent.cn`
+- `flush_interval -1` 仍在
+- 响应头里有 `X-SmartChildcare-Gateway: caddy-staging-s1`
+- SSE 路径有 `X-SmartChildcare-SSE: unbuffered`
 
-外部检查：
+### 5.5 backend / caddy 日志
 
 ```bash
-curl https://api-staging.smartchildcareagent.cn/api/v1/health
+docker compose logs --tail=200 backend
+docker compose logs --tail=200 caddy
 ```
 
-容器内检查：
+重点看：
+
+- backend startup 日志里的 `environment` / `llm_provider` / `configured_memory_backend`
+- caddy 的 ACME、certificate、handshake、reload 错误
+
+如果 Caddy 日志显示证书申请失败或 storage/cert 错误，先修证书链路；不要盲删 Caddy 数据目录。
+
+## 6. TLS 与外部 health 排查
+
+### 6.1 TLS 握手
 
 ```bash
-docker compose exec backend python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health'))['status'])"
+curl -vk https://api-staging.smartchildcareagent.cn/api/v1/health
+openssl s_client -connect api-staging.smartchildcareagent.cn:443 -servername api-staging.smartchildcareagent.cn
 ```
 
-这个检查能证明：
+如果 443 握手失败：
 
-- backend 进程已启动
-- 路由前缀正常
-- 当前 memory backend 已被识别
-- 健康响应可被 Caddy 反代出去
+- 先看 `docker compose logs caddy`
+- 再看 DNS / 防火墙 / ACME
+- 只有在日志明确显示证书状态损坏时，才考虑备份后清理 Caddy 证书状态
 
-这个检查不能证明：
-
-- vivo 上游调用一定成功
-- consultation SSE 一定能穿过整条链路
-
-## 8. Provider 验证
-
-先做 vivo LLM smoke：
+### 6.2 外部 health
 
 ```bash
-python3 scripts/vivo_llm_smoke.py --runner docker --strict
+curl -fsS https://api-staging.smartchildcareagent.cn/api/v1/health
+curl -fsS http://150.109.77.178/api/v1/health
 ```
 
-如果失败，优先检查：
+判读规则：
 
-- `VIVO_APP_ID`
-- `VIVO_APP_KEY`
-- 服务器外网访问能力
-- vivo 官方文档要求是否有变更：[vivo 官方文档](https://aigc.vivo.com.cn/#/document/index?id=1746)
+- 域名 health 是 staging 正式准入标准。
+- IP health 只用于判断“是不是还有旧 runtime 在跑”。
+- 如果域名 TLS 坏、IP health 还是旧 schema，优先怀疑旧 backend/旧 compose + 坏 Caddy 并存。
 
-如果只是临时 demo fallback，可在服务器本地 `.env.release` 暂时切：
+## 7. consultation SSE 验证
 
-```env
-ENABLE_MOCK_PROVIDER=true
-```
+### 7.1 聚合 smoke
 
-但要明确这是 staging/demo fallback，不是最终长期方案。
-
-## 9. Consultation SSE 验证
-
-先跑容器内 smoke：
+优先跑仓库自带聚合 smoke：
 
 ```bash
-python3 scripts/consultation_sse_smoke.py --runner docker --base-url http://127.0.0.1:8000 --memory-check best-effort
+BASE_URL=https://api-staging.smartchildcareagent.cn \
+FIRST_EVENT_TIMEOUT=20 \
+STREAM_TIMEOUT=45 \
+MEMORY_CHECK=required \
+REQUIRE_REAL_PROVIDER=1 \
+DOCKER_SERVICE=backend \
+bash scripts/vps_smoke.sh
 ```
 
-再跑外部 raw SSE：
+必须关注：
+
+- `health`
+- `environment`
+- `providers.llm`
+- `brain_provider`
+- `first_frame_seconds`
+- `first_event_seconds`
+- `transport`
+- `provider_source`
+- `fallback`
+- `memory`
+
+### 7.2 raw SSE
 
 ```bash
 curl -N -H "Accept: text/event-stream" -H "Content-Type: application/json" \
--X POST https://api-staging.smartchildcareagent.cn/api/v1/agents/consultations/high-risk/stream \
+  -X POST https://api-staging.smartchildcareagent.cn/api/v1/agents/consultations/high-risk/stream \
   -d '{
     "targetChildId":"stage-demo-child",
-    "teacherNote":"need stream verification on staging",
+    "teacherNote":"S1 staging SSE verification",
     "currentUser":{"id":"teacher-stage","name":"Stage Teacher","className":"Sunshine"},
     "visibleChildren":[{"id":"stage-demo-child","name":"Stage Demo Child"}],
     "presentChildren":[{"id":"stage-demo-child","name":"Stage Demo Child"}],
@@ -267,96 +278,106 @@ curl -N -H "Accept: text/event-stream" -H "Content-Type: application/json" \
   }'
 ```
 
-验证目标：
+通过条件：
 
-- 事件是逐步到达，而不是长时间无输出后一次性返回。
-- 连接能正常结束，不被代理提前截断。
-- 当前 consultation 金链路仍保持既有字段名和事件语义。
+- 20 秒内至少收到一个 SSE 首帧
+- stage 顺序仍是：
+  - `long_term_profile`
+  - `recent_context`
+  - `current_recommendation`
+- 最终 `done` 里看到：
+  - `transport=fastapi-brain`
+  - `provider_source=vivo`
+  - `realProvider=true`
+  - `fallback=false`
 
-本轮只验证传输，不调整任何 SSE contract。
+## 8. 修复顺序
 
-## 10. 前端如何切换 backend base URL
+只有在 5~7 步已经确认问题后，再按这个顺序修：
 
-前端仍通过服务端桥接访问 backend，不改浏览器侧主调用方式。
+### 8.1 修 backend
 
-相关桥接代码：
+```bash
+cd ~/apps/smartchildcare-agent/childcare-smart
+git pull --ff-only
+docker compose build --no-cache backend
+docker compose up -d backend
+```
 
-- `lib/server/brain-client.ts`
-- `app/api/ai/high-risk-consultation/route.ts`
-- `app/api/ai/high-risk-consultation/stream/route.ts`
-- `app/api/ai/stream/route.ts`
+立即复验：
 
-前端部署平台至少设置：
+```bash
+docker compose exec backend python - <<'PY'
+import json, urllib.request
+payload = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5))
+assert payload['status'] == 'ok'
+assert payload['environment'] != 'development'
+assert payload['provider_assertion_scope'] == 'configuration_only'
+assert payload['brain_provider']
+assert payload['llm_provider_selected']
+print(json.dumps(payload, ensure_ascii=False, indent=2))
+PY
+```
+
+### 8.2 再修 Caddy
+
+```bash
+docker compose up -d --force-recreate caddy
+docker compose logs --tail=200 caddy
+curl -vk https://api-staging.smartchildcareagent.cn/api/v1/health
+```
+
+### 8.3 最后复验 SSE 与前端 proxy
+
+```bash
+bash scripts/vps_smoke.sh
+```
+
+再做 release debug 页面人工验收。
+
+## 9. 前端 release remote brain proxy 验收
+
+release 环境至少要有：
 
 ```env
 BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn
 ```
 
-保持为空，除非你明确需要 UI 上显示 backend 源：
+打开：
 
-```env
-NEXT_PUBLIC_BACKEND_BASE_URL=
+```text
+/teacher/high-risk-consultation?trace=debug
 ```
 
-重要提醒：
+必须同时确认：
 
-- 只测前端页面不够，因为 Next.js 有 fallback 逻辑。
-- backend 真正可用，必须直接测 `api-staging.smartchildcareagent.cn` 的 health 和 consultation SSE。
+- Next `/api/ai/high-risk-consultation/stream` 响应头里有：
+  - `x-smartchildcare-transport: remote-brain-proxy`
+  - `x-smartchildcare-upstream-host: api-staging.smartchildcareagent.cn`
+- 页面 debug 卡里最终是：
+  - `providerTrace.transport=fastapi-brain`
+  - `providerTrace.source=vivo`
+  - `realProvider=true`
+  - `fallback=false`
 
-## 11. SQLite / Memory Fallback 风险
+如果看到：
 
-本轮 staging 推荐：
+- `next-json-fallback`
+- `next-stream-fallback`
+- `x-smartchildcare-fallback-reason`
 
-```env
-BRAIN_MEMORY_BACKEND=sqlite
-BRAIN_MEMORY_SQLITE_PATH=/data/agent-memory.db
-```
+则判定 release 仍未真正走 remote brain proxy。
 
-当前处理方式：
+## 10. 严格警告
 
-- SQLite 文件放在容器内 `/data/agent-memory.db`
-- 由 compose 命名卷 `backend_data` 持久化
-
-为什么这是最小可行方案：
-
-- 单机 staging 简单直接
-- 容器重建后只要卷还在，数据仍可保留
-- 足够支撑 demo / staging 的 memory context 验证
-
-风险与边界：
-
-- 只适合单机单实例
-- 不适合长期多用户或高并发 memory
-- 不是最终生产级统一 memory 方案
-- 如果卷被删，SQLite 数据会一起丢失
-
-未来若切 MySQL：
-
-```env
-BRAIN_MEMORY_BACKEND=mysql
-MYSQL_URL=mysql://user:password@host:3306/database
-```
-
-## 12. 最小命令清单
-
-```bash
-ssh root@150.109.77.178
-cd ~/apps/smartchildcare-agent/childcare-smart
-cp .env.release.example .env.release
-vim .env.release
-docker compose config
-docker compose up -d --build
-docker compose ps
-docker compose logs -f backend
-docker compose logs -f caddy
-curl https://api-staging.smartchildcareagent.cn/api/v1/health
-python3 scripts/vivo_llm_smoke.py --runner docker --strict
-python3 scripts/consultation_sse_smoke.py --runner docker --base-url http://127.0.0.1:8000 --memory-check best-effort
-```
-
-## 13. 仍需人工完成
-
-- 腾讯云安全组或防火墙开放 `22`、`80`、`443`
-- `api-staging.smartchildcareagent.cn` 的 A 记录指向 `150.109.77.178`
-- 服务器根目录 `.env.release` 填入真实 `VIVO_APP_ID` / `VIVO_APP_KEY`
-- 前端部署平台设置 `BRAIN_API_BASE_URL=https://api-staging.smartchildcareagent.cn`
+- 不要因为 TLS 坏了就先删 Caddy 的 `/data` 或证书状态。
+- 只有在日志明确证明证书状态损坏时，才允许先备份再清理。
+- 默认优先顺序永远是：
+  - 目录与版本
+  - compose 展开
+  - backend 内部 health
+  - Caddy 实载配置
+  - TLS
+  - 外部 health
+  - raw SSE
+  - release proxy
