@@ -206,6 +206,46 @@ def test_parent_trend_query_writes_trace_and_snapshot_and_uses_memory(tmp_path, 
     )
 
 
+def test_parent_message_reflexion_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "parent-message-memory.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+    seed_child_memory()
+
+    orchestrator = build_orchestrator()
+    result = asyncio.run(
+        orchestrator.parent_message_reflexion(
+            {
+                "targetChildId": "child-1",
+                "teacherNote": "今天入园时有点黏老师，午睡前需要更多安抚。",
+                "issueSummary": "入园分离时情绪波动，午睡前需要更多陪伴。",
+                "currentInterventionCard": {
+                    "summary": "先降低沟通压力，再观察今晚情绪和入睡情况。",
+                    "tonightHomeAction": "睡前先保持固定节奏，再观察孩子安静下来需要多久。",
+                    "reviewIn48h": "请在明早入园前反馈，48 小时内一起复盘。",
+                },
+                "visibleChildren": [{"id": "child-1", "name": "child-one"}],
+                "debugMemory": True,
+                "debugLoop": True,
+            }
+        )
+    )
+
+    traces = asyncio.run(orchestrator.memory.get_recent_traces(child_id="child-1", limit=20))
+    snapshots = asyncio.run(orchestrator.repositories.list_recent_snapshots(limit=20, child_id="child-1"))
+
+    assert result["evaluationMeta"]["memoryContextUsed"] is True
+    assert result["memoryMeta"]["memory_context_used"] is True
+    assert any(item.action_type == "parent-message-reflexion" and item.status == "succeeded" for item in traces)
+    assert any(item.node_name == "parent-message-generator" for item in traces)
+    assert any(item.node_name == "parent-message-evaluator" for item in traces)
+    assert any(item.snapshot_type == "parent-message-reflexion-result" for item in snapshots)
+    assert any(
+        item.node_name == "parent-message-reflexion"
+        and item.metadata_json.get("memory_context_used") is True
+        for item in traces
+    )
+
+
 def test_memory_service_remember_persists_session_message(monkeypatch):
     configure_memory_backend(monkeypatch, backend="memory")
 

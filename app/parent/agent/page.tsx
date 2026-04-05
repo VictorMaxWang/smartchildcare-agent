@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import { BrainCircuit, CheckCircle2, Clock3, Mic, ScanSearch, Send, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
+import ParentTrendResponseCard from "@/components/parent/ParentTrendResponseCard";
 import {
   AgentWorkspaceCard,
   InlineLinkButton,
@@ -17,9 +18,26 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { buildParentAgentChildContext, buildParentAgentFollowUpPayload, buildParentAgentFollowUpResult, buildParentAgentSuggestionResult, buildParentChildSuggestionSnapshot, PARENT_AGENT_QUICK_QUESTIONS, type ParentAgentResult } from "@/lib/agent/parent-agent";
+import {
+  buildParentAgentChildContext,
+  buildParentAgentFollowUpPayload,
+  buildParentAgentFollowUpResult,
+  buildParentAgentSuggestionResult,
+  buildParentChildSuggestionSnapshot,
+  PARENT_AGENT_QUICK_QUESTIONS,
+  type ParentAgentResult,
+} from "@/lib/agent/parent-agent";
+import {
+  buildParentTrendQueryPayload,
+  isLikelyTrendQuestion,
+  PARENT_TREND_QUICK_QUESTIONS,
+} from "@/lib/agent/parent-trend";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
-import type { AiFollowUpResponse, AiSuggestionResponse } from "@/lib/ai/types";
+import type {
+  AiFollowUpResponse,
+  AiSuggestionResponse,
+  ParentTrendQueryResponse,
+} from "@/lib/ai/types";
 import { getLocalToday } from "@/lib/date";
 import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
 import { buildReminderItems } from "@/lib/mobile/reminders";
@@ -60,6 +78,8 @@ function buildFeedbackContent(input: {
 export default function ParentAgentPage() {
   const searchParams = useSearchParams();
   const {
+    children,
+    attendanceRecords,
     getParentFeed,
     healthCheckRecords,
     mealRecords,
@@ -68,6 +88,8 @@ export default function ParentAgentPage() {
     taskCheckInRecords,
     addGuardianFeedback,
     checkInTask,
+    interventionCards,
+    consultations,
     reminders,
     mobileDrafts,
     saveMobileDraft,
@@ -86,6 +108,10 @@ export default function ParentAgentPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [followUpLoading, setFollowUpLoading] = useState(false);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const [latestTrendQuery, setLatestTrendQuery] = useState<string | null>(null);
+  const [latestTrendResult, setLatestTrendResult] = useState<ParentTrendQueryResponse | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
   const [feedbackExecutionStatus, setFeedbackExecutionStatus] = useState<"completed" | "partial" | "not_started" | null>(null);
   const [feedbackImproved, setFeedbackImproved] = useState<boolean | "unknown">("unknown");
@@ -162,6 +188,7 @@ export default function ParentAgentPage() {
       ),
     [reminders, selectedFeed]
   );
+  const questionLoading = suggestionLoading || followUpLoading || trendLoading;
 
   useEffect(() => {
     if (!selectedChildId && parentFeed[0]?.child.id) {
@@ -172,6 +199,10 @@ export default function ParentAgentPage() {
   useEffect(() => {
     setHistory([]);
     setQuestion("");
+    setTrendLoading(false);
+    setTrendError(null);
+    setLatestTrendQuery(null);
+    setLatestTrendResult(null);
     setFeedbackStatus(null);
     setFeedbackExecutionStatus(null);
   }, [selectedChildId]);
@@ -236,11 +267,75 @@ export default function ParentAgentPage() {
     };
   }, [baseContext, snapshot]);
 
+  async function readRouteError(response: Response, fallbackMessage: string) {
+    try {
+      const body = (await response.json()) as { error?: string; detail?: string };
+      return body.error ?? body.detail ?? fallbackMessage;
+    } catch {
+      return fallbackMessage;
+    }
+  }
+
+  async function submitTrendQuery(nextQuestion: string) {
+    if (!selectedFeed) return;
+
+    setTrendLoading(true);
+    setTrendError(null);
+    setLatestTrendQuery(nextQuestion);
+    setLatestTrendResult(null);
+
+    try {
+      const payload = buildParentTrendQueryPayload({
+        question: nextQuestion,
+        childId: selectedFeed.child.id,
+        children,
+        attendanceRecords,
+        mealRecords,
+        growthRecords,
+        guardianFeedbacks,
+        healthCheckRecords,
+        taskCheckInRecords,
+        interventionCards,
+        consultations,
+        mobileDrafts,
+        reminders,
+      });
+
+      const response = await fetch("/api/ai/parent-trend-query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readRouteError(response, "趋势查询暂时不可用，请稍后再试。"));
+      }
+
+      const data = (await response.json()) as ParentTrendQueryResponse;
+      setLatestTrendResult(data);
+      setQuestion("");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "趋势查询暂时不可用，请稍后再试。";
+      setTrendError(message);
+    } finally {
+      setTrendLoading(false);
+    }
+  }
+
   async function submitFollowUp(prefilledQuestion?: string) {
     if (!activeContext || !currentResult) return;
     const nextQuestion = (prefilledQuestion ?? question).trim();
     if (!nextQuestion) return;
 
+    if (isLikelyTrendQuestion(nextQuestion)) {
+      await submitTrendQuery(nextQuestion);
+      return;
+    }
+
+    setTrendError(null);
+    setLatestTrendQuery(null);
+    setLatestTrendResult(null);
     setFollowUpLoading(true);
     try {
       const payload = buildParentAgentFollowUpPayload({
@@ -456,7 +551,7 @@ export default function ParentAgentPage() {
                         setQuestion(item);
                         void submitFollowUp(item);
                       }}
-                      disabled={followUpLoading || suggestionLoading || !currentResult}
+                      disabled={questionLoading || !currentResult}
                     >
                       {item}
                     </Button>
@@ -534,7 +629,7 @@ export default function ParentAgentPage() {
               )}
             </AgentWorkspaceCard>
 
-            <SectionCard title="AI 回复区" description="支持快捷问题和继续追问，回答会自动带上当前干预卡和最近反馈。">
+            <SectionCard title="AI 回复区" description="支持普通追问和趋势问答，回答会自动带上当前干预卡、最近反馈和趋势图卡。">
               <div className="space-y-4">
                 <Textarea
                   value={question}
@@ -542,17 +637,53 @@ export default function ParentAgentPage() {
                   placeholder="继续追问，例如：今晚我具体先做哪一步？如果孩子不配合怎么办？"
                   className="min-h-28 bg-white"
                 />
-                <div className="flex flex-wrap justify-between gap-3">
-                  <div className="flex flex-wrap gap-2">
-                    {currentResult?.recommendedQuestions.slice(0, 3).map((item) => (
-                      <Button key={item} type="button" variant="outline" className="rounded-full" onClick={() => void submitFollowUp(item)} disabled={followUpLoading}>
-                        {item}
-                      </Button>
-                    ))}
+                <div className="space-y-3">
+                  <div>
+                    <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">继续追问</p>
+                    <div className="flex flex-wrap gap-2">
+                      {currentResult?.recommendedQuestions.slice(0, 3).map((item) => (
+                        <Button
+                          key={item}
+                          type="button"
+                          variant="outline"
+                          className="rounded-full"
+                          onClick={() => void submitFollowUp(item)}
+                          disabled={questionLoading}
+                        >
+                          {item}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                  <Button className="gap-2 rounded-xl" onClick={() => void submitFollowUp()} disabled={followUpLoading || !question.trim() || !currentResult}>
+                  <div>
+                    <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">趋势快问</p>
+                    <div className="flex flex-wrap gap-2">
+                      {PARENT_TREND_QUICK_QUESTIONS.map((item) => (
+                        <Button
+                          key={item}
+                          type="button"
+                          variant="outline"
+                          className="rounded-full border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100"
+                          onClick={() => {
+                            setQuestion(item);
+                            void submitFollowUp(item);
+                          }}
+                          disabled={questionLoading || !currentResult}
+                        >
+                          {item}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-3">
+                  <Button
+                    className="gap-2 rounded-xl"
+                    onClick={() => void submitFollowUp()}
+                    disabled={questionLoading || !question.trim() || !currentResult}
+                  >
                     <Send className="h-4 w-4" />
-                    {followUpLoading ? "追问中…" : "发送追问"}
+                    {followUpLoading ? "追问中…" : trendLoading ? "查询趋势中…" : "发送追问"}
                   </Button>
                 </div>
                 <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
@@ -564,6 +695,20 @@ export default function ParentAgentPage() {
                     <p className="text-sm text-slate-500">建议生成后，这里会展示结构化 AI 回复。</p>
                   )}
                 </div>
+                {followUpLoading ? (
+                  <div className="rounded-3xl border border-slate-100 bg-white p-4 text-sm text-slate-500">
+                    AI 正在整理最新追问，请稍候…
+                  </div>
+                ) : null}
+                {latestTrendQuery || trendLoading || trendError || latestTrendResult ? (
+                  <ParentTrendResponseCard
+                    question={latestTrendQuery}
+                    result={latestTrendResult}
+                    loading={trendLoading}
+                    error={trendError}
+                    onRetry={latestTrendQuery ? () => void submitTrendQuery(latestTrendQuery) : undefined}
+                  />
+                ) : null}
               </div>
             </SectionCard>
 
@@ -728,7 +873,7 @@ export default function ParentAgentPage() {
                     type="button"
                     onClick={() => void submitFollowUp(item)}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                    disabled={followUpLoading || !currentResult}
+                    disabled={questionLoading || !currentResult}
                   >
                     <div className="flex items-start gap-3">
                       <Sparkles className="mt-0.5 h-4 w-4 text-indigo-500" />

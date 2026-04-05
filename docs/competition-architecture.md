@@ -288,17 +288,21 @@ flowchart TD
 - 它不是新的后台工作流，而是现有 consultation 结果的园长侧可解释展示层。
 - 当前可写成“Admin 展示层已完成的第二展示位”，而不是新的独立主线；其后端与 staging 边界仍沿用高风险会诊主线的保守口径。
 
-### 主路径三：Parent 端时光穿梭机 / 微绘本
+### 主路径三：Parent 趋势问答 / TrendLineChart 对话增强
 当前代码基础：
 - `app/parent/page.tsx`
 - `app/parent/agent/page.tsx`
 - `components/agent/InterventionCardPanel.tsx`
+- `components/parent/TrendLineChart.tsx`
+- `components/parent/ParentTrendResponseCard.tsx`
+- `lib/agent/parent-trend.ts`
+- `app/api/ai/parent-trend-query/route.ts`
 - `lib/store.tsx`
 
 当前建议口径：
-- 这条路径已具备数据、卡片、反馈与行动的基础。
-- “时光穿梭机 / 微绘本”当前更适合写成比赛阶段下一步增强方向。
-- 不应在文档中把它描述成当前最优先主攻线，更不应描述成已经完整交付。
+- 这条路径已具备 `T10` backend + `T11` Parent 展示层，能把 7 / 14 / 30 天时间窗聚合结果、解释文本、comparison、warnings 与 dataQuality 压缩进家长聊天流。
+- 它当前更适合作为比赛中的家长侧补强展示线，而不是新的最优先主攻线。
+- “时光穿梭机 / 微绘本”继续作为后续情感化增强方向，不应描述成已经完整交付。
 
 ## 9. 当前阶段任务主线、并行关系与 staging 边界
 更完整状态账本见 `docs/current-status-ledger.md`。本文件只保留比赛叙事所需的当前阶段口径。
@@ -307,7 +311,7 @@ flowchart TD
 - 主线 1：`T2 -> T4C -> T5/T5A`
 - 主线 2：高风险儿童一键会诊继续作为当前最强 Agent 工作流展示位
 - 主线 3：Admin 决策区 / 风险优先级 / 会诊 trace 面板作为第二强展示位
-- 主线 4：Parent 时光穿梭机 / 微绘本作为后续增强方向
+- 主线 4：Parent 趋势问答 / TrendLineChart 作为已完成展示层的家长侧补强线；“时光穿梭机 / 微绘本”继续作为后续增强方向
 
 ### 当前正在并行的线程
 - `T4C`：把 `T2` 的上传结果接到 `T4` 的 understanding response
@@ -339,7 +343,7 @@ flowchart TD
 - 当前 backend 不是纯 mock，但也不能对外宣称 fully live。
 - vivo provider 现状与最终官方接入细节之间可能存在差异。
 - staging 当前域名 / TLS / release proxy 尚未最终打通。
-- Parent 端“时光穿梭机 / 微绘本”目前仍偏方向性需求，不能写成熟成功能。
+- Parent 端趋势问答已完成前端展示层，但仍不能写成统一 live 趋势平台；“时光穿梭机 / 微绘本”仍偏方向性需求。
 
 ### Fallback 策略
 - FastAPI brain 不可用时，走 Next route 本地 fallback，维持 demo 可运行。

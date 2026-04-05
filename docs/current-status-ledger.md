@@ -56,7 +56,7 @@
 - 当前最优先主线：`T2 -> T4C -> T5/T5A`
 - 当前最强展示位：高风险儿童一键会诊
 - 当前第二强展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
-- Parent 时光穿梭机 / 微绘本：后续增强，不是当前主攻线
+- Parent 趋势问答 / TrendLineChart：已完成展示层接入，作为家长侧补强展示线，不是当前主攻线
 - 当前并行线程：`T4C`、`T5A`、`D2`
 - `S1.1` 尚未启动，等待 staging SSH
 - 不要把 `T2`、`T4A`、`T4B`、`T6` 误写成未开始
@@ -96,8 +96,8 @@
 | `T7` | Evaluator-Optimizer / Reflexion（家长话术与干预卡） | 未开始 | 属后续阶段 | 当前无正式交付路径，保持为 roadmap |
 | `T8` | 高风险儿童一键会诊 Multi-Agent backend | 部分具备基础 | 当前高风险会诊主链已有较强基础与金链路，但不要等同于完整 `T8` 全量版本已完成 | `app/teacher/high-risk-consultation/page.tsx`、`lib/agent/high-risk-consultation.ts`、`backend/tests/test_high_risk_consultation_stream.py` |
 | `T9` | Admin 决策卡 + 风险优先级区 + 会诊 trace 面板 | 已完成（Admin 展示层） | `/admin` 与 `/admin/agent` 已接入共享决策卡、风险优先级区与会诊 trace 面板；仍不代表 staging / 远端链路已 fully healthy | 园长侧叙事仍以现有首页 / agent 为主 |
-| `T10` | Parent 趋势问答 backend（7/14/30 天时间窗聚合） | 未开始 | 后续阶段 | 当前不要写成已具备 |
-| `T11` | TrendLineChart + Parent 对话界面集成 | 未开始 | 后续阶段 | 当前不要写成已具备 |
+| `T10` | Parent 趋势问答 backend（7/14/30 天时间窗聚合） | 已完成（代码层） | backend 已完成并支持 `request_snapshot` / `remote_snapshot`；不可把 fallback 结果包装成高质量真实趋势 | `backend/app/api/v1/endpoints/agents.py`、`backend/app/services/parent_trend_service.py`、`backend/tests/test_parent_trend_service.py` |
+| `T11` | TrendLineChart + Parent 对话界面集成 | 已完成（Parent 展示层） | `/parent/agent` 已接入趋势快捷问答、TrendLineChart、fallback / warning / dataQuality 展示；仍不改变当前最优先主线 | `app/parent/agent/page.tsx`、`components/parent/TrendLineChart.tsx`、`components/parent/ParentTrendResponseCard.tsx` |
 | `T12` | 微绘本 pipeline + StoryBookViewer | 未开始 | 后续阶段 | 当前不要写成已具备 |
 | `T13` | 集成联调 + README / demo-script / competition docs 收尾 | 未开始 | 最终收尾阶段 | 当前不要写成已开始大规模收尾 |
 
@@ -117,13 +117,14 @@
 - 不要把 staging 写成 fully healthy。
 - 不要把高风险会诊金链路写成完整 `T8` 已完成。
 - 不要把 `T9` 扩写成“后端聚合接口、staging、远端 release proxy 都已联通验收”；当前完成的是 Admin 展示层与前端复用接线。
+- 不要把 `T10` / `T11` 扩写成统一 live 趋势平台，也不要写成 staging / vivo 全量验收完成。
 
 ## 8. 当前推荐优先级
 1. 主线 1：`T2 -> T4C -> T5/T5A`
 2. 主线 2：高风险儿童一键会诊继续作为当前最强 Agent 工作流展示位
 3. 主线 3：Admin 决策区继续作为第二强展示位，和高风险会诊一起构成园长侧答辩叙事
 4. 主线 4：拿到 staging SSH 后执行 `S1.1`
-5. Parent 时光穿梭机 / 微绘本、Evaluator / Reflexion、README / demo-script 收尾全部后置
+5. Parent 趋势问答展示层已补齐，但整体仍属于家长侧补强线；“时光穿梭机 / 微绘本”、Evaluator / Reflexion、README / demo-script 收尾继续后置
 
 ## 9. staging 当前真实状态
 ### 当前可正式写入文档的保守表述

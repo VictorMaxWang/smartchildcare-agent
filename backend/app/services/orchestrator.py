@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 from app.agents.admin_agent import run_admin_agent
+from app.agents.generator_evaluator import run_parent_message_reflexion
 from app.agents.high_risk_consultation import (
     run_high_risk_consultation,
     stream_high_risk_consultation as run_high_risk_consultation_stream,
@@ -183,7 +184,7 @@ def _debug_memory_enabled(payload: dict[str, Any]) -> bool:
 
 
 def _memory_query(task: str, payload: dict[str, Any]) -> str | None:
-    for key in ("question", "teacherNote"):
+    for key in ("question", "teacherNote", "issueSummary"):
         value = _coerce_string(payload.get(key))
         if value:
             return value
@@ -225,6 +226,8 @@ class Orchestrator:
         if task == "high-risk-consultation":
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "parent-follow-up":
+            child_ids = _extract_child_ids(effective_payload, limit=1)
+        elif task == "parent-message-reflexion":
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "parent-trend-query":
             child_ids = _extract_child_ids(effective_payload, limit=1)
@@ -376,6 +379,25 @@ class Orchestrator:
             runner=run_parent_follow_up,
             node_name="parent-follow-up",
             snapshot_type="parent-follow-up-result",
+        )
+
+    async def parent_message_reflexion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        trace_id = (
+            _coerce_string(payload.get("trace_id"))
+            or _coerce_string(payload.get("traceId"))
+            or _create_trace_id("parent-message-reflexion")
+        )
+        reflexion_payload = {**payload, "traceId": trace_id}
+
+        async def runner(effective_payload: dict[str, Any]) -> dict[str, Any]:
+            return await run_parent_message_reflexion(effective_payload, memory=self.memory)
+
+        return await self._run_with_trace(
+            task="parent-message-reflexion",
+            payload=reflexion_payload,
+            runner=runner,
+            node_name="parent-message-reflexion",
+            snapshot_type="parent-message-reflexion-result",
         )
 
     async def parent_trend_query(self, payload: dict[str, Any]) -> dict[str, Any]:

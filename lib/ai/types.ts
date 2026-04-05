@@ -1,3 +1,5 @@
+import type { AppStateSnapshot } from "@/lib/persistence/snapshot";
+
 export type AiRiskLevel = "low" | "medium" | "high";
 export type AiTrendPrediction = "up" | "stable" | "down";
 export type ConsultationTriggerType =
@@ -445,6 +447,101 @@ export interface AiFollowUpResponse {
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
   model?: string;
+}
+
+export type ParentTrendIntent = "emotion" | "diet" | "sleep" | "health" | "growth_overall";
+export type ParentTrendLabel = "改善" | "波动" | "稳定" | "需关注";
+export type ParentTrendDirection = "up" | "down" | "flat" | "insufficient";
+export type ParentTrendSeriesKind = "line" | "bar";
+
+export interface ParentTrendQueryPayload {
+  question: string;
+  childId?: string;
+  windowDays?: number;
+  appSnapshot?: AppStateSnapshot;
+  institutionId?: string;
+  traceId?: string;
+  debugMemory?: boolean;
+}
+
+export interface ParentTrendQueryChild {
+  childId?: string | null;
+  name?: string | null;
+  nickname?: string | null;
+  className?: string | null;
+  institutionId?: string | null;
+}
+
+export interface ParentTrendQuerySummary {
+  question: string;
+  requestedWindowDays?: number | null;
+  resolvedWindowDays: number;
+  childId?: string | null;
+  childName?: string | null;
+}
+
+export interface ParentTrendRange {
+  startDate: string;
+  endDate: string;
+}
+
+export interface ParentTrendSeriesPoint {
+  date: string;
+  label: string;
+  value: number | null;
+  rawCount: number;
+  missing: boolean;
+}
+
+export interface ParentTrendSeries {
+  id: string;
+  label: string;
+  unit: string;
+  kind: ParentTrendSeriesKind;
+  data: ParentTrendSeriesPoint[];
+}
+
+export interface ParentTrendComparison {
+  baselineAvg: number | null;
+  recentAvg: number | null;
+  deltaPct: number | null;
+  direction: ParentTrendDirection;
+}
+
+export interface ParentTrendSupportingSignal {
+  sourceType: string;
+  date?: string | null;
+  summary: string;
+}
+
+export interface ParentTrendDataQuality {
+  observedDays: number;
+  coverageRatio: number;
+  sparse: boolean;
+  fallbackUsed: boolean;
+  source: string;
+}
+
+export interface ParentTrendQueryResponse {
+  query: ParentTrendQuerySummary;
+  intent: ParentTrendIntent;
+  metric: string;
+  child: ParentTrendQueryChild;
+  windowDays: number;
+  range: ParentTrendRange;
+  labels: string[];
+  xAxis: string[];
+  series: ParentTrendSeries[];
+  trendLabel: ParentTrendLabel;
+  trendScore: number;
+  comparison: ParentTrendComparison;
+  explanation: string;
+  supportingSignals: ParentTrendSupportingSignal[];
+  dataQuality: ParentTrendDataQuality;
+  warnings: string[];
+  memoryMeta?: Record<string, unknown> | null;
+  source: string;
+  fallback: boolean;
 }
 
 export interface WeeklyReportSnapshot {

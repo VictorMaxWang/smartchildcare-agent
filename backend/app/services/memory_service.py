@@ -250,6 +250,14 @@ def _workflow_snapshot_types(workflow_type: str) -> list[str]:
         return ["consultation-result", "teacher-agent-result", "parent-follow-up-result"]
     if workflow_type in {"teacher-agent", "teacher-follow-up", "parent-follow-up"}:
         return ["consultation-result", "teacher-agent-result", "parent-follow-up-result", "session-message"]
+    if workflow_type == "parent-message-reflexion":
+        return [
+            "consultation-result",
+            "teacher-agent-result",
+            "parent-follow-up-result",
+            "parent-message-reflexion-result",
+            "session-message",
+        ]
     if workflow_type == "parent-trend-query":
         return ["consultation-result", "teacher-agent-result", "parent-follow-up-result", "parent-trend-result", "session-message"]
     if workflow_type == "weekly-report":
