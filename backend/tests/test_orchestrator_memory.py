@@ -65,6 +65,54 @@ def seed_child_memory():
     )
 
 
+def build_parent_trend_snapshot() -> dict:
+    return {
+        "children": [
+            {
+                "id": "child-1",
+                "name": "安安",
+                "nickname": "安宝",
+                "institutionId": "inst-test",
+                "className": "小一班",
+            }
+        ],
+        "attendance": [],
+        "meals": [],
+        "growth": [
+            {
+                "id": "growth-1",
+                "childId": "child-1",
+                "createdAt": "2026-03-10T09:00:00+08:00",
+                "category": "social-emotional",
+                "tags": ["分离焦虑", "哭闹"],
+                "selectedIndicators": ["daily-observation"],
+                "description": "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+                "needsAttention": True,
+                "followUpAction": "continue observation",
+            },
+            {
+                "id": "growth-2",
+                "childId": "child-1",
+                "createdAt": "2026-04-03T09:00:00+08:00",
+                "category": "social-emotional",
+                "tags": ["平静", "稳定"],
+                "selectedIndicators": ["daily-observation"],
+                "description": "今天入园更平静，情绪稳定，能主动跟老师进班。",
+                "needsAttention": False,
+                "followUpAction": "continue observation",
+            },
+        ],
+        "feedback": [],
+        "health": [],
+        "taskCheckIns": [],
+        "interventionCards": [],
+        "consultations": [],
+        "mobileDrafts": [],
+        "reminders": [],
+        "updatedAt": "2026-04-04T00:00:00Z",
+    }
+
+
 def test_high_risk_consultation_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):
     sqlite_path = tmp_path / "orchestrator-memory.db"
     configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
@@ -124,6 +172,38 @@ def test_teacher_workflow_result_contains_memory_continuity(tmp_path, monkeypatc
     assert result["source"] == "mock"
     assert result["continuityNotes"]
     assert result["memoryMeta"]["memory_context_used"] is True
+
+
+def test_parent_trend_query_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "parent-trend-memory.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+    seed_child_memory()
+
+    orchestrator = build_orchestrator()
+    result = asyncio.run(
+        orchestrator.parent_trend_query(
+            {
+                "question": "最近一个月分离焦虑缓解了吗？",
+                "childId": "child-1",
+                "appSnapshot": build_parent_trend_snapshot(),
+                "debugMemory": True,
+            }
+        )
+    )
+
+    traces = asyncio.run(orchestrator.memory.get_recent_traces(child_id="child-1", limit=10))
+    snapshots = asyncio.run(orchestrator.repositories.list_recent_snapshots(limit=10, child_id="child-1"))
+
+    assert result["intent"] == "emotion"
+    assert result["memoryMeta"]["memory_context_used"] is True
+    assert any(signal["sourceType"] == "memory" for signal in result["supportingSignals"])
+    assert any(item.action_type == "parent-trend-query" and item.status == "succeeded" for item in traces)
+    assert any(item.snapshot_type == "parent-trend-result" for item in snapshots)
+    assert any(
+        item.node_name == "parent-trend-query"
+        and item.metadata_json.get("memory_context_used") is True
+        for item in traces
+    )
 
 
 def test_memory_service_remember_persists_session_message(monkeypatch):

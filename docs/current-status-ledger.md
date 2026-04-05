@@ -55,6 +55,7 @@
 ## 3. 一屏结论
 - 当前最优先主线：`T2 -> T4C -> T5/T5A`
 - 当前最强展示位：高风险儿童一键会诊
+- 当前第二强展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
 - Parent 时光穿梭机 / 微绘本：后续增强，不是当前主攻线
 - 当前并行线程：`T4C`、`T5A`、`D2`
 - `S1.1` 尚未启动，等待 staging SSH
@@ -94,7 +95,7 @@
 | `T6` | Tool layer + ReAct runner + trace | 已完成 | 后端 agent 基础设施已具备可演示能力，通知仍未接真实发送通道 | `backend/app/tools/childcare_tools.py`、`backend/app/services/react_runner.py`、`backend/tests/test_react_runner.py` |
 | `T7` | Evaluator-Optimizer / Reflexion（家长话术与干预卡） | 未开始 | 属后续阶段 | 当前无正式交付路径，保持为 roadmap |
 | `T8` | 高风险儿童一键会诊 Multi-Agent backend | 部分具备基础 | 当前高风险会诊主链已有较强基础与金链路，但不要等同于完整 `T8` 全量版本已完成 | `app/teacher/high-risk-consultation/page.tsx`、`lib/agent/high-risk-consultation.ts`、`backend/tests/test_high_risk_consultation_stream.py` |
-| `T9` | Admin 决策卡 + 风险优先级区 + 会诊 trace 面板 | 未开始 | 后续阶段 | 园长侧叙事仍以现有首页 / agent 为主 |
+| `T9` | Admin 决策卡 + 风险优先级区 + 会诊 trace 面板 | 已完成（Admin 展示层） | `/admin` 与 `/admin/agent` 已接入共享决策卡、风险优先级区与会诊 trace 面板；仍不代表 staging / 远端链路已 fully healthy | 园长侧叙事仍以现有首页 / agent 为主 |
 | `T10` | Parent 趋势问答 backend（7/14/30 天时间窗聚合） | 未开始 | 后续阶段 | 当前不要写成已具备 |
 | `T11` | TrendLineChart + Parent 对话界面集成 | 未开始 | 后续阶段 | 当前不要写成已具备 |
 | `T12` | 微绘本 pipeline + StoryBookViewer | 未开始 | 后续阶段 | 当前不要写成已具备 |
@@ -105,6 +106,7 @@
 - `T4C`：`T2 -> T4` glue
 - `T5A`：Teacher 草稿确认流组件壳 + persist 抽象
 - `D2`：当前状态账本增强
+- `T9`：Admin 决策区 / 风险优先级 / 会诊 trace 面板已完成展示层接入，作为高风险会诊后的第二强展示位
 - `S1.1`：尚未启动，等待 SSH
 
 ### 当前不要误重排 / 误重开
@@ -114,12 +116,14 @@
 - 不要把 `T5A` 写成完整 `T5` 已完成。
 - 不要把 staging 写成 fully healthy。
 - 不要把高风险会诊金链路写成完整 `T8` 已完成。
+- 不要把 `T9` 扩写成“后端聚合接口、staging、远端 release proxy 都已联通验收”；当前完成的是 Admin 展示层与前端复用接线。
 
 ## 8. 当前推荐优先级
 1. 主线 1：`T2 -> T4C -> T5/T5A`
 2. 主线 2：高风险儿童一键会诊继续作为当前最强 Agent 工作流展示位
-3. 主线 3：拿到 staging SSH 后执行 `S1.1`
-4. Parent 时光穿梭机 / 微绘本、Admin 决策卡、Evaluator / Reflexion、README / demo-script 收尾全部后置
+3. 主线 3：Admin 决策区继续作为第二强展示位，和高风险会诊一起构成园长侧答辩叙事
+4. 主线 4：拿到 staging SSH 后执行 `S1.1`
+5. Parent 时光穿梭机 / 微绘本、Evaluator / Reflexion、README / demo-script 收尾全部后置
 
 ## 9. staging 当前真实状态
 ### 当前可正式写入文档的保守表述

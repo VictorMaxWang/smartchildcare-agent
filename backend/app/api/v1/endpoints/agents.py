@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.schemas.parent_trend import ParentTrendQueryRequest, ParentTrendQueryResponse
 from app.schemas.react_tools import ReactRunRequest, ReactRunResponse
 from app.services.orchestrator import Orchestrator, build_orchestrator
 
@@ -23,6 +24,18 @@ async def parent_suggestions(payload: dict[str, Any], orchestrator: Orchestrator
 @router.post("/agents/parent/follow-up")
 async def parent_follow_up(payload: dict[str, Any], orchestrator: Orchestrator = Depends(get_orchestrator)):
     return await orchestrator.parent_follow_up(payload)
+
+
+@router.post("/agents/parent/trend-query", response_model=ParentTrendQueryResponse)
+async def parent_trend_query(
+    payload: ParentTrendQueryRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+):
+    try:
+        result = await orchestrator.parent_trend_query(payload.model_dump(mode="json", by_alias=True))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ParentTrendQueryResponse.model_validate(result)
 
 
 @router.post("/agents/teacher/run")

@@ -27,6 +27,7 @@ from app.memory.session_memory import SessionMemory
 from app.memory.vector_store import SimpleVectorStore
 from app.providers.mock import build_mock_diet_evaluation, build_mock_vision_meal
 from app.services.memory_service import MemoryService
+from app.services.parent_trend_service import run_parent_trend_query
 from app.services.react_runner import ReactRunner
 from app.services.streaming import encode_sse, mock_agent_stream
 from app.schemas.memory import MemoryContextBuildOptions
@@ -91,7 +92,11 @@ def _extract_child_id(*values: Any) -> str | None:
 def _extract_child_ids(value: dict[str, Any], limit: int = 3) -> list[str]:
     child_ids: list[str] = []
 
-    target_child_id = _coerce_string(value.get("targetChildId")) or _coerce_string(value.get("child_id"))
+    target_child_id = (
+        _coerce_string(value.get("targetChildId"))
+        or _coerce_string(value.get("childId"))
+        or _coerce_string(value.get("child_id"))
+    )
     if target_child_id:
         child_ids.append(target_child_id)
 
@@ -186,6 +191,8 @@ def _memory_query(task: str, payload: dict[str, Any]) -> str | None:
         return "最近会诊 风险 闭环 家长反馈"
     if task in {"teacher-agent", "parent-follow-up"}:
         return "最近跟进 家长反馈 连续观察"
+    if task == "parent-trend-query":
+        return "最近儿童趋势 变化 家长问答"
     if task == "weekly-report":
         return "最近重点儿童 风险 闭环 周报"
     return None
@@ -218,6 +225,8 @@ class Orchestrator:
         if task == "high-risk-consultation":
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "parent-follow-up":
+            child_ids = _extract_child_ids(effective_payload, limit=1)
+        elif task == "parent-trend-query":
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "teacher-agent":
             if workflow == "weekly-summary":
@@ -367,6 +376,15 @@ class Orchestrator:
             runner=run_parent_follow_up,
             node_name="parent-follow-up",
             snapshot_type="parent-follow-up-result",
+        )
+
+    async def parent_trend_query(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._run_with_trace(
+            task="parent-trend-query",
+            payload=payload,
+            runner=run_parent_trend_query,
+            node_name="parent-trend-query",
+            snapshot_type="parent-trend-result",
         )
 
     async def teacher_run(self, payload: dict[str, Any]) -> dict[str, Any]:

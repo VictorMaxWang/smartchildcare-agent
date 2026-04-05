@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, ClipboardCheck, ShieldAlert, TrendingUp, Workflow } from "lucide-react";
+import RiskPriorityBoard from "@/components/admin/RiskPriorityBoard";
 import EmptyState from "@/components/EmptyState";
-import ConsultationStoryCard from "@/components/consultation/ConsultationStoryCard";
 import {
   AssistantEntryCard,
   InlineLinkButton,
@@ -13,6 +13,7 @@ import {
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
+import { buildAdminConsultationPriorityItems } from "@/lib/agent/admin-consultation";
 import { buildAdminHomeViewModel } from "@/lib/agent/admin-agent";
 import type { AdminDispatchEvent, InstitutionPriorityItem } from "@/lib/agent/admin-types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
@@ -51,9 +52,7 @@ export default function AdminHomePage() {
   } = useApp();
   const [notificationEvents, setNotificationEvents] = useState<AdminDispatchEvent[]>([]);
   const [notificationError, setNotificationError] = useState<string | null>(null);
-  const latestConsultations = getLatestConsultations()
-    .filter((item) => item.shouldEscalateToAdmin)
-    .slice(0, 4);
+  const latestConsultations = getLatestConsultations();
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +131,20 @@ export default function AdminHomePage() {
       visibleChildren,
     ]
   );
+  const consultationPriorityItems = useMemo(
+    () =>
+      buildAdminConsultationPriorityItems({
+        consultations: latestConsultations,
+        children: visibleChildren.map((child) => ({
+          id: child.id,
+          name: child.name,
+          className: child.className,
+        })),
+        notificationEvents,
+        limit: 4,
+      }),
+    [latestConsultations, notificationEvents, visibleChildren]
+  );
 
   if (visibleChildren.length === 0) {
     return (
@@ -168,46 +181,11 @@ export default function AdminHomePage() {
             />
 
             <SectionCard
-              title="高风险会诊优先级决策区"
-              description="把教师发起的一键会诊直接升级成园长今天该盯的决策卡。"
-              actions={<Badge variant="warning">会诊驱动</Badge>}
+              title="今日重点会诊 / 高风险优先事项"
+              description="把教师发起的一键会诊直接升级成园长今天最该盯的决策区，适合移动端录屏和答辩展示。"
+              actions={<Badge variant="warning">AI 园长办公会</Badge>}
             >
-              <div className="grid gap-4 md:grid-cols-2">
-                {latestConsultations.length > 0 ? (
-                  latestConsultations.map((item) => {
-                    const child = visibleChildren.find((entry) => entry.id === item.childId);
-                    return (
-                      <div key={item.consultationId} className="rounded-3xl border border-amber-100 bg-linear-to-br from-amber-50 via-white to-rose-50 p-5">
-                        <div className="flex items-center justify-between gap-3">
-                          <Badge variant="warning">{item.riskLevel === "high" ? "P1" : item.riskLevel === "medium" ? "P2" : "P3"}</Badge>
-                          <EventStatusBadge
-                            status={
-                              item.directorDecisionCard.status === "completed"
-                                ? "completed"
-                                : item.directorDecisionCard.status === "in_progress"
-                                  ? "in_progress"
-                                  : "pending"
-                            }
-                          />
-                        </div>
-                        <p className="mt-4 text-lg font-semibold text-slate-900">{child?.name ?? item.childId}</p>
-                        <p className="mt-1 text-sm text-slate-500">{child?.className ?? "当前班级"}</p>
-                        <p className="mt-3 text-sm leading-6 text-slate-600">{item.directorDecisionCard.reason}</p>
-                        <ConsultationStoryCard result={item} className="mt-4" />
-                        <div className="mt-4 space-y-2 text-sm text-slate-600">
-                          <p>建议谁负责：{item.directorDecisionCard.recommendedOwnerName}</p>
-                          <p>建议何时处理：{item.directorDecisionCard.recommendedAt}</p>
-                          <p>当前状态：{item.directorDecisionCard.status === "completed" ? "已完成" : item.directorDecisionCard.status === "in_progress" ? "跟进中" : "待分派"}</p>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-sm text-slate-500 md:col-span-2">
-                    当前还没有升级到园长侧的高风险会诊卡，教师端发起一键会诊后这里会自动出现。
-                  </div>
-                )}
-              </div>
+              <RiskPriorityBoard items={consultationPriorityItems} />
             </SectionCard>
 
             <SectionCard
