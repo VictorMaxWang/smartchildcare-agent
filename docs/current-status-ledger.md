@@ -1,6 +1,6 @@
 # SmartChildcare Agent 当前状态账本
 
-更新基准：`2026-04-04`
+更新基准：`2026-04-05`
 
 本文件的目标不是重复比赛叙事，而是让新的 Codex 线程在开始之前先读懂：
 - `T0` 到 `T13` 的完整任务体系
@@ -105,7 +105,7 @@
 
 ## 7. 当前并行线程与禁止误操作
 ### 当前阶段关注项
-- Teacher 主线：`T2`、`T2.5`、`T4A`、`T4B`、`T4C`、`T5A`、`T5` 已基本闭环，当前进入录屏 / 验收收口阶段
+- Teacher 主线：`T2`、`T2.5`、`T4A`、`T4B`、`T4C`、`T5` 已基本闭环，`T5A` 已作为过渡阶段完成其作用；当前进入录屏 / 验收收口阶段
 - 高风险会诊：继续作为当前最强 Agent 工作流展示位
 - `T9`：Admin 决策区 / 风险优先级 / 会诊 trace 面板已完成展示层接入，作为第二展示位持续保持稳定
 - Parent 趋势线：`T10` / `T11` 已具展示能力，当前作为家长侧补强线维护
@@ -142,7 +142,7 @@
 - 因此当前只能写成“已有局部远端链路证据”，不能写成 staging 已 fully healthy / fully switched。
 
 ### 当前外部可见状态的稳定写法
-- 本轮做过一次公开只读核验，结论是“外部可见状态仍未收口”，但这类观测值是高时效信息，不应当长期写成账本常量。
+- 外部可见状态的瞬时观测值不应长期写成账本常量；如需确认最新公网症状，应回看部署 runbook 与 smoke 文档。
 - 如果后续线程需要看具体命令、返回值或最新公网症状，请回到：
   - `docs/deployment-vps.md`
   - `docs/vps-smoke.md`
@@ -160,7 +160,7 @@
 ### 如果继续 Teacher 语音主线
 - Teacher 语音主线一次只收口一个点：先做录屏 / 验收收口，再决定是否继续补局部细节，不要重新把 `T4C` / `T5A` 当成并行主开发线。
 - `T4C` 关注：`components/teacher/TeacherVoiceAssistantLayer.tsx`、`lib/mobile/teacher-voice-understand.ts`、`backend/app/services/teacher_voice_understand.py`
-- `T5A` 关注：`lib/mobile/voice-input.ts`、`backend/app/tools/childcare_tools.py`、`backend/app/services/react_runner.py`
+- `T5` 收口关注：`app/teacher/agent/page.tsx`、`components/teacher/TeacherDraftConfirmationPanel.tsx`、`lib/mobile/teacher-draft-records.ts`、`lib/mobile/voice-input.ts`
 
 ### 如果继续高风险会诊主线
 - 先读 `docs/teacher-consultation-qa.md`

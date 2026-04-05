@@ -18,6 +18,7 @@ class GeneratorStepResult:
     provider: str | None = None
     fallback: bool = False
     stop_reason: ParentMessageStopReason | None = None
+    debug_meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -32,6 +33,7 @@ class EvaluationStepResult:
     provider: str | None = None
     model: str | None = None
     stop_reason: ParentMessageStopReason | None = None
+    debug_meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

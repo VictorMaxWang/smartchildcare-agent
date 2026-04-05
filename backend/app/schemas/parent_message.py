@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 def _to_camel(value: str) -> str:
@@ -29,6 +29,10 @@ class ParentMessageRequestModel(BaseModel):
 
 class ParentMessageResponseModel(BaseModel):
     model_config = ConfigDict(alias_generator=_to_camel, populate_by_name=True, extra="ignore")
+
+
+class ParentMessageProviderResponseModel(BaseModel):
+    model_config = ConfigDict(alias_generator=_to_camel, populate_by_name=True, extra="forbid")
 
 
 class ParentMessageReflexionRequest(ParentMessageRequestModel):
@@ -98,6 +102,53 @@ class ParentMessageDraftOutput(ParentMessageResponseModel):
     why_this_matters: str
     estimated_time: str
     follow_up_window: str
+
+
+def _normalize_provider_text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None]
+    return [str(value)]
+
+
+class ParentMessageProviderDraftOutput(ParentMessageProviderResponseModel):
+    title: str
+    summary: str
+    tonight_actions: list[str] = Field(default_factory=list)
+    wording_for_parent: str
+    why_this_matters: str
+    estimated_time: str
+    follow_up_window: str
+
+    @field_validator("tonight_actions", mode="before")
+    @classmethod
+    def _normalize_tonight_actions(cls, value: Any) -> list[str]:
+        return _normalize_provider_text_list(value)
+
+
+class ParentMessageProviderEvaluatorOutput(ParentMessageProviderResponseModel):
+    score: float
+    problems: list[str] = Field(default_factory=list)
+    revision_suggestions: list[str] = Field(default_factory=list)
+    can_send: bool
+    retryable: bool = True
+    decision: ParentMessageDecision
+
+    @field_validator("problems", "revision_suggestions", mode="before")
+    @classmethod
+    def _normalize_text_lists(cls, value: Any) -> list[str]:
+        return _normalize_provider_text_list(value)
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def _normalize_decision(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
 
 class ParentMessageDebugIteration(ParentMessageResponseModel):

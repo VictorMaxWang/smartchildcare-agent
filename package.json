@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:parent-message-mapper": "node --test ./lib/agent/parent-message-reflexion.test.ts",
     "ai:smoke": "node ./scripts/ai-suggestions-smoke.mjs",
     "ai:smoke:trend": "node ./scripts/ai-parent-trend-smoke.mjs",
     "release:check": "node ./scripts/release-check.mjs",

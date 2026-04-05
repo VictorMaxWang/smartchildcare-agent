@@ -5,7 +5,7 @@
 - 这是 SmartChildcare Agent：一个“移动端优先的托育 AI 助手 / Agent 系统”，目标比赛是 vivo 赞助的 AIGC 创新赛。优先保证移动端产品感、Agent 工作流、可演示性、最大复用现有仓库。
 - 凡是涉及 vivo AI 能力接入，必须严格参考官方文档：[vivo 官方文档入口](https://aigc.vivo.com.cn/#/document/index?id=1746)。
 - 仅允许通过环境变量使用 `VIVO_APP_ID` / `VIVO_APP_KEY`；不要把真实值写入代码、README、日志、截图或示例文件，不要提交到 git。
-- 请主动使用 subagents，并在 plan 中先写出准备启动的 subagents 及其分工。至少包含：`repo_mapper`、`docs_architect`、`reviewer_tester`。
+- 请主动使用 subagents，并在 plan 中先写出准备启动的 subagents 及其分工。至少包含：`repo_mapper`、`docs_architect`、`status_ledger_editor`、`reviewer_tester`。
 - 先给 5-8 条 implementation plan，然后不要停，直接执行。
 - 只做当前任务范围内的改动；完成后输出：修改 / 新增文件清单、文档结构、运行 / 验证方式、风险与下一步建议。
 
@@ -146,6 +146,7 @@ Agent 设计与实现默认遵循以下原则：
   - `frontend_architect`：聚焦移动端结构、卡片流、role scaffold、交互叙事。
   - `vivo_api_integrator`：对照官方文档核验 vivo provider 接入方案。
   - `db_memory_designer`：梳理 MySQL、JSON cache、trace、vector 的演进策略。
+  - `status_ledger_editor`：在状态账本或阶段同步任务里负责对照代码事实收口任务状态与阶段口径。
   - `reviewer_tester`：审查脏工作树风险、验证命令、过度承诺风险和交付质量。
   - `docs_architect`：在文档任务里负责章节树、口径、信息压缩与长期可读性。
 

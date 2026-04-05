@@ -8,13 +8,17 @@ from time import perf_counter
 from typing import Any
 
 from app.core.config import Settings, get_settings
-from app.providers.base import ProviderAuthenticationError, ProviderResponseError
+from pydantic import ValidationError
+
+from app.providers.base import ProviderAuthenticationError, ProviderResponseError, ProviderTextResult
 from app.providers.resolver import can_use_vivo_text_provider, resolve_text_provider
 from app.schemas.parent_message import (
     ParentMessageDebugIteration,
     ParentMessageDraftOutput,
     ParentMessageEvaluationMeta,
     ParentMessageFinalOutput,
+    ParentMessageProviderDraftOutput,
+    ParentMessageProviderEvaluatorOutput,
     ParentMessageReflexionRequest,
     ParentMessageReflexionResponse,
 )
@@ -95,6 +99,7 @@ class ParentMessageReflexionService:
                     "model": result.model,
                     "provider": result.provider,
                     "fallback": result.fallback,
+                    **({"debug": result.debug_meta} if result.debug_meta else {}),
                 },
             )
             return result
@@ -131,6 +136,7 @@ class ParentMessageReflexionService:
                     "model": result.model,
                     "fallback": result.fallback,
                     "decision": result.decision,
+                    **({"debug": result.debug_meta} if result.debug_meta else {}),
                 },
             )
             return result
@@ -282,37 +288,40 @@ class ParentMessageReflexionService:
             raise
         except ProviderResponseError as error:
             logger.warning("parent message generator provider error: %s", error)
-            return GeneratorStepResult(
-                draft=local_draft.model_dump(mode="json"),
-                source="mock",
-                model="local-parent-message-v1",
-                provider="local-generator",
-                fallback=True,
-                stop_reason="generator_fallback",
+            return self._build_generator_fallback(
+                local_draft=local_draft,
+                provider_result=None,
+                fallback_reason="provider-response-error",
+                detail=str(error),
             )
 
         if provider_result.fallback or provider_result.source != "vivo":
-            return GeneratorStepResult(
-                draft=local_draft.model_dump(mode="json"),
-                source="mock",
-                model="local-parent-message-v1",
-                provider=provider_result.provider or "local-generator",
-                fallback=True,
-                stop_reason="generator_fallback",
+            return self._build_generator_fallback(
+                local_draft=local_draft,
+                provider_result=provider_result,
+                fallback_reason=self._provider_fallback_reason(provider_result),
             )
 
         try:
             parsed = self._extract_json_object(provider_result.text)
-            validated = ParentMessageDraftOutput.model_validate(parsed)
-        except Exception as error:  # pragma: no cover - defensive parsing fallback
+        except ValueError as error:  # pragma: no cover - defensive parsing fallback
             logger.warning("parent message generator JSON parse failed: %s", error)
-            return GeneratorStepResult(
-                draft=local_draft.model_dump(mode="json"),
-                source="mock",
-                model="local-parent-message-v1",
-                provider=provider_result.provider or "local-generator",
-                fallback=True,
-                stop_reason="generator_fallback",
+            return self._build_generator_fallback(
+                local_draft=local_draft,
+                provider_result=provider_result,
+                fallback_reason="json-parse-error",
+                detail=str(error),
+            )
+
+        try:
+            validated = ParentMessageProviderDraftOutput.model_validate(parsed)
+        except ValidationError as error:  # pragma: no cover - defensive schema fallback
+            logger.warning("parent message generator JSON schema mismatch: %s", error)
+            return self._build_generator_fallback(
+                local_draft=local_draft,
+                provider_result=provider_result,
+                fallback_reason="json-schema-mismatch",
+                detail=str(error),
             )
 
         return GeneratorStepResult(
@@ -321,6 +330,11 @@ class ParentMessageReflexionService:
             model=provider_result.model,
             provider=provider_result.provider,
             fallback=False,
+            debug_meta=self._build_provider_debug_meta(
+                stage="generator",
+                provider_result=provider_result,
+                fallback_reason="structured-json-ok",
+            ),
         )
 
     async def _evaluate_candidate(
@@ -334,19 +348,23 @@ class ParentMessageReflexionService:
             return local_result
 
         llm_result = await self._call_live_evaluator(draft, context, iteration)
-        if llm_result is None:
+        if llm_result.fallback:
             local_result.can_send = False
+            local_result.retryable = False
             local_result.decision = "block"
             local_result.fallback = True
             local_result.stop_reason = "evaluator_fallback"
             local_result.problems = unique_texts(
-                [*local_result.problems, "智能评审阶段未能稳定返回结构化结果，本轮需要人工再看一眼。"],
+                [*local_result.problems, *llm_result.problems],
                 limit=6,
             )
             local_result.revision_suggestions = unique_texts(
-                [*local_result.revision_suggestions, "优先使用本地草稿做人工确认，暂不直接发送。"],
+                [*local_result.revision_suggestions, *llm_result.revision_suggestions],
                 limit=6,
             )
+            local_result.provider = llm_result.provider or local_result.provider
+            local_result.model = llm_result.model or local_result.model
+            local_result.debug_meta = llm_result.debug_meta
             return local_result
 
         combined_score = min(local_result.score, llm_result.score)
@@ -375,7 +393,7 @@ class ParentMessageReflexionService:
         draft: dict[str, Any],
         context: ParentMessageContext,
         iteration: int,
-    ) -> EvaluationStepResult | None:
+    ) -> EvaluationStepResult:
         try:
             provider = resolve_text_provider(self.settings)
             provider_result = provider.summarize(
@@ -386,24 +404,44 @@ class ParentMessageReflexionService:
             raise
         except ProviderResponseError as error:
             logger.warning("parent message evaluator provider error: %s", error)
-            return None
+            return self._build_evaluator_fallback(
+                provider_result=None,
+                fallback_reason="provider-response-error",
+                detail=str(error),
+            )
 
         if provider_result.fallback or provider_result.source != "vivo":
-            return None
+            return self._build_evaluator_fallback(
+                provider_result=provider_result,
+                fallback_reason=self._provider_fallback_reason(provider_result),
+            )
 
         try:
             parsed = self._extract_json_object(provider_result.text)
-        except Exception as error:  # pragma: no cover - defensive parsing fallback
+        except ValueError as error:  # pragma: no cover - defensive parsing fallback
             logger.warning("parent message evaluator JSON parse failed: %s", error)
-            return None
+            return self._build_evaluator_fallback(
+                provider_result=provider_result,
+                fallback_reason="json-parse-error",
+                detail=str(error),
+            )
 
-        score = self._normalize_score(parsed.get("score"))
-        problems = [self._coerce_text(item) for item in safe_list(parsed.get("problems"))]
-        suggestions = [self._coerce_text(item) for item in safe_list(parsed.get("revision_suggestions"))]
-        can_send = bool(parsed.get("can_send")) and score >= 8
-        retryable = parsed.get("retryable")
-        retryable_bool = True if retryable is None else bool(retryable)
-        decision = self._coerce_text(parsed.get("decision")) or ("approve" if can_send else "revise")
+        try:
+            validated = ParentMessageProviderEvaluatorOutput.model_validate(parsed)
+        except ValidationError as error:  # pragma: no cover - defensive schema fallback
+            logger.warning("parent message evaluator JSON schema mismatch: %s", error)
+            return self._build_evaluator_fallback(
+                provider_result=provider_result,
+                fallback_reason="json-schema-mismatch",
+                detail=str(error),
+            )
+
+        score = self._normalize_score(validated.score)
+        problems = [self._coerce_text(item) for item in validated.problems]
+        suggestions = [self._coerce_text(item) for item in validated.revision_suggestions]
+        can_send = bool(validated.can_send) and score >= 8
+        retryable_bool = bool(validated.retryable)
+        decision = self._coerce_text(validated.decision) or ("approve" if can_send else "revise")
 
         return EvaluationStepResult(
             score=score,
@@ -416,6 +454,11 @@ class ParentMessageReflexionService:
             provider=provider_result.provider or "vivo-llm",
             model=provider_result.model,
             stop_reason=None,
+            debug_meta=self._build_provider_debug_meta(
+                stage="evaluator",
+                provider_result=provider_result,
+                fallback_reason="structured-json-ok",
+            ),
         )
 
     def _local_rule_evaluate(self, draft: dict[str, Any], context: ParentMessageContext) -> EvaluationStepResult:
@@ -552,8 +595,10 @@ class ParentMessageReflexionService:
         guardian_feedback = self._guardian_feedback_text(context.latest_guardian_feedback)
         prompt_sections = [
             "你是 SmartChildcare Agent 的 Generator 节点，负责生成给家长的温和沟通稿或家庭小干预卡。",
-            "请输出严格 JSON，不要输出 Markdown、解释、代码块或额外文字。",
+            "请只返回一个严格 JSON object，不要输出 Markdown、解释、代码块、注释或额外前后缀。",
+            "JSON 根节点必须是 object，不是数组；所有 key 必须使用双引号；不允许额外字段。",
             "JSON 字段必须只有：title, summary, tonight_actions, wording_for_parent, why_this_matters, estimated_time, follow_up_window。",
+            '合法 JSON 形状示例：{"title":"...","summary":"...","tonight_actions":["..."],"wording_for_parent":"...","why_this_matters":"...","estimated_time":"...","follow_up_window":"..."}',
             "要求：语气温和、不责备、不制造焦虑、动作明确、适合托育场景、适合手机端快速阅读。",
             f"孩子：{context.child_name}",
             f"老师观察：{context.teacher_note or '暂无单独老师补充，优先使用问题摘要。'}",
@@ -583,10 +628,12 @@ class ParentMessageReflexionService:
         return "\n".join(
             [
                 "你是 SmartChildcare Agent 的 Evaluator 节点，角色是资深托育园长 / 家园沟通顾问。",
-                "请严格输出 JSON，不要额外说明。",
+                "请只返回一个严格 JSON object，不要输出 Markdown、解释、代码块、注释或额外前后缀。",
+                "JSON 根节点必须是 object，不是数组；所有 key 必须使用双引号；不允许额外字段。",
                 "你必须从以下维度审查：是否引发焦虑、是否过度责备、是否足够委婉、是否有明确可执行动作、是否容易被家长快速理解、是否符合托育场景。",
                 "JSON 字段必须只有：score, problems, revision_suggestions, can_send, retryable, decision。",
                 "score 为 0-10 的数值；只有 score >= 8 且 can_send=true 才算通过。",
+                '合法 JSON 形状示例：{"score":8.5,"problems":["..."],"revision_suggestions":["..."],"can_send":true,"retryable":true,"decision":"revise"}',
                 f"孩子：{context.child_name}",
                 f"本轮迭代：{iteration}",
                 "待评估草稿：",
@@ -702,10 +749,16 @@ class ParentMessageReflexionService:
             if is_final
             else (item.iteration if item.evaluation.can_send and item.evaluation.score >= 8 else None)
         )
+        problems = unique_texts(item.evaluation.problems, limit=6)
+        if is_final and item.generator.fallback:
+            generator_warning = self._build_fallback_warning("生成阶段", item.generator.debug_meta.get("fallback_reason"))
+            if generator_warning:
+                problems = unique_texts([generator_warning, *problems], limit=6)
+
         return ParentMessageEvaluationMeta(
             score=round(float(item.evaluation.score), 2),
             can_send=bool(item.evaluation.can_send),
-            problems=unique_texts(item.evaluation.problems, limit=6),
+            problems=problems,
             revision_suggestions=unique_texts(item.evaluation.revision_suggestions, limit=6),
             iteration_scores=optimized.iteration_scores,
             approved_iteration=approved_iteration,
@@ -749,6 +802,120 @@ class ParentMessageReflexionService:
             **trace_meta,
         }
 
+    def _build_generator_fallback(
+        self,
+        *,
+        local_draft: ParentMessageDraftOutput,
+        provider_result: ProviderTextResult | None,
+        fallback_reason: str,
+        detail: str | None = None,
+    ) -> GeneratorStepResult:
+        return GeneratorStepResult(
+            draft=local_draft.model_dump(mode="json"),
+            source="mock",
+            model="local-parent-message-v1",
+            provider=(provider_result.provider if provider_result else None) or "local-generator",
+            fallback=True,
+            stop_reason="generator_fallback",
+            debug_meta=self._build_provider_debug_meta(
+                stage="generator",
+                provider_result=provider_result,
+                fallback_reason=fallback_reason,
+                detail=detail,
+            ),
+        )
+
+    def _build_evaluator_fallback(
+        self,
+        *,
+        provider_result: ProviderTextResult | None,
+        fallback_reason: str,
+        detail: str | None = None,
+    ) -> EvaluationStepResult:
+        warning = self._build_fallback_warning("评审阶段", fallback_reason)
+        debug_meta = self._build_provider_debug_meta(
+            stage="evaluator",
+            provider_result=provider_result,
+            fallback_reason=fallback_reason,
+            detail=detail,
+        )
+        return EvaluationStepResult(
+            score=0.0,
+            problems=unique_texts(
+                [warning, "智能评审阶段未能稳定返回结构化结果，本轮需要人工再看一眼。"],
+                limit=6,
+            ),
+            revision_suggestions=unique_texts(["优先使用本地草稿做人工确认，暂不直接发送。"], limit=6),
+            can_send=False,
+            retryable=False,
+            decision="block",
+            fallback=True,
+            provider=(provider_result.provider if provider_result else None) or "vivo-llm",
+            model=provider_result.model if provider_result else None,
+            stop_reason="evaluator_fallback",
+            debug_meta=debug_meta,
+        )
+
+    @classmethod
+    def _provider_fallback_reason(cls, provider_result: ProviderTextResult) -> str:
+        meta = safe_dict(provider_result.meta)
+        reason = cls._coerce_text(meta.get("reason"))
+        if reason:
+            return reason
+        if provider_result.source != "vivo":
+            return "non-vivo-source"
+        return "provider-fallback"
+
+    @classmethod
+    def _build_provider_debug_meta(
+        cls,
+        *,
+        stage: str,
+        provider_result: ProviderTextResult | None,
+        fallback_reason: str,
+        detail: str | None = None,
+    ) -> dict[str, Any]:
+        meta = safe_dict(provider_result.meta if provider_result else {})
+        return {
+            key: value
+            for key, value in {
+                "fallback_stage": stage,
+                "fallback_reason": fallback_reason,
+                "fallback_reason_text": cls._format_fallback_reason(fallback_reason),
+                "detail": detail,
+                "provider_source": provider_result.source if provider_result else None,
+                "provider_name": provider_result.provider if provider_result else None,
+                "provider_model": provider_result.model if provider_result else None,
+                "provider_request_id": provider_result.request_id if provider_result else None,
+                "provider_meta_reason": cls._coerce_text(meta.get("reason")),
+                "provider_status_code": meta.get("status_code"),
+                "provider_upstream_id": cls._coerce_text(meta.get("upstream_id")),
+            }.items()
+            if value not in (None, "", [], {})
+        }
+
+    @classmethod
+    def _build_fallback_warning(cls, stage: str, fallback_reason: Any) -> str:
+        normalized_reason = cls._coerce_text(fallback_reason)
+        reason_text = cls._format_fallback_reason(normalized_reason or "unknown")
+        return f"{stage}已回退为本地兜底：{reason_text}。"
+
+    @staticmethod
+    def _format_fallback_reason(reason: str) -> str:
+        return {
+            "structured-json-ok": "provider 已稳定返回结构化 JSON",
+            "provider-response-error": "上游服务响应异常",
+            "provider-fallback": "provider 未返回可直接使用的结果",
+            "non-vivo-source": "provider 未返回 vivo 实时结果",
+            "timeout": "上游请求超时",
+            "rate-limited": "上游请求被限流",
+            "empty-content": "上游返回内容为空",
+            "upstream-server-error": "上游服务暂时不可用",
+            "json-parse-error": "provider 输出无法解析为 JSON 对象",
+            "json-schema-mismatch": "provider 输出未通过 JSON 结构校验",
+            "unknown": "provider 输出不稳定",
+        }.get(reason, reason.replace("-", " "))
+
     async def _save_phase_trace(
         self,
         *,
@@ -782,26 +949,88 @@ class ParentMessageReflexionService:
     @staticmethod
     def _extract_json_object(text: str) -> dict[str, Any]:
         cleaned = text.strip()
-        code_fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", cleaned, re.DOTALL)
+        if not cleaned:
+            raise ValueError("empty provider response")
+
+        direct = ParentMessageReflexionService._try_load_json_object(cleaned)
+        if direct is not None:
+            return direct
+
+        code_fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
         if code_fence:
-            cleaned = code_fence.group(1).strip()
+            fenced = code_fence.group(1).strip()
+            parsed = ParentMessageReflexionService._try_load_json_object(fenced)
+            if parsed is not None:
+                return parsed
+
+        for match in re.finditer(r'"(?:\\.|[^"\\])*"', cleaned, re.DOTALL):
+            parsed = ParentMessageReflexionService._try_load_json_object(match.group(0))
+            if parsed is not None:
+                return parsed
+
+        balanced = ParentMessageReflexionService._find_first_json_object_slice(cleaned)
+        if balanced is not None:
+            parsed = ParentMessageReflexionService._try_load_json_object(balanced)
+            if parsed is not None:
+                return parsed
+
+        raise ValueError("missing JSON object")
+
+    @staticmethod
+    def _try_load_json_object(payload: str, depth: int = 0) -> dict[str, Any] | None:
+        if depth > 3 or not payload:
+            return None
 
         try:
-            parsed = json.loads(cleaned)
-            if isinstance(parsed, dict):
-                return parsed
+            parsed = json.loads(payload)
         except json.JSONDecodeError:
-            pass
+            parsed = None
 
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("missing JSON object")
+        if isinstance(parsed, dict):
+            return parsed
 
-        parsed = json.loads(cleaned[start : end + 1])
-        if not isinstance(parsed, dict):
-            raise ValueError("JSON root must be an object")
-        return parsed
+        if isinstance(parsed, str):
+            return ParentMessageReflexionService._try_load_json_object(parsed.strip(), depth + 1)
+
+        balanced = ParentMessageReflexionService._find_first_json_object_slice(payload)
+        if balanced and balanced != payload:
+            return ParentMessageReflexionService._try_load_json_object(balanced, depth + 1)
+
+        return None
+
+    @staticmethod
+    def _find_first_json_object_slice(payload: str) -> str | None:
+        start: int | None = None
+        depth = 0
+        in_string = False
+        escaped = False
+
+        for index, char in enumerate(payload):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+
+            if char == "{":
+                if depth == 0:
+                    start = index
+                depth += 1
+                continue
+
+            if char == "}" and depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    return payload[start : index + 1]
+
+        return None
 
     @staticmethod
     def _normalize_score(value: Any) -> float:

@@ -24,41 +24,96 @@ function uniqueItems(items: Array<string | null | undefined>, limit = 4) {
   return result;
 }
 
-function buildParentMessageMeta(
-  response: ParentMessageReflexionResponse
-): ParentMessageMeta {
+function readText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readTextArray(value: unknown, limit = 4) {
+  if (!Array.isArray(value)) return [];
+  return uniqueItems(
+    value.map((item) => (typeof item === "string" ? item : item == null ? undefined : String(item))),
+    limit
+  );
+}
+
+function readBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+  }
+  if (typeof value === "number") return value !== 0;
+  return false;
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function readFinalOutput(response: ParentMessageReflexionResponse) {
+  const finalOutput = (response?.finalOutput ?? {}) as Partial<ParentMessageReflexionResponse["finalOutput"]>;
+  const evaluationMeta = (response?.evaluationMeta ?? {}) as Partial<
+    ParentMessageReflexionResponse["evaluationMeta"]
+  >;
+
   return {
-    revisionCount: response.revisionCount,
-    score: response.evaluationMeta.score,
-    canSend: response.evaluationMeta.canSend,
-    fallback: response.fallback || response.evaluationMeta.fallback,
-    stopReason: response.evaluationMeta.stopReason,
-    source: response.source,
-    model: response.model ?? undefined,
+    title: readText(finalOutput.title),
+    summary: readText(finalOutput.summary),
+    tonightActions: readTextArray(finalOutput.tonightActions),
+    wordingForParent: readText(finalOutput.wordingForParent),
+    whyThisMatters: readText(finalOutput.whyThisMatters),
+    estimatedTime: readText(finalOutput.estimatedTime),
+    followUpWindow: readText(finalOutput.followUpWindow),
+    evaluationMeta,
   };
 }
 
-function buildAssistantAnswer(
-  response: ParentMessageReflexionResponse,
-  fallbackTopAction: string
-) {
-  const topAction =
-    response.finalOutput.tonightActions[0]?.trim() || fallbackTopAction;
-  const actionLines = uniqueItems(response.finalOutput.tonightActions, 4).map(
-    (item, index) => `${index + 1}. ${item}`
-  );
+function buildParentMessageMeta(
+  response: ParentMessageReflexionResponse
+): ParentMessageMeta {
+  const evaluationMeta = (response?.evaluationMeta ?? {}) as Partial<
+    ParentMessageReflexionResponse["evaluationMeta"]
+  >;
+
+  return {
+    revisionCount: readNumber(response?.revisionCount),
+    score: readNumber(evaluationMeta.score),
+    canSend: readBoolean(evaluationMeta.canSend),
+    fallback: readBoolean(response?.fallback) || readBoolean(evaluationMeta.fallback),
+    stopReason: readText(evaluationMeta.stopReason) || undefined,
+    source: readText(response?.source) || undefined,
+    model: readText(response?.model) || undefined,
+  };
+}
+
+function buildAssistantAnswer(params: {
+  wordingForParent: string;
+  whyThisMatters: string;
+  tonightActions: string[];
+  fallbackTopAction: string;
+  followUpWindow: string;
+  estimatedTime: string;
+}) {
+  const topAction = params.tonightActions[0] || params.fallbackTopAction;
+  const actionLines = uniqueItems(params.tonightActions, 4).map((item, index) => `${index + 1}. ${item}`);
 
   return [
-    response.finalOutput.wordingForParent,
+    params.wordingForParent,
     "",
-    `Why it matters: ${response.finalOutput.whyThisMatters}`,
+    `Why it matters: ${params.whyThisMatters}`,
     `Tonight's top action: ${topAction}`,
     "",
     "Tonight actions:",
-    ...(actionLines.length > 0 ? actionLines : [`1. ${fallbackTopAction}`]),
+    ...(actionLines.length > 0 ? actionLines : [`1. ${params.fallbackTopAction}`]),
     "",
-    `Follow-up window: ${response.finalOutput.followUpWindow}`,
-    `Estimated time: ${response.finalOutput.estimatedTime}`,
+    `Follow-up window: ${params.followUpWindow}`,
+    `Estimated time: ${params.estimatedTime}`,
   ].join("\n");
 }
 
@@ -128,47 +183,41 @@ export function mergeParentMessageReflexionResult(params: {
   response: ParentMessageReflexionResponse;
 }): ParentAgentResult {
   const { baseResult, response } = params;
-  const mergedHomeSteps = uniqueItems([
-    ...response.finalOutput.tonightActions,
-    ...baseResult.homeSteps,
-  ]);
+  const finalOutput = readFinalOutput(response);
+  const mergedHomeSteps = uniqueItems([...finalOutput.tonightActions, ...baseResult.homeSteps]);
   const tonightTopAction = mergedHomeSteps[0] ?? baseResult.tonightTopAction;
-  const nextReviewWindow =
-    response.finalOutput.followUpWindow.trim() ||
-    baseResult.interventionCard.reviewIn48h;
-  const nextTitle = response.finalOutput.title.trim() || baseResult.title;
-  const nextSummary =
-    response.finalOutput.summary.trim() || baseResult.summary;
+  const nextReviewWindow = finalOutput.followUpWindow || baseResult.interventionCard.reviewIn48h;
+  const nextTitle = finalOutput.title || baseResult.title;
+  const nextSummary = finalOutput.summary || baseResult.summary;
+  const nextWhyThisMatters = finalOutput.whyThisMatters || baseResult.whyNow;
+  const nextWordingForParent =
+    finalOutput.wordingForParent || baseResult.interventionCard.parentMessageDraft;
 
   return {
     ...baseResult,
     title: nextTitle,
     summary: nextSummary,
     tonightTopAction,
-    whyNow: response.finalOutput.whyThisMatters.trim() || baseResult.whyNow,
-    homeSteps:
-      mergedHomeSteps.length > 0 ? mergedHomeSteps : baseResult.homeSteps,
+    whyNow: nextWhyThisMatters,
+    homeSteps: mergedHomeSteps.length > 0 ? mergedHomeSteps : baseResult.homeSteps,
     interventionCard: {
       ...baseResult.interventionCard,
-      title: response.finalOutput.title.trim() || baseResult.interventionCard.title,
+      title: finalOutput.title || baseResult.interventionCard.title,
       summary: nextSummary,
-      tonightHomeAction:
-        response.finalOutput.tonightActions[0]?.trim() ||
-        baseResult.interventionCard.tonightHomeAction,
-      homeSteps:
-        mergedHomeSteps.length > 0
-          ? mergedHomeSteps
-          : baseResult.interventionCard.homeSteps,
+      tonightHomeAction: finalOutput.tonightActions[0] || baseResult.interventionCard.tonightHomeAction,
+      homeSteps: mergedHomeSteps.length > 0 ? mergedHomeSteps : baseResult.interventionCard.homeSteps,
       reviewIn48h: nextReviewWindow,
-      parentMessageDraft:
-        response.finalOutput.wordingForParent.trim() ||
-        baseResult.interventionCard.parentMessageDraft,
+      parentMessageDraft: nextWordingForParent,
     },
-    assistantAnswer: buildAssistantAnswer(response, tonightTopAction),
-    highlights: uniqueItems([
-      response.finalOutput.whyThisMatters,
-      ...baseResult.highlights,
-    ]),
+    assistantAnswer: buildAssistantAnswer({
+      wordingForParent: nextWordingForParent,
+      whyThisMatters: nextWhyThisMatters,
+      tonightActions: finalOutput.tonightActions,
+      fallbackTopAction: tonightTopAction,
+      followUpWindow: nextReviewWindow,
+      estimatedTime: finalOutput.estimatedTime,
+    }),
+    highlights: uniqueItems([nextWhyThisMatters, ...baseResult.highlights]),
     parentMessageMeta: buildParentMessageMeta(response),
   };
 }
