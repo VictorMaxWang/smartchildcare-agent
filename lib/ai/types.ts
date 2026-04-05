@@ -449,6 +449,83 @@ export interface AiFollowUpResponse {
   model?: string;
 }
 
+export type ParentMessageStopReason =
+  | "passed"
+  | "max_iterations"
+  | "generator_fallback"
+  | "evaluator_fallback"
+  | "non_retryable_error"
+  | "same_failure_twice"
+  | "same_output_twice";
+
+export type ParentMessageDecision = "approve" | "revise" | "block";
+
+export interface ParentMessageReflexionRequest {
+  targetChildId?: string | null;
+  childId?: string | null;
+  teacherNote?: string | null;
+  issueSummary?: string | null;
+  currentInterventionCard?: Record<string, unknown> | string | null;
+  latestGuardianFeedback?: Record<string, unknown> | string | null;
+  todayInSchoolActions?: string[];
+  tonightHomeActions?: string[];
+  snapshot?: Record<string, unknown> | null;
+  visibleChildren?: Array<Record<string, unknown>>;
+  sessionId?: string | null;
+  institutionId?: string | null;
+  traceId?: string | null;
+  debugMemory?: boolean;
+  debugLoop?: boolean;
+}
+
+export interface ParentMessageEvaluationMeta {
+  score: number;
+  canSend: boolean;
+  problems: string[];
+  revisionSuggestions: string[];
+  iterationScores: number[];
+  approvedIteration: number | null;
+  stopReason: ParentMessageStopReason;
+  fallback: boolean;
+  provider?: string | null;
+  model?: string | null;
+  memoryContextUsed: boolean;
+  decision: ParentMessageDecision;
+}
+
+export interface ParentMessageFinalOutput {
+  title: string;
+  summary: string;
+  tonightActions: string[];
+  wordingForParent: string;
+  whyThisMatters: string;
+  estimatedTime: string;
+  followUpWindow: string;
+  evaluationMeta: ParentMessageEvaluationMeta;
+}
+
+export interface ParentMessageDebugIteration {
+  iteration: number;
+  source: string;
+  model?: string | null;
+  fallback: boolean;
+  revisionInstructions?: string | null;
+  candidate: ParentMessageFinalOutput;
+  evaluation: ParentMessageEvaluationMeta;
+}
+
+export interface ParentMessageReflexionResponse {
+  finalOutput: ParentMessageFinalOutput;
+  evaluationMeta: ParentMessageEvaluationMeta;
+  revisionCount: number;
+  source: string;
+  model?: string | null;
+  fallback: boolean;
+  continuityNotes: string[];
+  memoryMeta?: Record<string, unknown> | null;
+  debugIterations?: ParentMessageDebugIteration[] | null;
+}
+
 export type ParentTrendIntent = "emotion" | "diet" | "sleep" | "health" | "growth_overall";
 export type ParentTrendLabel = "改善" | "波动" | "稳定" | "需关注";
 export type ParentTrendDirection = "up" | "down" | "flat" | "insufficient";

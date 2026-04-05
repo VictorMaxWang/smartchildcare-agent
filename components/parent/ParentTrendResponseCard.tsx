@@ -67,7 +67,10 @@ export default function ParentTrendResponseCard({
   const fallbackUsed = isTrendFallbackResult(result);
 
   return (
-    <div className="rounded-[28px] border border-slate-100 bg-white p-5 shadow-sm">
+    <div
+      className="rounded-[28px] border border-slate-100 bg-white p-5 shadow-sm"
+      data-testid="parent-trend-response-card"
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-medium tracking-[0.16em] text-slate-400">趋势问答结果</p>

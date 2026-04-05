@@ -27,6 +27,16 @@ import {
 
 export type ParentAgentResultSource = "ai" | "fallback" | "mock";
 
+export interface ParentMessageMeta {
+  revisionCount: number;
+  score: number;
+  canSend: boolean;
+  fallback?: boolean;
+  stopReason?: string;
+  source?: string;
+  model?: string;
+}
+
 export const PARENT_AGENT_QUICK_QUESTIONS = [
   "为什么最近不愿意去园？",
   "今晚我应该怎么陪伴？",
@@ -89,6 +99,7 @@ export interface ParentAgentResult {
   source: ParentAgentResultSource;
   model?: string;
   generatedAt: string;
+  parentMessageMeta?: ParentMessageMeta;
 }
 
 function getAgeBandFromBirthDate(birthDate: string) {

@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { BrainCircuit, CheckCircle2, Clock3, Mic, ScanSearch, Send, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
+import ParentTrendQaPanel from "@/components/parent/ParentTrendQaPanel";
 import ParentTrendResponseCard from "@/components/parent/ParentTrendResponseCard";
 import {
   AgentWorkspaceCard,
@@ -25,17 +26,26 @@ import {
   buildParentAgentSuggestionResult,
   buildParentChildSuggestionSnapshot,
   PARENT_AGENT_QUICK_QUESTIONS,
+  type ParentAgentChildContext,
   type ParentAgentResult,
 } from "@/lib/agent/parent-agent";
 import {
+  buildParentMessageReflexionPayload,
+  mergeParentMessageReflexionResult,
+} from "@/lib/agent/parent-message-reflexion";
+import {
+  buildParentTrendDebugState,
   buildParentTrendQueryPayload,
   isLikelyTrendQuestion,
   PARENT_TREND_QUICK_QUESTIONS,
+  resolveParentTrendDebugCase,
 } from "@/lib/agent/parent-trend";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
 import type {
   AiFollowUpResponse,
   AiSuggestionResponse,
+  ChildSuggestionSnapshot,
+  ParentMessageReflexionResponse,
   ParentTrendQueryResponse,
 } from "@/lib/ai/types";
 import { getLocalToday } from "@/lib/date";
@@ -77,6 +87,11 @@ function buildFeedbackContent(input: {
 
 export default function ParentAgentPage() {
   const searchParams = useSearchParams();
+  const childFromQuery = searchParams.get("child");
+  const trendDebugEnabled = searchParams.get("trace") === "debug";
+  const trendDebugCase = trendDebugEnabled
+    ? resolveParentTrendDebugCase(searchParams.get("trendCase"))
+    : null;
   const {
     children,
     attendanceRecords,
@@ -101,7 +116,7 @@ export default function ParentAgentPage() {
   } = useApp();
 
   const parentFeed = getParentFeed();
-  const defaultChildId = searchParams.get("child") || parentFeed[0]?.child.id || "";
+  const defaultChildId = childFromQuery || parentFeed[0]?.child.id || "";
   const [selectedChildId, setSelectedChildId] = useState(defaultChildId);
   const [question, setQuestion] = useState("");
   const [currentResult, setCurrentResult] = useState<ParentAgentResult | null>(null);
@@ -112,15 +127,37 @@ export default function ParentAgentPage() {
   const [trendError, setTrendError] = useState<string | null>(null);
   const [latestTrendQuery, setLatestTrendQuery] = useState<string | null>(null);
   const [latestTrendResult, setLatestTrendResult] = useState<ParentTrendQueryResponse | null>(null);
+  const [reflexionLoading, setReflexionLoading] = useState(false);
+  const [parentMessageStatus, setParentMessageStatus] = useState<string | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
   const [feedbackExecutionStatus, setFeedbackExecutionStatus] = useState<"completed" | "partial" | "not_started" | null>(null);
   const [feedbackImproved, setFeedbackImproved] = useState<boolean | "unknown">("unknown");
   const [childReaction, setChildReaction] = useState("");
   const [freeNote, setFreeNote] = useState("");
+  const reflexionRequestRef = useRef(0);
+  const reflexionAbortRef = useRef<AbortController | null>(null);
+  const selectedChildIdRef = useRef(selectedChildId);
 
   const selectedFeed = useMemo(
     () => parentFeed.find((item) => item.child.id === selectedChildId) ?? parentFeed[0],
     [parentFeed, selectedChildId]
+  );
+  const trendDebugState = useMemo(
+    () =>
+      selectedFeed && trendDebugCase
+        ? buildParentTrendDebugState({
+            trendCase: trendDebugCase,
+            child: selectedFeed.child,
+          })
+        : null,
+    [selectedFeed, trendDebugCase]
+  );
+  const displayedTrendQuestion = trendDebugState?.question ?? latestTrendQuery;
+  const displayedTrendResult = trendDebugState?.result ?? latestTrendResult;
+  const displayedTrendError = trendDebugState?.error ?? trendError;
+  const displayedTrendLoading = trendDebugState?.loading ?? trendLoading;
+  const hasVisibleTrendCard = Boolean(
+    displayedTrendQuestion || displayedTrendLoading || displayedTrendError || displayedTrendResult
   );
 
   const baseContext = useMemo(() => {
@@ -165,12 +202,12 @@ export default function ParentAgentPage() {
     () => (selectedFeed ? getLatestConsultationForChild(selectedFeed.child.id) : undefined),
     [getLatestConsultationForChild, selectedFeed]
   );
-  const displayInterventionCard = latestInterventionCard ?? currentResult?.interventionCard;
-  const displayConsultation = latestConsultation ?? currentResult?.consultation;
+  const displayInterventionCard = currentResult?.interventionCard ?? latestInterventionCard;
+  const displayConsultation = currentResult?.consultation ?? latestConsultation;
   const displayTonightTopAction = displayInterventionCard?.tonightHomeAction ?? currentResult?.tonightTopAction ?? baseContext?.task.description ?? "";
   const displayWhyNow =
-    displayConsultation?.summary ??
     currentResult?.whyNow ??
+    displayConsultation?.summary ??
     "系统综合近 7 天业务数据、教师观察和家长反馈，为今晚优先选出一条最值得执行的家庭动作。";
   const displayObservationPoints =
     displayInterventionCard?.observationPoints ?? currentResult?.tonightObservationPoints ?? [];
@@ -188,7 +225,7 @@ export default function ParentAgentPage() {
       ),
     [reminders, selectedFeed]
   );
-  const questionLoading = suggestionLoading || followUpLoading || trendLoading;
+  const questionLoading = suggestionLoading || followUpLoading || displayedTrendLoading;
 
   useEffect(() => {
     if (!selectedChildId && parentFeed[0]?.child.id) {
@@ -197,12 +234,32 @@ export default function ParentAgentPage() {
   }, [parentFeed, selectedChildId]);
 
   useEffect(() => {
+    if (!childFromQuery || childFromQuery === selectedChildIdRef.current) return;
+    setSelectedChildId(childFromQuery);
+  }, [childFromQuery]);
+
+  useEffect(() => {
+    selectedChildIdRef.current = selectedFeed?.child.id ?? "";
+  }, [selectedFeed]);
+
+  useEffect(() => {
+    return () => {
+      reflexionAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    reflexionRequestRef.current += 1;
+    reflexionAbortRef.current?.abort();
+    reflexionAbortRef.current = null;
     setHistory([]);
     setQuestion("");
     setTrendLoading(false);
     setTrendError(null);
     setLatestTrendQuery(null);
     setLatestTrendResult(null);
+    setReflexionLoading(false);
+    setParentMessageStatus(null);
     setFeedbackStatus(null);
     setFeedbackExecutionStatus(null);
   }, [selectedChildId]);
@@ -220,64 +277,120 @@ export default function ParentAgentPage() {
     }).forEach((item) => upsertReminder(item));
   }, [currentResult, selectedFeed, upsertReminder]);
 
-  useEffect(() => {
-    if (!baseContext || !snapshot) return;
-
-    let cancelled = false;
-    const controller = new AbortController();
-    const context = baseContext;
-    const snapshotPayload = snapshot;
-
-    async function fetchSuggestion() {
-      setSuggestionLoading(true);
-
+  const readRouteError = useCallback(
+    async (response: Response, fallbackMessage: string) => {
       try {
-        const response = await fetch("/api/ai/suggestions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot: snapshotPayload }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error("fetch suggestion failed");
-        }
-
-        const data = (await response.json()) as AiSuggestionResponse;
-        if (!cancelled) {
-          setCurrentResult(buildParentAgentSuggestionResult({ context, suggestion: data }));
-        }
+        const body = (await response.json()) as { error?: string; detail?: string };
+        return body.error ?? body.detail ?? fallbackMessage;
       } catch {
-        if (!cancelled) {
-          const fallback = buildFallbackSuggestion(snapshotPayload.ruleFallback);
-          setCurrentResult(buildParentAgentSuggestionResult({ context, suggestion: fallback }));
-        }
-      } finally {
-        if (!cancelled) {
-          setSuggestionLoading(false);
-        }
+        return fallbackMessage;
+      }
+    },
+    []
+  );
+
+  const enrichParentMessageResult = useCallback(async (params: {
+    context: ParentAgentChildContext;
+    snapshotPayload: ChildSuggestionSnapshot;
+    baseResult: ParentAgentResult;
+    historyId?: string;
+  }) => {
+    const requestId = ++reflexionRequestRef.current;
+    const childId = params.context.child.id;
+    const controller = new AbortController();
+
+    reflexionAbortRef.current?.abort();
+    reflexionAbortRef.current = controller;
+
+    setReflexionLoading(true);
+    setParentMessageStatus("Evaluator is refining the parent-facing message.");
+
+    try {
+      const payload = buildParentMessageReflexionPayload({
+        context: params.context,
+        snapshot: params.snapshotPayload,
+        result: params.baseResult,
+      });
+      const response = await fetch("/api/ai/parent-message-reflexion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          await readRouteError(
+            response,
+            "Parent message refinement is unavailable right now. Showing the base result instead."
+          )
+        );
+      }
+
+      const data = (await response.json()) as ParentMessageReflexionResponse;
+      if (
+        reflexionRequestRef.current !== requestId ||
+        selectedChildIdRef.current !== childId
+      ) {
+        return;
+      }
+
+      const nextResult = mergeParentMessageReflexionResult({
+        baseResult: params.baseResult,
+        response: data,
+      });
+
+      setCurrentResult(nextResult);
+      if (params.historyId) {
+        setHistory((prev) =>
+          prev.map((item) =>
+            item.id === params.historyId ? { ...item, result: nextResult } : item
+          )
+        );
+      }
+
+      if (data.fallback || data.evaluationMeta.fallback) {
+        setParentMessageStatus("Showing a backend fallback refinement result.");
+      } else if (!data.evaluationMeta.canSend) {
+        setParentMessageStatus(
+          "Showing the evaluator output, but can_send is still false."
+        );
+      } else {
+        setParentMessageStatus(null);
+      }
+    } catch (error) {
+      if (
+        controller.signal.aborted ||
+        reflexionRequestRef.current !== requestId ||
+        selectedChildIdRef.current !== childId
+      ) {
+        return;
+      }
+
+      setParentMessageStatus(
+        error instanceof Error
+          ? error.message
+          : "Parent message refinement is unavailable right now. Showing the base result instead."
+      );
+    } finally {
+      if (
+        reflexionRequestRef.current === requestId &&
+        selectedChildIdRef.current === childId
+      ) {
+        setReflexionLoading(false);
+      }
+      if (reflexionAbortRef.current === controller) {
+        reflexionAbortRef.current = null;
       }
     }
-
-    void fetchSuggestion();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [baseContext, snapshot]);
-
-  async function readRouteError(response: Response, fallbackMessage: string) {
-    try {
-      const body = (await response.json()) as { error?: string; detail?: string };
-      return body.error ?? body.detail ?? fallbackMessage;
-    } catch {
-      return fallbackMessage;
-    }
-  }
+  }, [readRouteError]);
 
   async function submitTrendQuery(nextQuestion: string) {
     if (!selectedFeed) return;
+    if (trendDebugCase) {
+      setQuestion("");
+      return;
+    }
 
     setTrendLoading(true);
     setTrendError(null);
@@ -367,12 +480,87 @@ export default function ParentAgentPage() {
         .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
 
       setCurrentResult(nextResult);
-      setHistory((prev) => [...prev, { id: `${Date.now()}-${prev.length}`, question: nextQuestion, result: nextResult }]);
+      const historyId = `${Date.now()}-${history.length}`;
+      setHistory((prev) => [
+        ...prev,
+        { id: historyId, question: nextQuestion, result: nextResult },
+      ]);
+      void enrichParentMessageResult({
+        context: activeContext,
+        snapshotPayload: payload.snapshot as ChildSuggestionSnapshot,
+        baseResult: nextResult,
+        historyId,
+      });
       setQuestion("");
     } finally {
       setFollowUpLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!baseContext || !snapshot) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const context = baseContext;
+    const snapshotPayload = snapshot;
+
+    async function fetchSuggestion() {
+      setSuggestionLoading(true);
+
+      try {
+        const response = await fetch("/api/ai/suggestions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshot: snapshotPayload }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("fetch suggestion failed");
+        }
+
+        const data = (await response.json()) as AiSuggestionResponse;
+        if (!cancelled) {
+          const baseResult = buildParentAgentSuggestionResult({
+            context,
+            suggestion: data,
+          });
+          setCurrentResult(baseResult);
+          void enrichParentMessageResult({
+            context,
+            snapshotPayload,
+            baseResult,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          const fallback = buildFallbackSuggestion(snapshotPayload.ruleFallback);
+          const baseResult = buildParentAgentSuggestionResult({
+            context,
+            suggestion: fallback,
+          });
+          setCurrentResult(baseResult);
+          void enrichParentMessageResult({
+            context,
+            snapshotPayload,
+            baseResult,
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setSuggestionLoading(false);
+        }
+      }
+    }
+
+    void fetchSuggestion();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [baseContext, enrichParentMessageResult, snapshot]);
 
   function submitFeedback() {
     if (!selectedFeed || !displayInterventionCard) return;
@@ -581,9 +769,34 @@ export default function ParentAgentPage() {
                         {currentResult.source}
                       </Badge>
                       {currentResult.model ? <Badge variant="secondary">{currentResult.model}</Badge> : null}
+                      {currentResult.parentMessageMeta ? (
+                        <>
+                          <Badge variant="outline">
+                            revisions {currentResult.parentMessageMeta.revisionCount}
+                          </Badge>
+                          <Badge variant="outline">
+                            score {currentResult.parentMessageMeta.score.toFixed(1)}
+                          </Badge>
+                          <Badge
+                            variant={
+                              currentResult.parentMessageMeta.canSend
+                                ? "success"
+                                : "secondary"
+                            }
+                          >
+                            can_send {currentResult.parentMessageMeta.canSend ? "true" : "false"}
+                          </Badge>
+                        </>
+                      ) : null}
+                      {reflexionLoading ? <Badge variant="outline">evaluator</Badge> : null}
                     </div>
+                    {parentMessageStatus ? (
+                      <p className="mt-3 text-sm leading-6 text-slate-600">
+                        {parentMessageStatus}
+                      </p>
+                    ) : null}
                     <p className="mt-3 text-lg font-semibold text-slate-900">{currentResult.title}</p>
-                    <p className="mt-3 text-sm leading-7 text-slate-600">{displayConsultation?.summary ?? currentResult.summary}</p>
+                    <p className="mt-3 text-sm leading-7 text-slate-600">{currentResult.summary}</p>
                     <div className="mt-4 rounded-2xl bg-white/80 p-4">
                       <p className="text-sm font-semibold text-slate-900">今晚最该做的一件事</p>
                       <p className="mt-2 text-sm leading-6 text-slate-700">{displayTonightTopAction}</p>
@@ -637,6 +850,12 @@ export default function ParentAgentPage() {
                   placeholder="继续追问，例如：今晚我具体先做哪一步？如果孩子不配合怎么办？"
                   className="min-h-28 bg-white"
                 />
+                {trendDebugEnabled ? (
+                  <ParentTrendQaPanel
+                    childId={selectedFeed.child.id}
+                    activeCase={trendDebugCase}
+                  />
+                ) : null}
                 <div className="space-y-3">
                   <div>
                     <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">继续追问</p>
@@ -700,13 +919,13 @@ export default function ParentAgentPage() {
                     AI 正在整理最新追问，请稍候…
                   </div>
                 ) : null}
-                {latestTrendQuery || trendLoading || trendError || latestTrendResult ? (
+                {hasVisibleTrendCard ? (
                   <ParentTrendResponseCard
-                    question={latestTrendQuery}
-                    result={latestTrendResult}
-                    loading={trendLoading}
-                    error={trendError}
-                    onRetry={latestTrendQuery ? () => void submitTrendQuery(latestTrendQuery) : undefined}
+                    question={displayedTrendQuestion}
+                    result={displayedTrendResult}
+                    loading={displayedTrendLoading}
+                    error={displayedTrendError}
+                    onRetry={displayedTrendQuestion ? () => void submitTrendQuery(displayedTrendQuestion) : undefined}
                   />
                 ) : null}
               </div>

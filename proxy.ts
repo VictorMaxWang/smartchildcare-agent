@@ -73,7 +73,7 @@ async function verifySessionToken(token?: string | null) {
 }
 
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
   if (
     pathname.startsWith("/_next") ||
@@ -89,7 +89,7 @@ export async function proxy(request: NextRequest) {
   const isValidSession = await verifySessionToken(token);
   if (!isValidSession) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", pathname);
+    loginUrl.searchParams.set("next", `${pathname}${search}`);
     const response = NextResponse.redirect(loginUrl);
     response.cookies.set(SESSION_COOKIE, "", {
       httpOnly: true,

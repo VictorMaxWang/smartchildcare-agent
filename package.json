@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "ai:smoke": "node ./scripts/ai-suggestions-smoke.mjs",
+    "ai:smoke:trend": "node ./scripts/ai-parent-trend-smoke.mjs",
     "release:check": "node ./scripts/release-check.mjs",
     "release:report": "node ./scripts/release-check.mjs",
     "release:report:local": "node ./scripts/release-check.mjs --report-path=./artifacts/release-report.local.json",

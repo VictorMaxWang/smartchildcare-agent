@@ -163,7 +163,7 @@ export default function TrendLineChart({
 
   if (loading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" data-testid="trend-chart-loading">
         <div className="flex gap-2">
           <div className="h-6 w-20 rounded-full bg-slate-100" />
           <div className="h-6 w-28 rounded-full bg-slate-100" />
@@ -176,7 +176,7 @@ export default function TrendLineChart({
 
   if (error) {
     return (
-      <div className="rounded-3xl border border-rose-100 bg-rose-50/80 p-4">
+      <div className="rounded-3xl border border-rose-100 bg-rose-50/80 p-4" data-testid="trend-chart-error">
         <p className="text-sm font-semibold text-rose-700">趋势图暂时不可用</p>
         <p className="mt-2 text-sm leading-6 text-rose-700/90">{error}</p>
         {onRetry ? (
@@ -190,7 +190,10 @@ export default function TrendLineChart({
 
   if (!primarySeries || chartRows.length === 0) {
     return (
-      <div className="flex h-48 flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-5 text-center">
+      <div
+        className="flex h-48 flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-5 text-center"
+        data-testid="trend-chart-empty"
+      >
         <BarChart3 className="h-5 w-5 text-slate-400" />
         <p className="mt-3 text-sm font-semibold text-slate-700">当前时间窗内没有可展示的数据</p>
         <p className="mt-1 text-sm text-slate-500">可以换一个趋势问题，或等待更多记录后再看。</p>
@@ -200,7 +203,7 @@ export default function TrendLineChart({
 
   if (validPrimaryCount < 2) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" data-testid="trend-chart-insufficient">
         <div className="flex flex-wrap gap-2">
           {chartSeries.map((item, index) => (
             <Badge key={item.id} variant={index === 0 ? "info" : "secondary"} className="gap-2 px-3 py-1">
@@ -233,7 +236,7 @@ export default function TrendLineChart({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="trend-chart-ready">
       <div className="flex flex-wrap gap-2 overflow-x-auto pb-1">
         {chartSeries.map((item, index) => (
           <Badge key={item.id} variant={index === 0 ? "info" : "secondary"} className="gap-2 px-3 py-1">

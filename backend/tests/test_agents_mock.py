@@ -78,6 +78,27 @@ def test_parent_trend_query():
     assert "dataQuality" in body
 
 
+def test_parent_trend_query_demo_snapshot_fallback_honesty():
+    response = client.post(
+        "/api/v1/agents/parent/trend-query",
+        json={
+            "question": "最近两周睡眠情况稳定吗？",
+            "childId": "c-11",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "demo_snapshot"
+    assert body["fallback"] is True
+    assert body["dataQuality"]["fallbackUsed"] is True
+    assert body["dataQuality"]["observedDays"] == 0
+    assert body["dataQuality"]["coverageRatio"] == 0
+    assert body["dataQuality"]["sparse"] is True
+    assert body["comparison"]["direction"] == "insufficient"
+    assert body["trendLabel"] != "改善"
+    assert body["warnings"]
+
+
 def test_teacher_run():
     response = client.post(
         "/api/v1/agents/teacher/run",

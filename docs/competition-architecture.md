@@ -201,6 +201,7 @@ flowchart TD
 
 建议口径：
 - 当前仓库已经有结构化输入、结构化输出、follow-up history、提醒与反馈沉淀的基础。
+- 如按子项细分，`T7A` 已具 backend-first / backend-ready 形态：已有 FastAPI endpoint、service、orchestrator 与测试；但前端最小接入仍未完成，因此不是 UI-ready。
 - 下一阶段可以在教师会诊、家长反馈、园长派单后加入 evaluator / optimizer 环节。
 - 当前不要对外宣称“已完成 Reflexion 闭环”。
 
@@ -252,7 +253,7 @@ flowchart TD
 - 文档口径必须区分“代码层已接入”“strict smoke 已定义”“staging 真验收已完成”三件事；当前三者不等价。
 - 如果 vivo 平台接口变动，必须以官方文档为准，不以历史实现为准。
 
-## 8. 三条比赛主演示路径
+## 8. 当前 demo 重点路径与展示优先级
 ### 主路径一：Teacher 语音入口主线
 建议演示顺序：
 - 在教师端任一页面展示全局语音球入口
@@ -261,9 +262,9 @@ flowchart TD
 - 继续进入教师 Agent 或高风险会诊
 
 演示重点：
-- 这是当前最优先推进主线 `T2 -> T4C -> T5/T5A`。
-- `T2` 已完成；`T4C` 与 `T5A` 仍在进行中。
-- 当前更准确的说法是“已经打通采集、上传、结构化理解和草稿种子”，不是“最终确认 / 持久化链路已全部完成”。
+- `T2` 已完成，`T2.5` 已完成一轮真机 / 浏览器硬化。
+- `T4A` 已完成，`T4B` 已完成（代码层），`T4C` 已完成；Teacher 端已能从上传进入结构化 understanding。
+- `T5A` 已作为过渡阶段完成其作用，`T5` 已完成主接线；当前 Teacher 主线已基本闭环，进入录屏 / 验收阶段，但仍不写成 fully verified。
 
 ### 主路径二：高风险儿童一键会诊
 建议演示顺序：
@@ -277,7 +278,7 @@ flowchart TD
 - 这条路径可以天然映射 vivo 的 LLM / OCR / ASR / TTS / 端云协同能力。
 - 当前已有 QA、trace、debug 面板与 memory / provider / transport 可视化，但仍不能把它等同于完整 `T8` 已完成。
 
-### 主路径二补位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
+### 当前第二强展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
 当前代码基础：
 - `app/admin/page.tsx`
 - `app/admin/agent/page.tsx`
@@ -286,9 +287,9 @@ flowchart TD
 当前建议口径：
 - 这是高风险会诊之后的第二条强展示线，负责把会诊结果转成园长办公会式的决策卡。
 - 它不是新的后台工作流，而是现有 consultation 结果的园长侧可解释展示层。
-- 当前可写成“Admin 展示层已完成的第二展示位”，而不是新的独立主线；其后端与 staging 边界仍沿用高风险会诊主线的保守口径。
+- 当前可写成“Admin 展示层已完成的第二展示位”，而不是新的独立后端聚合主线；其后端与 staging 边界仍沿用高风险会诊主线的保守口径。
 
-### 主路径三：Parent 趋势问答 / TrendLineChart 对话增强
+### 家长侧补强展示线：Parent 趋势问答 / TrendLineChart 对话增强
 当前代码基础：
 - `app/parent/page.tsx`
 - `app/parent/agent/page.tsx`
@@ -300,7 +301,7 @@ flowchart TD
 - `lib/store.tsx`
 
 当前建议口径：
-- 这条路径已具备 `T10` backend + `T11` Parent 展示层，能把 7 / 14 / 30 天时间窗聚合结果、解释文本、comparison、warnings 与 dataQuality 压缩进家长聊天流。
+- 这条路径已具备 `T10` backend（代码层）+ `T11` Parent 展示层，能把 7 / 14 / 30 天时间窗聚合结果、解释文本、comparison、warnings 与 dataQuality 压缩进家长聊天流。
 - 它当前更适合作为比赛中的家长侧补强展示线，而不是新的最优先主攻线。
 - “时光穿梭机 / 微绘本”继续作为后续情感化增强方向，不应描述成已经完整交付。
 
@@ -308,27 +309,30 @@ flowchart TD
 更完整状态账本见 `docs/current-status-ledger.md`。本文件只保留比赛叙事所需的当前阶段口径。
 
 ### 当前最优先主线
-- 主线 1：`T2 -> T4C -> T5/T5A`
-- 主线 2：高风险儿童一键会诊继续作为当前最强 Agent 工作流展示位
-- 主线 3：Admin 决策区 / 风险优先级 / 会诊 trace 面板作为第二强展示位
-- 主线 4：Parent 趋势问答 / TrendLineChart 作为已完成展示层的家长侧补强线；“时光穿梭机 / 微绘本”继续作为后续增强方向
+- Teacher 语音主线已基本闭环，当前以录屏 / 验收收口为先。
+- 高风险儿童一键会诊继续作为当前最强 Agent 工作流展示位。
+- Admin 决策区 / 风险优先级 / 会诊 trace 面板作为当前第二强展示位。
+- `S1.1` 为待 staging SSH 后手动执行的远端收口事项。
+- Parent 趋势问答 / TrendLineChart 作为已具展示能力的家长侧补强线；“时光穿梭机 / 微绘本”继续作为后续增强方向。
 
-### 当前正在并行的线程
-- `T4C`：把 `T2` 的上传结果接到 `T4` 的 understanding response
-- `T5A`：Teacher 草稿确认流组件壳 + persist 抽象
-- `D2`：项目状态账本增强
-- `S1.1`：尚未启动，等待 SSH
+### 当前阶段关注项
+- Teacher 主线：已从功能开发转入录屏 / 验收收口，不再把 `T4C` / `T5A` 写成当前主开发进行中。
+- 高风险会诊：继续作为当前最强展示位。
+- `T9`：Admin 展示层已完成接入，当前持续作为第二展示位。
+- Parent 趋势线：`T10` / `T11` 已具展示能力，当前作为家长侧补强线维护。
+- `T7A`：backend-ready，待前端最小接入，不写成 UI-ready。
+- `S1.1`：尚未完成，等待 staging SSH 后手动执行。
 
 ### 当前不要误重排 / 误重开
 - 不要把 `T2` 当作未开始。
 - 不要把 `T4A` / `T4B` 当作未开始。
 - 不要把 `T6` 当作未开始。
-- 不要把 `T5A` 写成完整 `T5` 已完成。
+- 不要把 `T5` 扩写成完整录屏级 / 远端级验收已完成。
 - 不要把 staging 写成 fully healthy / fully switched。
 
 ### staging 当前真实状态
 - DNS 已解析到 `api-staging.smartchildcareagent.cn`。
-- 远端 JSON + live vivo + memory 有证据。
+- 已看到远端 JSON 返回，以及 vivo / memory 相关链路的局部证据。
 - 但以下仍未完成：
   - 域名 / TLS 最终打通
   - 新 health schema 对外可见
