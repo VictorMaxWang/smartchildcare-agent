@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import requests
+
 import pytest
+import requests
 from pydantic import SecretStr
 
 from app.core.config import Settings
@@ -15,7 +16,15 @@ from app.providers.base import (
 )
 from app.providers.mock import MockTextProvider
 from app.providers.resolver import resolve_text_provider
-from app.providers.vivo_llm import AUTH_SHAPE, SIGNED_HEADERS, VivoLlmProvider
+from app.providers.vivo_llm import (
+    APP_ID_HEADER_NAME,
+    AUTH_SHAPE,
+    DEFAULT_APP_ID_CARRIER,
+    REQUEST_ID_QUERY_KEY,
+    SIGNATURE_MODE,
+    SIGNED_HEADERS,
+    VivoLlmProvider,
+)
 
 
 class FakeResponse:
@@ -43,22 +52,40 @@ def build_settings(**overrides) -> Settings:
     return Settings(**defaults)
 
 
+def build_success_payload(content: str = "Real vivo response.") -> dict[str, object]:
+    return {
+        "id": "chatcmpl-vivo-123",
+        "created": 1712300000,
+        "model": "Volc-DeepSeek-V3.2",
+        "usage": {"prompt_tokens": 12, "completion_tokens": 18, "total_tokens": 30},
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"content": content},
+            }
+        ],
+    }
+
+
 def test_vivo_llm_success(monkeypatch):
     def fake_post(url, **kwargs):
         assert url == "https://api-ai.vivo.com.cn/v1/chat/completions"
-        assert kwargs["params"]["requestId"]
+        assert kwargs["params"][REQUEST_ID_QUERY_KEY]
+        assert kwargs["params"]["app_id"] == "app-id"
         assert kwargs["headers"]["Authorization"] == "Bearer app-key"
         assert kwargs["headers"]["X-AI-GATEWAY-APP-ID"] == "app-id"
         assert kwargs["headers"]["X-AI-GATEWAY-SIGNED-HEADERS"] == SIGNED_HEADERS
         assert kwargs["headers"]["X-AI-GATEWAY-TIMESTAMP"].isdigit()
         assert len(kwargs["headers"]["X-AI-GATEWAY-NONCE"]) == 8
+        assert APP_ID_HEADER_NAME not in kwargs["headers"]
         assert kwargs["json"]["model"] == "Volc-DeepSeek-V3.2"
         assert kwargs["json"]["stream"] is False
+        assert "app_id" not in kwargs["json"]
         signing_string = "\n".join(
             [
                 "POST",
                 "/v1/chat/completions",
-                f"requestId={kwargs['params']['requestId']}",
+                VivoLlmProvider._canonical_query_string(kwargs["params"]),
                 "app-id",
                 kwargs["headers"]["X-AI-GATEWAY-TIMESTAMP"],
                 (
@@ -72,21 +99,7 @@ def test_vivo_llm_success(monkeypatch):
             hmac.new(b"app-key", signing_string, hashlib.sha256).digest()
         ).decode("utf-8")
         assert kwargs["headers"]["X-AI-GATEWAY-SIGNATURE"] == expected_signature
-        return FakeResponse(
-            200,
-            {
-                "id": "chatcmpl-vivo-123",
-                "created": 1712300000,
-                "model": "Volc-DeepSeek-V3.2",
-                "usage": {"prompt_tokens": 12, "completion_tokens": 18, "total_tokens": 30},
-                "choices": [
-                    {
-                        "finish_reason": "stop",
-                        "message": {"content": "Real vivo response."},
-                    }
-                ],
-            },
-        )
+        return FakeResponse(200, build_success_payload())
 
     monkeypatch.setattr(requests, "post", fake_post)
 
@@ -102,9 +115,71 @@ def test_vivo_llm_success(monkeypatch):
     assert result.meta["upstream_id"] == "chatcmpl-vivo-123"
     assert result.meta["created"] == 1712300000
     assert result.meta["auth_shape"] == AUTH_SHAPE
+    assert result.meta["app_id_carrier"] == DEFAULT_APP_ID_CARRIER
+    assert result.meta["request_id_key"] == REQUEST_ID_QUERY_KEY
+    assert result.meta["signature_mode"] == SIGNATURE_MODE
     assert result.meta["diagnosis"] == "auth_ok"
     assert result.raw["id"] == "chatcmpl-vivo-123"
     assert result.request_id
+
+
+def test_vivo_llm_default_request_shape_sends_app_id_in_query_only(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_post(url, **kwargs):
+        captured["params"] = kwargs["params"]
+        captured["json"] = kwargs["json"]
+        captured["headers"] = kwargs["headers"]
+        return FakeResponse(200, build_success_payload("query shape"))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    result = VivoLlmProvider(build_settings()).summarize(prompt="test", fallback="fallback")
+
+    assert captured["params"]["app_id"] == "app-id"
+    assert "app_id" not in captured["json"]
+    assert APP_ID_HEADER_NAME not in captured["headers"]
+    assert result.meta["app_id_carrier"] == "query"
+
+
+def test_vivo_llm_body_app_id_carrier_moves_app_id_into_body(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_post(url, **kwargs):
+        captured["params"] = kwargs["params"]
+        captured["json"] = kwargs["json"]
+        captured["headers"] = kwargs["headers"]
+        return FakeResponse(200, build_success_payload("body shape"))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    result = VivoLlmProvider(build_settings(), app_id_carrier="body").summarize(prompt="test", fallback="fallback")
+
+    assert "app_id" not in captured["params"]
+    assert captured["json"]["app_id"] == "app-id"
+    assert APP_ID_HEADER_NAME not in captured["headers"]
+    assert result.meta["app_id_carrier"] == "body"
+    assert result.meta["auth_shape"].endswith("body_app_id")
+
+
+def test_vivo_llm_header_app_id_carrier_adds_plain_app_id_header(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_post(url, **kwargs):
+        captured["params"] = kwargs["params"]
+        captured["json"] = kwargs["json"]
+        captured["headers"] = kwargs["headers"]
+        return FakeResponse(200, build_success_payload("header shape"))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    result = VivoLlmProvider(build_settings(), app_id_carrier="header").summarize(prompt="test", fallback="fallback")
+
+    assert "app_id" not in captured["params"]
+    assert "app_id" not in captured["json"]
+    assert captured["headers"][APP_ID_HEADER_NAME] == "app-id"
+    assert result.meta["app_id_carrier"] == "header"
+    assert result.meta["auth_shape"].endswith("header_app_id")
 
 
 def test_vivo_llm_authentication_failure_does_not_fallback(monkeypatch):
@@ -125,6 +200,7 @@ def test_vivo_llm_authentication_failure_does_not_fallback(monkeypatch):
     assert exc_info.value.error_code == 40100
     assert exc_info.value.trace_id == "trace-app-id"
     assert exc_info.value.auth_shape == AUTH_SHAPE
+    assert exc_info.value.app_id_carrier == DEFAULT_APP_ID_CARRIER
 
 
 def test_vivo_llm_server_error_falls_back_when_enabled(monkeypatch):
@@ -140,6 +216,7 @@ def test_vivo_llm_server_error_falls_back_when_enabled(monkeypatch):
     assert result.meta["status_code"] == 503
     assert result.meta["attempted_provider"] == "vivo-llm"
     assert result.meta["auth_shape"] == AUTH_SHAPE
+    assert result.meta["app_id_carrier"] == DEFAULT_APP_ID_CARRIER
     assert result.request_id
 
 
@@ -237,7 +314,18 @@ def test_vivo_llm_invalid_app_id_maps_to_specific_auth_diagnosis(monkeypatch):
 
     assert exc_info.value.diagnosis == "app_id_invalid_or_mismatched"
     assert exc_info.value.error_code == 40102
+    assert exc_info.value.error_msg == "invalid app_id"
     assert exc_info.value.trace_id == "trace-invalid-app-id"
+    assert exc_info.value.request_id
+    assert exc_info.value.auth_shape == AUTH_SHAPE
+    assert exc_info.value.app_id_carrier == DEFAULT_APP_ID_CARRIER
+    assert exc_info.value.request_id_key == REQUEST_ID_QUERY_KEY
+    assert exc_info.value.signature_mode == SIGNATURE_MODE
+    assert exc_info.value.raw == {
+        "error_code": 40102,
+        "error_msg": "invalid app_id",
+        "trace_id": "trace-invalid-app-id",
+    }
 
 
 def test_vivo_llm_invalid_api_key_maps_to_specific_auth_diagnosis(monkeypatch):
@@ -258,13 +346,17 @@ def test_vivo_llm_invalid_api_key_maps_to_specific_auth_diagnosis(monkeypatch):
     assert exc_info.value.trace_id == "trace-api-key"
 
 
-def test_vivo_llm_model_permission_error_maps_to_permission_diagnosis(monkeypatch):
+def test_vivo_llm_permission_code_30001_maps_to_permission_diagnosis(monkeypatch):
     monkeypatch.setattr(
         requests,
         "post",
         lambda *args, **kwargs: FakeResponse(
             403,
-            {"error_msg": "not having this ability, you need to apply for it", "trace_id": "trace-permission"},
+            {
+                "error_code": 30001,
+                "error_msg": "no model access permission permission expires",
+                "trace_id": "trace-permission",
+            },
         ),
     )
 
@@ -273,6 +365,7 @@ def test_vivo_llm_model_permission_error_maps_to_permission_diagnosis(monkeypatc
 
     assert exc_info.value.diagnosis == "model_permission_missing"
     assert exc_info.value.kind == "permission"
+    assert exc_info.value.error_code == 30001
     assert exc_info.value.trace_id == "trace-permission"
 
 
@@ -292,3 +385,4 @@ def test_vivo_llm_signature_error_maps_to_specific_auth_diagnosis(monkeypatch):
     assert exc_info.value.diagnosis == "signature_invalid_or_missing"
     assert exc_info.value.kind == "auth"
     assert exc_info.value.trace_id == "trace-signature"
+    assert exc_info.value.app_id_carrier == DEFAULT_APP_ID_CARRIER

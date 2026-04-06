@@ -21,7 +21,14 @@ from app.providers.resolver import (
     has_vivo_text_provider_config,
     resolve_text_provider,
 )
-from app.providers.vivo_llm import AUTH_SHAPE
+from app.providers.vivo_llm import (
+    AUTH_SHAPE,
+    DEFAULT_APP_ID_CARRIER,
+    REQUEST_ID_QUERY_KEY,
+    SIGNATURE_MODE,
+    SUPPORTED_APP_ID_CARRIERS,
+    VivoLlmProvider,
+)
 
 DEFAULT_PROMPT = "Please return one concise Chinese sentence for the SmartChildcare vivo LLM smoke test."
 DEFAULT_FALLBACK = "smoke fallback triggered"
@@ -42,6 +49,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="Prompt sent to the provider.")
     parser.add_argument("--fallback", default=DEFAULT_FALLBACK, help="Fallback text used by the provider.")
     parser.add_argument("--include-raw", action="store_true", help="Include raw upstream JSON in the output.")
+    parser.add_argument(
+        "--app-id-carrier",
+        choices=SUPPORTED_APP_ID_CARRIERS,
+        default=DEFAULT_APP_ID_CARRIER,
+        help="Experiment with explicit app_id transport while keeping the rest of the auth shape stable.",
+    )
     return parser.parse_args()
 
 
@@ -67,6 +80,9 @@ def build_output(result: Any, *, include_raw: bool, brain_provider: str, vivo_cr
         "usage": result.usage,
         "meta": meta,
         "auth_shape": meta.get("auth_shape") or AUTH_SHAPE,
+        "app_id_carrier": meta.get("app_id_carrier") or DEFAULT_APP_ID_CARRIER,
+        "request_id_key": meta.get("request_id_key") or REQUEST_ID_QUERY_KEY,
+        "signature_mode": meta.get("signature_mode") or SIGNATURE_MODE,
         "diagnosis": meta.get("diagnosis") or "auth_ok",
         "http_status": meta.get("status_code"),
         "error_code": meta.get("error_code"),
@@ -124,6 +140,9 @@ def extract_error_details(exc: Exception) -> dict[str, Any]:
         "trace_id": getattr(exc, "trace_id", None),
         "request_id": getattr(exc, "request_id", None),
         "auth_shape": getattr(exc, "auth_shape", AUTH_SHAPE),
+        "app_id_carrier": getattr(exc, "app_id_carrier", DEFAULT_APP_ID_CARRIER),
+        "request_id_key": getattr(exc, "request_id_key", REQUEST_ID_QUERY_KEY),
+        "signature_mode": getattr(exc, "signature_mode", SIGNATURE_MODE),
         "raw": getattr(exc, "raw", None),
     }
 
@@ -141,6 +160,9 @@ def build_error_output(
     trace_id: str | None = None,
     request_id: str | None = None,
     auth_shape: str = AUTH_SHAPE,
+    app_id_carrier: str = DEFAULT_APP_ID_CARRIER,
+    request_id_key: str = REQUEST_ID_QUERY_KEY,
+    signature_mode: str = SIGNATURE_MODE,
 ) -> dict[str, Any]:
     return {
         "ok": False,
@@ -155,6 +177,9 @@ def build_error_output(
         "trace_id": trace_id,
         "request_id": request_id,
         "auth_shape": auth_shape,
+        "app_id_carrier": app_id_carrier,
+        "request_id_key": request_id_key,
+        "signature_mode": signature_mode,
     }
 
 
@@ -200,7 +225,10 @@ def main() -> int:
         )
         return 1
 
-    provider = resolve_text_provider(settings)
+    if can_use_vivo_text_provider(settings):
+        provider = VivoLlmProvider(settings, app_id_carrier=args.app_id_carrier)
+    else:
+        provider = resolve_text_provider(settings)
 
     try:
         result = provider.summarize(prompt=args.prompt, fallback=args.fallback)
@@ -232,12 +260,13 @@ def main() -> int:
             trace_id=details["trace_id"],
             request_id=details["request_id"],
             auth_shape=details["auth_shape"],
+            app_id_carrier=details["app_id_carrier"],
+            request_id_key=details["request_id_key"],
+            signature_mode=details["signature_mode"],
         )
         if args.include_raw and isinstance(details["raw"], dict):
             output["raw"] = details["raw"]
-        print(
-            json.dumps(output, ensure_ascii=False, indent=2)
-        )
+        print(json.dumps(output, ensure_ascii=False, indent=2))
         return 1
     except ProviderResponseError as exc:
         details = extract_error_details(exc)
@@ -253,12 +282,13 @@ def main() -> int:
             trace_id=details["trace_id"],
             request_id=details["request_id"],
             auth_shape=details["auth_shape"],
+            app_id_carrier=details["app_id_carrier"],
+            request_id_key=details["request_id_key"],
+            signature_mode=details["signature_mode"],
         )
         if args.include_raw and isinstance(details["raw"], dict):
             output["raw"] = details["raw"]
-        print(
-            json.dumps(output, ensure_ascii=False, indent=2)
-        )
+        print(json.dumps(output, ensure_ascii=False, indent=2))
         return 1
 
     output = build_output(

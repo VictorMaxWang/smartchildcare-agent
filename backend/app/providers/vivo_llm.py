@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 import hashlib
 import hmac
 import random
@@ -22,9 +23,33 @@ from app.providers.base import (
 from app.providers.mock import MockTextProvider
 
 DEFAULT_SYSTEM_PROMPT = "You are the SmartChildcare AI assistant. Respond in concise, actionable Chinese for a mobile UI."
-AUTH_SHAPE = "authorization_bearer_plus_gateway_signature_headers"
+DEFAULT_APP_ID_CARRIER = "query"
+SUPPORTED_APP_ID_CARRIERS = ("query", "body", "header")
+APP_ID_HEADER_NAME = "app_id"
+REQUEST_ID_QUERY_KEY = "requestId"
+SIGNATURE_MODE = "gateway_headers_v1"
 SIGNED_HEADERS = "x-ai-gateway-app-id;x-ai-gateway-timestamp;x-ai-gateway-nonce"
 GATEWAY_NONCE_LENGTH = 8
+
+
+def _auth_shape_for_carrier(app_id_carrier: str) -> str:
+    return f"authorization_bearer_plus_gateway_signature_headers_plus_{app_id_carrier}_app_id"
+
+
+AUTH_SHAPE = _auth_shape_for_carrier(DEFAULT_APP_ID_CARRIER)
+
+
+@dataclass(frozen=True)
+class VivoLlmRequestShape:
+    endpoint_path: str
+    uri: str
+    query_params: dict[str, Any]
+    payload: dict[str, Any]
+    headers: dict[str, str]
+    auth_shape: str
+    app_id_carrier: str
+    request_id_key: str
+    signature_mode: str
 
 
 class VivoLlmProviderError(RuntimeError):
@@ -34,8 +59,11 @@ class VivoLlmProviderError(RuntimeError):
 class VivoLlmProvider:
     provider_name = "vivo-llm"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, app_id_carrier: str = DEFAULT_APP_ID_CARRIER) -> None:
+        if app_id_carrier not in SUPPORTED_APP_ID_CARRIERS:
+            raise ValueError(f"unsupported app_id_carrier: {app_id_carrier}")
         self.settings = settings
+        self.app_id_carrier = app_id_carrier
         self._mock_provider = MockTextProvider()
 
     def _request_id(self) -> str:
@@ -47,6 +75,52 @@ class VivoLlmProvider:
         if not app_id or not app_key:
             raise ProviderConfigurationError("VIVO_APP_ID and VIVO_APP_KEY are required for vivo text requests")
         return app_id, app_key
+
+    def _build_request_shape(self, *, app_id: str, app_key: str, prompt: str, request_id: str) -> VivoLlmRequestShape:
+        endpoint_path = "/chat/completions"
+        uri = "/v1/chat/completions"
+        query_params: dict[str, Any] = {REQUEST_ID_QUERY_KEY: request_id}
+        payload: dict[str, Any] = {
+            "model": self.settings.vivo_llm_model,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        headers: dict[str, str] = {
+            "Authorization": f"Bearer {app_key}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+        if self.app_id_carrier == "query":
+            query_params["app_id"] = app_id
+        elif self.app_id_carrier == "body":
+            payload["app_id"] = app_id
+        else:
+            headers[APP_ID_HEADER_NAME] = app_id
+
+        headers.update(
+            self._build_gateway_headers(
+                app_id=app_id,
+                app_key=app_key,
+                method="POST",
+                uri=uri,
+                query=query_params,
+            )
+        )
+
+        return VivoLlmRequestShape(
+            endpoint_path=endpoint_path,
+            uri=uri,
+            query_params=query_params,
+            payload=payload,
+            headers=headers,
+            auth_shape=_auth_shape_for_carrier(self.app_id_carrier),
+            app_id_carrier=self.app_id_carrier,
+            request_id_key=REQUEST_ID_QUERY_KEY,
+            signature_mode=SIGNATURE_MODE,
+        )
 
     @staticmethod
     def _gen_nonce(length: int = GATEWAY_NONCE_LENGTH) -> str:
@@ -125,6 +199,22 @@ class VivoLlmProvider:
         trace_id = payload.get("trace_id") or payload.get("traceId")
         return error_code, message, trace_id
 
+    @staticmethod
+    def _shape_details(request_shape: VivoLlmRequestShape | None) -> dict[str, str]:
+        if request_shape is None:
+            return {
+                "auth_shape": AUTH_SHAPE,
+                "app_id_carrier": DEFAULT_APP_ID_CARRIER,
+                "request_id_key": REQUEST_ID_QUERY_KEY,
+                "signature_mode": SIGNATURE_MODE,
+            }
+        return {
+            "auth_shape": request_shape.auth_shape,
+            "app_id_carrier": request_shape.app_id_carrier,
+            "request_id_key": request_shape.request_id_key,
+            "signature_mode": request_shape.signature_mode,
+        }
+
     @classmethod
     def _diagnose_upstream_error(
         cls,
@@ -136,7 +226,7 @@ class VivoLlmProvider:
         normalized_msg = (error_msg or "").strip().lower()
         normalized_code = str(error_code).strip() if error_code is not None else ""
 
-        if status_code == 429:
+        if status_code == 429 or "rate limit" in normalized_msg:
             return "response", "rate_limited"
         if normalized_code == "40100" or "missing required app_id" in normalized_msg:
             return "auth", "app_id_missing"
@@ -146,6 +236,10 @@ class VivoLlmProvider:
             return "auth", "app_id_invalid_or_mismatched"
         if "invalid api-key" in normalized_msg or "invalid api key" in normalized_msg:
             return "auth", "app_key_invalid"
+        if normalized_code == "30001" and (
+            "permission" in normalized_msg or "ability" in normalized_msg or "expire" in normalized_msg
+        ):
+            return "permission", "model_permission_missing"
         if (
             status_code == 403
             or "not having this ability" in normalized_msg
@@ -189,7 +283,9 @@ class VivoLlmProvider:
         kind: str,
         request_id: str,
         raw: dict[str, Any] | None,
+        request_shape: VivoLlmRequestShape | None,
     ) -> ProviderAuthenticationError | ProviderResponseError:
+        shape_details = cls._shape_details(request_shape)
         error.http_status = status_code
         error.error_code = error_code
         error.error_msg = error_msg
@@ -198,7 +294,10 @@ class VivoLlmProvider:
         error.kind = kind
         error.request_id = request_id
         error.raw = raw or {}
-        error.auth_shape = AUTH_SHAPE
+        error.auth_shape = shape_details["auth_shape"]
+        error.app_id_carrier = shape_details["app_id_carrier"]
+        error.request_id_key = shape_details["request_id_key"]
+        error.signature_mode = shape_details["signature_mode"]
         return error
 
     def _raise_upstream_error(
@@ -207,6 +306,7 @@ class VivoLlmProvider:
         status_code: int | None,
         request_id: str,
         raw: dict[str, Any] | None,
+        request_shape: VivoLlmRequestShape | None,
     ) -> None:
         payload = raw or {}
         error_code, error_msg, trace_id = self._extract_error_fields(payload)
@@ -233,6 +333,7 @@ class VivoLlmProvider:
             kind=kind,
             request_id=request_id,
             raw=payload,
+            request_shape=request_shape,
         )
 
     def _fallback(
@@ -246,7 +347,9 @@ class VivoLlmProvider:
         latency_ms: int | None = None,
         diagnosis: str | None = None,
         kind: str = "response",
+        request_shape: VivoLlmRequestShape | None = None,
     ) -> ProviderTextResult:
+        shape_details = self._shape_details(request_shape)
         error_code, error_msg, trace_id = self._extract_error_fields(raw or {})
         if diagnosis is None:
             kind, diagnosis = self._diagnose_upstream_error(
@@ -272,6 +375,7 @@ class VivoLlmProvider:
                 kind=kind,
                 request_id=request_id,
                 raw=raw,
+                request_shape=request_shape,
             )
 
         result = self._mock_provider.summarize(prompt="", fallback=fallback)
@@ -290,7 +394,7 @@ class VivoLlmProvider:
             "latency_ms": latency_ms,
             "attempted_provider": self.provider_name,
             "attempted_model": self.settings.vivo_llm_model,
-            "auth_shape": AUTH_SHAPE,
+            **shape_details,
         }
         result.raw = raw
         return result
@@ -299,34 +403,19 @@ class VivoLlmProvider:
         app_id, app_key = self._require_credentials()
         request_id = self._request_id()
         started_at = time.perf_counter()
-        endpoint_path = "/chat/completions"
-        uri = "/v1/chat/completions"
-        query_params = {"requestId": request_id}
-        headers = {
-            "Authorization": f"Bearer {app_key}",
-            "Content-Type": "application/json; charset=utf-8",
-            **self._build_gateway_headers(
-                app_id=app_id,
-                app_key=app_key,
-                method="POST",
-                uri=uri,
-                query=query_params,
-            ),
-        }
+        request_shape = self._build_request_shape(
+            app_id=app_id,
+            app_key=app_key,
+            prompt=prompt,
+            request_id=request_id,
+        )
 
         try:
             response = requests.post(
-                f"{self.settings.vivo_llm_base_url.rstrip('/')}{endpoint_path}",
-                params=query_params,
-                headers=headers,
-                json={
-                    "model": self.settings.vivo_llm_model,
-                    "stream": False,
-                    "messages": [
-                        {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
+                f"{self.settings.vivo_llm_base_url.rstrip('/')}{request_shape.endpoint_path}",
+                params=request_shape.query_params,
+                headers=request_shape.headers,
+                json=request_shape.payload,
                 timeout=self.settings.request_timeout_seconds,
             )
         except requests.Timeout:
@@ -336,6 +425,7 @@ class VivoLlmProvider:
                 reason="timeout",
                 latency_ms=self._latency_ms(started_at),
                 diagnosis="network_or_timeout",
+                request_shape=request_shape,
             )
         except requests.RequestException as error:
             return self._fallback(
@@ -344,6 +434,7 @@ class VivoLlmProvider:
                 reason=type(error).__name__.lower(),
                 latency_ms=self._latency_ms(started_at),
                 diagnosis="network_or_timeout",
+                request_shape=request_shape,
             )
 
         error_payload = self._try_parse_json(response)
@@ -352,6 +443,7 @@ class VivoLlmProvider:
                 status_code=response.status_code,
                 request_id=request_id,
                 raw=error_payload,
+                request_shape=request_shape,
             )
         if response.status_code == 429:
             return self._fallback(
@@ -362,6 +454,7 @@ class VivoLlmProvider:
                 raw=error_payload,
                 latency_ms=self._latency_ms(started_at),
                 diagnosis="rate_limited",
+                request_shape=request_shape,
             )
         if response.status_code >= 500:
             return self._fallback(
@@ -371,12 +464,14 @@ class VivoLlmProvider:
                 status_code=response.status_code,
                 raw=error_payload,
                 latency_ms=self._latency_ms(started_at),
+                request_shape=request_shape,
             )
         if response.status_code >= 400:
             self._raise_upstream_error(
                 status_code=response.status_code,
                 request_id=request_id,
                 raw=error_payload,
+                request_shape=request_shape,
             )
 
         try:
@@ -387,6 +482,7 @@ class VivoLlmProvider:
                 request_id=request_id,
                 reason=type(error).__name__.lower(),
                 latency_ms=self._latency_ms(started_at),
+                request_shape=request_shape,
             )
         if not isinstance(payload, dict):
             return self._fallback(
@@ -394,6 +490,7 @@ class VivoLlmProvider:
                 request_id=request_id,
                 reason="invalid-json-payload",
                 latency_ms=self._latency_ms(started_at),
+                request_shape=request_shape,
             )
         if payload.get("error_code") is not None or (
             (payload.get("error_msg") or payload.get("message") or payload.get("msg")) and not payload.get("choices")
@@ -402,6 +499,7 @@ class VivoLlmProvider:
                 status_code=response.status_code,
                 request_id=request_id,
                 raw=payload,
+                request_shape=request_shape,
             )
 
         choices = payload.get("choices")
@@ -416,6 +514,7 @@ class VivoLlmProvider:
                 reason="empty-content",
                 raw=payload if isinstance(payload, dict) else None,
                 latency_ms=self._latency_ms(started_at),
+                request_shape=request_shape,
             )
 
         return ProviderTextResult(
@@ -432,8 +531,8 @@ class VivoLlmProvider:
                 "upstream_id": payload.get("id"),
                 "created": payload.get("created"),
                 "tool_call_count": len(message.get("tool_calls", [])) if isinstance(message, dict) and isinstance(message.get("tool_calls"), list) else 0,
-                "auth_shape": AUTH_SHAPE,
                 "diagnosis": "auth_ok",
+                **self._shape_details(request_shape),
             },
             raw=payload,
             fallback=False,

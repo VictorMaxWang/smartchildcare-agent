@@ -106,6 +106,9 @@ def test_vivo_smoke_build_output_includes_auth_diagnostics():
                 "finish_reason": "stop",
                 "status_code": 200,
                 "auth_shape": vivo_smoke.AUTH_SHAPE,
+                "app_id_carrier": "query",
+                "request_id_key": vivo_smoke.REQUEST_ID_QUERY_KEY,
+                "signature_mode": vivo_smoke.SIGNATURE_MODE,
                 "diagnosis": "auth_ok",
                 "trace_id": "trace-ok",
             }
@@ -116,6 +119,9 @@ def test_vivo_smoke_build_output_includes_auth_diagnostics():
     )
 
     assert output["auth_shape"] == vivo_smoke.AUTH_SHAPE
+    assert output["app_id_carrier"] == "query"
+    assert output["request_id_key"] == vivo_smoke.REQUEST_ID_QUERY_KEY
+    assert output["signature_mode"] == vivo_smoke.SIGNATURE_MODE
     assert output["diagnosis"] == "auth_ok"
     assert output["http_status"] == 200
     assert output["trace_id"] == "trace-ok"
@@ -132,6 +138,9 @@ def test_vivo_smoke_error_output_includes_auth_diagnostics():
     exc.trace_id = "trace-auth"
     exc.request_id = "req-auth"
     exc.auth_shape = vivo_smoke.AUTH_SHAPE
+    exc.app_id_carrier = "query"
+    exc.request_id_key = vivo_smoke.REQUEST_ID_QUERY_KEY
+    exc.signature_mode = vivo_smoke.SIGNATURE_MODE
     exc.raw = {"error_code": 40102}
 
     details = vivo_smoke.extract_error_details(exc)
@@ -147,6 +156,9 @@ def test_vivo_smoke_error_output_includes_auth_diagnostics():
         trace_id=details["trace_id"],
         request_id=details["request_id"],
         auth_shape=details["auth_shape"],
+        app_id_carrier=details["app_id_carrier"],
+        request_id_key=details["request_id_key"],
+        signature_mode=details["signature_mode"],
     )
 
     assert output["kind"] == "auth"
@@ -157,6 +169,9 @@ def test_vivo_smoke_error_output_includes_auth_diagnostics():
     assert output["trace_id"] == "trace-auth"
     assert output["request_id"] == "req-auth"
     assert output["auth_shape"] == vivo_smoke.AUTH_SHAPE
+    assert output["app_id_carrier"] == "query"
+    assert output["request_id_key"] == vivo_smoke.REQUEST_ID_QUERY_KEY
+    assert output["signature_mode"] == vivo_smoke.SIGNATURE_MODE
 
 
 def test_vivo_smoke_error_output_includes_model_permission_diagnostics():
@@ -168,6 +183,9 @@ def test_vivo_smoke_error_output_includes_model_permission_diagnostics():
     exc.trace_id = "trace-permission"
     exc.request_id = "req-permission"
     exc.auth_shape = vivo_smoke.AUTH_SHAPE
+    exc.app_id_carrier = "query"
+    exc.request_id_key = vivo_smoke.REQUEST_ID_QUERY_KEY
+    exc.signature_mode = vivo_smoke.SIGNATURE_MODE
 
     details = vivo_smoke.extract_error_details(exc)
 
@@ -176,6 +194,9 @@ def test_vivo_smoke_error_output_includes_model_permission_diagnostics():
     assert details["http_status"] == 403
     assert details["error_msg"] == "not having this ability, you need to apply for it"
     assert details["trace_id"] == "trace-permission"
+    assert details["app_id_carrier"] == "query"
+    assert details["request_id_key"] == vivo_smoke.REQUEST_ID_QUERY_KEY
+    assert details["signature_mode"] == vivo_smoke.SIGNATURE_MODE
 
 
 def test_asr_validate_strict_accepts_real_vivo_result():
