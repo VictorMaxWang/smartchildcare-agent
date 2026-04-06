@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import requests
 import pytest
 from pydantic import SecretStr
@@ -12,13 +15,14 @@ from app.providers.base import (
 )
 from app.providers.mock import MockTextProvider
 from app.providers.resolver import resolve_text_provider
-from app.providers.vivo_llm import VivoLlmProvider
+from app.providers.vivo_llm import AUTH_SHAPE, SIGNED_HEADERS, VivoLlmProvider
 
 
 class FakeResponse:
     def __init__(self, status_code: int, payload):
         self.status_code = status_code
         self._payload = payload
+        self.text = payload if isinstance(payload, str) else ""
 
     def json(self):
         if isinstance(self._payload, Exception):
@@ -44,8 +48,30 @@ def test_vivo_llm_success(monkeypatch):
         assert url == "https://api-ai.vivo.com.cn/v1/chat/completions"
         assert kwargs["params"]["requestId"]
         assert kwargs["headers"]["Authorization"] == "Bearer app-key"
+        assert kwargs["headers"]["X-AI-GATEWAY-APP-ID"] == "app-id"
+        assert kwargs["headers"]["X-AI-GATEWAY-SIGNED-HEADERS"] == SIGNED_HEADERS
+        assert kwargs["headers"]["X-AI-GATEWAY-TIMESTAMP"].isdigit()
+        assert len(kwargs["headers"]["X-AI-GATEWAY-NONCE"]) == 8
         assert kwargs["json"]["model"] == "Volc-DeepSeek-V3.2"
         assert kwargs["json"]["stream"] is False
+        signing_string = "\n".join(
+            [
+                "POST",
+                "/v1/chat/completions",
+                f"requestId={kwargs['params']['requestId']}",
+                "app-id",
+                kwargs["headers"]["X-AI-GATEWAY-TIMESTAMP"],
+                (
+                    f"x-ai-gateway-app-id:app-id\n"
+                    f"x-ai-gateway-timestamp:{kwargs['headers']['X-AI-GATEWAY-TIMESTAMP']}\n"
+                    f"x-ai-gateway-nonce:{kwargs['headers']['X-AI-GATEWAY-NONCE']}"
+                ),
+            ]
+        ).encode("utf-8")
+        expected_signature = base64.b64encode(
+            hmac.new(b"app-key", signing_string, hashlib.sha256).digest()
+        ).decode("utf-8")
+        assert kwargs["headers"]["X-AI-GATEWAY-SIGNATURE"] == expected_signature
         return FakeResponse(
             200,
             {
@@ -75,15 +101,30 @@ def test_vivo_llm_success(monkeypatch):
     assert result.meta["finish_reason"] == "stop"
     assert result.meta["upstream_id"] == "chatcmpl-vivo-123"
     assert result.meta["created"] == 1712300000
+    assert result.meta["auth_shape"] == AUTH_SHAPE
+    assert result.meta["diagnosis"] == "auth_ok"
     assert result.raw["id"] == "chatcmpl-vivo-123"
     assert result.request_id
 
 
 def test_vivo_llm_authentication_failure_does_not_fallback(monkeypatch):
-    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: FakeResponse(401, {"error": "unauthorized"}))
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            401,
+            {"error_code": 40100, "error_msg": "missing required app_id in the request header", "trace_id": "trace-app-id"},
+        ),
+    )
 
-    with pytest.raises(ProviderAuthenticationError):
+    with pytest.raises(ProviderAuthenticationError) as exc_info:
         VivoLlmProvider(build_settings(enable_mock_provider=True)).summarize(prompt="test", fallback="fallback")
+
+    assert exc_info.value.diagnosis == "app_id_missing"
+    assert exc_info.value.kind == "auth"
+    assert exc_info.value.error_code == 40100
+    assert exc_info.value.trace_id == "trace-app-id"
+    assert exc_info.value.auth_shape == AUTH_SHAPE
 
 
 def test_vivo_llm_server_error_falls_back_when_enabled(monkeypatch):
@@ -98,6 +139,7 @@ def test_vivo_llm_server_error_falls_back_when_enabled(monkeypatch):
     assert result.meta["reason"] == "upstream-server-error"
     assert result.meta["status_code"] == 503
     assert result.meta["attempted_provider"] == "vivo-llm"
+    assert result.meta["auth_shape"] == AUTH_SHAPE
     assert result.request_id
 
 
@@ -110,6 +152,7 @@ def test_vivo_llm_rate_limit_falls_back_when_enabled(monkeypatch):
     assert result.fallback is True
     assert result.meta["reason"] == "rate-limited"
     assert result.meta["status_code"] == 429
+    assert result.meta["diagnosis"] == "rate_limited"
 
 
 def test_vivo_llm_timeout_falls_back_when_enabled(monkeypatch):
@@ -124,6 +167,7 @@ def test_vivo_llm_timeout_falls_back_when_enabled(monkeypatch):
     assert result.source == "mock"
     assert result.fallback is True
     assert result.meta["reason"] == "timeout"
+    assert result.meta["diagnosis"] == "network_or_timeout"
 
 
 def test_vivo_llm_missing_configuration_raises():
@@ -171,5 +215,80 @@ def test_vivo_llm_empty_content_falls_back_with_raw_payload(monkeypatch):
 def test_vivo_llm_server_error_raises_when_mock_disabled(monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *args, **kwargs: FakeResponse(503, {"error": "unavailable"}))
 
-    with pytest.raises(ProviderResponseError):
+    with pytest.raises(ProviderResponseError) as exc_info:
         VivoLlmProvider(build_settings(enable_mock_provider=False)).summarize(prompt="test", fallback="fallback")
+
+    assert exc_info.value.diagnosis == "unknown_upstream_error"
+    assert exc_info.value.kind == "response"
+
+
+def test_vivo_llm_invalid_app_id_maps_to_specific_auth_diagnosis(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            401,
+            {"error_code": 40102, "error_msg": "invalid app_id", "trace_id": "trace-invalid-app-id"},
+        ),
+    )
+
+    with pytest.raises(ProviderAuthenticationError) as exc_info:
+        VivoLlmProvider(build_settings()).summarize(prompt="test", fallback="fallback")
+
+    assert exc_info.value.diagnosis == "app_id_invalid_or_mismatched"
+    assert exc_info.value.error_code == 40102
+    assert exc_info.value.trace_id == "trace-invalid-app-id"
+
+
+def test_vivo_llm_invalid_api_key_maps_to_specific_auth_diagnosis(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            401,
+            {"message": "invalid api-key", "trace_id": "trace-api-key"},
+        ),
+    )
+
+    with pytest.raises(ProviderAuthenticationError) as exc_info:
+        VivoLlmProvider(build_settings()).summarize(prompt="test", fallback="fallback")
+
+    assert exc_info.value.diagnosis == "app_key_invalid"
+    assert exc_info.value.kind == "auth"
+    assert exc_info.value.trace_id == "trace-api-key"
+
+
+def test_vivo_llm_model_permission_error_maps_to_permission_diagnosis(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            403,
+            {"error_msg": "not having this ability, you need to apply for it", "trace_id": "trace-permission"},
+        ),
+    )
+
+    with pytest.raises(ProviderResponseError) as exc_info:
+        VivoLlmProvider(build_settings()).summarize(prompt="test", fallback="fallback")
+
+    assert exc_info.value.diagnosis == "model_permission_missing"
+    assert exc_info.value.kind == "permission"
+    assert exc_info.value.trace_id == "trace-permission"
+
+
+def test_vivo_llm_signature_error_maps_to_specific_auth_diagnosis(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            401,
+            {"error_code": 40101, "error_msg": "missing required signature in the request header", "trace_id": "trace-signature"},
+        ),
+    )
+
+    with pytest.raises(ProviderAuthenticationError) as exc_info:
+        VivoLlmProvider(build_settings()).summarize(prompt="test", fallback="fallback")
+
+    assert exc_info.value.diagnosis == "signature_invalid_or_missing"
+    assert exc_info.value.kind == "auth"
+    assert exc_info.value.trace_id == "trace-signature"

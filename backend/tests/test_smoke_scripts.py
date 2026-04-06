@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from app.providers.base import ProviderAuthenticationError, ProviderResponseError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +97,85 @@ def test_validate_strict_rejects_non_vivo_brain_provider():
     passed, reason = vivo_smoke.validate_strict(build_result(), brain_provider="mock")
     assert passed is False
     assert "brain_provider='vivo'" in reason
+
+
+def test_vivo_smoke_build_output_includes_auth_diagnostics():
+    output = vivo_smoke.build_output(
+        build_result(
+            meta={
+                "finish_reason": "stop",
+                "status_code": 200,
+                "auth_shape": vivo_smoke.AUTH_SHAPE,
+                "diagnosis": "auth_ok",
+                "trace_id": "trace-ok",
+            }
+        ),
+        include_raw=False,
+        brain_provider="vivo",
+        vivo_credentials_configured=True,
+    )
+
+    assert output["auth_shape"] == vivo_smoke.AUTH_SHAPE
+    assert output["diagnosis"] == "auth_ok"
+    assert output["http_status"] == 200
+    assert output["trace_id"] == "trace-ok"
+    assert output["upstream_status_code"] == 200
+
+
+def test_vivo_smoke_error_output_includes_auth_diagnostics():
+    exc = ProviderAuthenticationError("auth failed")
+    exc.kind = "auth"
+    exc.diagnosis = "app_id_invalid_or_mismatched"
+    exc.http_status = 401
+    exc.error_code = 40102
+    exc.error_msg = "invalid app_id"
+    exc.trace_id = "trace-auth"
+    exc.request_id = "req-auth"
+    exc.auth_shape = vivo_smoke.AUTH_SHAPE
+    exc.raw = {"error_code": 40102}
+
+    details = vivo_smoke.extract_error_details(exc)
+    output = vivo_smoke.build_error_output(
+        error=str(exc),
+        kind=details["kind"],
+        brain_provider="vivo",
+        vivo_credentials_configured=True,
+        diagnosis=details["diagnosis"],
+        http_status=details["http_status"],
+        error_code=details["error_code"],
+        error_msg=details["error_msg"],
+        trace_id=details["trace_id"],
+        request_id=details["request_id"],
+        auth_shape=details["auth_shape"],
+    )
+
+    assert output["kind"] == "auth"
+    assert output["diagnosis"] == "app_id_invalid_or_mismatched"
+    assert output["http_status"] == 401
+    assert output["error_code"] == 40102
+    assert output["error_msg"] == "invalid app_id"
+    assert output["trace_id"] == "trace-auth"
+    assert output["request_id"] == "req-auth"
+    assert output["auth_shape"] == vivo_smoke.AUTH_SHAPE
+
+
+def test_vivo_smoke_error_output_includes_model_permission_diagnostics():
+    exc = ProviderResponseError("permission failed")
+    exc.kind = "permission"
+    exc.diagnosis = "model_permission_missing"
+    exc.http_status = 403
+    exc.error_msg = "not having this ability, you need to apply for it"
+    exc.trace_id = "trace-permission"
+    exc.request_id = "req-permission"
+    exc.auth_shape = vivo_smoke.AUTH_SHAPE
+
+    details = vivo_smoke.extract_error_details(exc)
+
+    assert details["kind"] == "permission"
+    assert details["diagnosis"] == "model_permission_missing"
+    assert details["http_status"] == 403
+    assert details["error_msg"] == "not having this ability, you need to apply for it"
+    assert details["trace_id"] == "trace-permission"
 
 
 def test_asr_validate_strict_accepts_real_vivo_result():

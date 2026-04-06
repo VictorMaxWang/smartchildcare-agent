@@ -21,6 +21,7 @@ from app.providers.resolver import (
     has_vivo_text_provider_config,
     resolve_text_provider,
 )
+from app.providers.vivo_llm import AUTH_SHAPE
 
 DEFAULT_PROMPT = "Please return one concise Chinese sentence for the SmartChildcare vivo LLM smoke test."
 DEFAULT_FALLBACK = "smoke fallback triggered"
@@ -46,9 +47,10 @@ def parse_args() -> argparse.Namespace:
 
 def build_output(result: Any, *, include_raw: bool, brain_provider: str, vivo_credentials_configured: bool) -> dict[str, Any]:
     raw = result.raw if isinstance(result.raw, dict) else {}
+    meta = result.meta if isinstance(result.meta, dict) else {}
     provider_source = result.source
     provider_model = result.model
-    fallback_reason = result.meta.get("reason") if isinstance(result.meta, dict) else None
+    fallback_reason = meta.get("reason")
     output = {
         "ok": True,
         "brain_provider": brain_provider,
@@ -63,11 +65,18 @@ def build_output(result: Any, *, include_raw: bool, brain_provider: str, vivo_cr
         "fallback_reason": fallback_reason,
         "request_id": result.request_id,
         "usage": result.usage,
-        "meta": result.meta,
+        "meta": meta,
+        "auth_shape": meta.get("auth_shape") or AUTH_SHAPE,
+        "diagnosis": meta.get("diagnosis") or "auth_ok",
+        "http_status": meta.get("status_code"),
+        "error_code": meta.get("error_code"),
+        "error_msg": meta.get("error_msg"),
+        "trace_id": meta.get("trace_id"),
         "upstream_markers": {
             "id": raw.get("id"),
             "created": raw.get("created"),
         },
+        "upstream_status_code": meta.get("status_code"),
         "content_preview": (result.content or "")[:160],
     }
     if include_raw:
@@ -75,13 +84,77 @@ def build_output(result: Any, *, include_raw: bool, brain_provider: str, vivo_cr
     return output
 
 
-def build_error_output(*, error: str, kind: str, brain_provider: str, vivo_credentials_configured: bool) -> dict[str, Any]:
+def extract_error_details(exc: Exception) -> dict[str, Any]:
+    error_msg = getattr(exc, "error_msg", None)
+    diagnosis = getattr(exc, "diagnosis", None)
+    kind = getattr(exc, "kind", None)
+    if diagnosis is None:
+        message = str(exc).lower()
+        if "timeout" in message:
+            diagnosis = "network_or_timeout"
+        elif "network" in message or "connection" in message:
+            diagnosis = "network_or_timeout"
+        elif "missing required app_id" in message:
+            diagnosis = "app_id_missing"
+        elif "invalid app_id" in message:
+            diagnosis = "app_id_invalid_or_mismatched"
+        elif "missing required signature" in message or "invalid signature" in message:
+            diagnosis = "signature_invalid_or_missing"
+        elif "invalid api-key" in message or "invalid api key" in message:
+            diagnosis = "app_key_invalid"
+        elif "not having this ability" in message or ("model" in message and "permission" in message):
+            diagnosis = "model_permission_missing"
+        else:
+            diagnosis = "unknown_upstream_error"
+    if kind is None:
+        if diagnosis in {"app_id_missing", "app_id_invalid_or_mismatched", "signature_invalid_or_missing", "app_key_invalid"}:
+            kind = "auth"
+        elif diagnosis == "model_permission_missing":
+            kind = "permission"
+        elif diagnosis == "network_or_timeout":
+            kind = "network"
+        else:
+            kind = "response"
+    return {
+        "kind": kind,
+        "diagnosis": diagnosis,
+        "http_status": getattr(exc, "http_status", None),
+        "error_code": getattr(exc, "error_code", None),
+        "error_msg": error_msg,
+        "trace_id": getattr(exc, "trace_id", None),
+        "request_id": getattr(exc, "request_id", None),
+        "auth_shape": getattr(exc, "auth_shape", AUTH_SHAPE),
+        "raw": getattr(exc, "raw", None),
+    }
+
+
+def build_error_output(
+    *,
+    error: str,
+    kind: str,
+    brain_provider: str,
+    vivo_credentials_configured: bool,
+    diagnosis: str | None = None,
+    http_status: int | None = None,
+    error_code: int | str | None = None,
+    error_msg: str | None = None,
+    trace_id: str | None = None,
+    request_id: str | None = None,
+    auth_shape: str = AUTH_SHAPE,
+) -> dict[str, Any]:
     return {
         "ok": False,
         "error": error,
         "kind": kind,
         "brain_provider": brain_provider,
         "vivo_credentials_configured": vivo_credentials_configured,
+        "diagnosis": diagnosis,
+        "http_status": http_status,
+        "error_code": error_code,
+        "error_msg": error_msg,
+        "trace_id": trace_id,
+        "request_id": request_id,
+        "auth_shape": auth_shape,
     }
 
 
@@ -146,37 +219,45 @@ def main() -> int:
         )
         return 1
     except ProviderAuthenticationError as exc:
+        details = extract_error_details(exc)
+        output = build_error_output(
+            error=str(exc),
+            kind=details["kind"],
+            brain_provider=brain_provider,
+            vivo_credentials_configured=vivo_credentials_configured,
+            diagnosis=details["diagnosis"],
+            http_status=details["http_status"],
+            error_code=details["error_code"],
+            error_msg=details["error_msg"],
+            trace_id=details["trace_id"],
+            request_id=details["request_id"],
+            auth_shape=details["auth_shape"],
+        )
+        if args.include_raw and isinstance(details["raw"], dict):
+            output["raw"] = details["raw"]
         print(
-            json.dumps(
-                build_error_output(
-                    error=str(exc),
-                    kind="auth",
-                    brain_provider=brain_provider,
-                    vivo_credentials_configured=vivo_credentials_configured,
-                ),
-                ensure_ascii=False,
-                indent=2,
-            )
+            json.dumps(output, ensure_ascii=False, indent=2)
         )
         return 1
     except ProviderResponseError as exc:
-        message = str(exc).lower()
-        kind = "response"
-        if "timeout" in message:
-            kind = "timeout"
-        elif "network" in message or "connection" in message:
-            kind = "network"
+        details = extract_error_details(exc)
+        output = build_error_output(
+            error=str(exc),
+            kind=details["kind"],
+            brain_provider=brain_provider,
+            vivo_credentials_configured=vivo_credentials_configured,
+            diagnosis=details["diagnosis"],
+            http_status=details["http_status"],
+            error_code=details["error_code"],
+            error_msg=details["error_msg"],
+            trace_id=details["trace_id"],
+            request_id=details["request_id"],
+            auth_shape=details["auth_shape"],
+        )
+        if args.include_raw and isinstance(details["raw"], dict):
+            output["raw"] = details["raw"]
         print(
-            json.dumps(
-                build_error_output(
-                    error=str(exc),
-                    kind=kind,
-                    brain_provider=brain_provider,
-                    vivo_credentials_configured=vivo_credentials_configured,
-                ),
-                ensure_ascii=False,
-                indent=2,
-            )
+            json.dumps(output, ensure_ascii=False, indent=2)
         )
         return 1
 
