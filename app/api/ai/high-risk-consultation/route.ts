@@ -19,6 +19,7 @@ import {
   forwardBrainRequest,
   type BrainForwardResult,
 } from "@/lib/server/brain-client";
+import { normalizeHighRiskConsultationResult } from "@/lib/consultation/normalize-result";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
 function isRecordArray(value: unknown) {
@@ -185,9 +186,7 @@ export async function POST(request: Request) {
     summary: llmResult.output.summary,
     parentMessageDraft: llmResult.output.parentMessageDraft,
     continuityNotes: consultation.continuityNotes ?? suggestionSnapshot.continuityNotes,
-    ...(process.env.NODE_ENV !== "production" || request.headers.get("x-debug-memory") === "1"
-      ? { memoryMeta: consultation.memoryMeta ?? memoryContext.meta }
-      : {}),
+    memoryMeta: consultation.memoryMeta ?? memoryContext.meta,
     directorDecisionCard: {
       ...consultation.directorDecisionCard,
       reason: llmResult.output.directorReason,
@@ -220,6 +219,7 @@ export async function POST(request: Request) {
     transportSource: "next-server",
     consultationSource: String(nextConsultation.source ?? ""),
     fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
+    brainProvider: "next-fallback",
     realProvider: false,
     fallback: true,
     ocr: ocrResult?.provider ?? "unused",
@@ -233,7 +233,7 @@ export async function POST(request: Request) {
     },
   };
 
-  return NextResponse.json(
+  const normalizedResult = normalizeHighRiskConsultationResult(
     {
       ...nextConsultation,
       interventionCard,
@@ -250,6 +250,17 @@ export async function POST(request: Request) {
         teacherNote: payload.teacherNote?.trim() || "",
       },
     },
+    {
+      brainProvider: "next-fallback",
+      defaultTransport: "next-json-fallback",
+      defaultTransportSource: "next-server",
+      defaultConsultationSource: String(nextConsultation.source ?? ""),
+      defaultFallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
+    }
+  );
+
+  return NextResponse.json(
+    normalizedResult,
     { status: 200, headers: localFallbackHeaders }
   );
 }

@@ -665,6 +665,7 @@ export default function ParentAgentPage() {
       actions={
         <>
           <InlineLinkButton href="/parent" label="返回家长首页" />
+          <InlineLinkButton href={`/parent/storybook?child=${selectedFeed.child.id}`} label="打开今日微绘本" variant="secondary" />
           <InlineLinkButton href={`/parent/agent?child=${selectedFeed.child.id}`} label="刷新当前建议" variant="premium" />
         </>
       }

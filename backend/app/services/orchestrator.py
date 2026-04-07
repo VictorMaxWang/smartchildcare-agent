@@ -28,11 +28,18 @@ from app.memory.session_memory import SessionMemory
 from app.memory.vector_store import SimpleVectorStore
 from app.providers.mock import build_mock_diet_evaluation, build_mock_vision_meal
 from app.services.memory_service import MemoryService
+from app.services.admin_consultation_feed import list_high_risk_consultation_feed
+from app.services.high_risk_consultation_contract import (
+    build_high_risk_done_event,
+    normalize_high_risk_consultation_result,
+)
+from app.services.parent_storybook_service import run_parent_storybook
 from app.services.parent_trend_service import run_parent_trend_query
 from app.services.react_runner import ReactRunner
 from app.services.streaming import encode_sse, mock_agent_stream
 from app.schemas.memory import MemoryContextBuildOptions
 from app.schemas.react_tools import ReactRunRequest
+from app.tools.summary_tools import safe_dict
 
 
 logger = logging.getLogger(__name__)
@@ -165,6 +172,25 @@ def _build_trace_metadata(task: str, payload: dict[str, Any], result: dict[str, 
     if isinstance(memory_trace_meta, dict):
         metadata.update(memory_trace_meta)
 
+    provider_trace = safe_dict(result.get("providerTrace"))
+    trace_meta = safe_dict(result.get("traceMeta"))
+    for key in (
+        "requestId",
+        "transport",
+        "transportSource",
+        "consultationSource",
+        "fallbackReason",
+        "brainProvider",
+        "realProvider",
+        "fallback",
+    ):
+        if key not in metadata:
+            value = provider_trace.get(key)
+            if value is None:
+                value = trace_meta.get(key)
+            if value is not None:
+                metadata[key] = value
+
     return metadata
 
 
@@ -188,6 +214,8 @@ def _memory_query(task: str, payload: dict[str, Any]) -> str | None:
         value = _coerce_string(payload.get(key))
         if value:
             return value
+    if task == "parent-storybook":
+        return "最近成长 亮点 家长 睡前 故事"
     if task == "high-risk-consultation":
         return "最近会诊 风险 闭环 家长反馈"
     if task in {"teacher-agent", "parent-follow-up"}:
@@ -228,6 +256,8 @@ class Orchestrator:
         elif task == "parent-follow-up":
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "parent-message-reflexion":
+            child_ids = _extract_child_ids(effective_payload, limit=1)
+        elif task == "parent-storybook":
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "parent-trend-query":
             child_ids = _extract_child_ids(effective_payload, limit=1)
@@ -285,6 +315,29 @@ class Orchestrator:
         }
         return effective_payload
 
+    def _brain_provider(self) -> str:
+        settings = get_settings()
+        return settings.brain_provider.strip().lower() or "unknown"
+
+    def _normalize_high_risk_result(
+        self,
+        *,
+        payload: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider_trace = safe_dict(result.get("providerTrace"))
+        return normalize_high_risk_consultation_result(
+            result,
+            payload=payload,
+            brain_provider=self._brain_provider(),
+            default_transport="fastapi-brain",
+            default_transport_source="fastapi-brain",
+            default_consultation_source=_coerce_string(result.get("source"))
+            or _coerce_string(provider_trace.get("consultationSource"))
+            or "mock",
+            default_fallback_reason=_coerce_string(provider_trace.get("fallbackReason")) or "",
+        )
+
     async def _run_with_trace(
         self,
         *,
@@ -339,6 +392,9 @@ class Orchestrator:
                     **result,
                     "memoryMeta": effective_payload.get("_memory_trace_meta"),
                 }
+
+        if task == "high-risk-consultation" and isinstance(result, dict):
+            result = self._normalize_high_risk_result(payload=effective_payload, result=result)
 
         await self._safe_save_trace(
             trace_id=trace_id,
@@ -409,6 +465,15 @@ class Orchestrator:
             snapshot_type="parent-trend-result",
         )
 
+    async def parent_storybook(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._run_with_trace(
+            task="parent-storybook",
+            payload=payload,
+            runner=run_parent_storybook,
+            node_name="parent-storybook",
+            snapshot_type="parent-storybook-result",
+        )
+
     async def teacher_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._run_with_trace(
             task="teacher-agent",
@@ -471,9 +536,28 @@ class Orchestrator:
                     if event == "done":
                         result = data.get("result")
                         if isinstance(result, dict):
-                            final_result = result
-                            child_id = _extract_child_id(result, effective_payload)
-                            session_id = _extract_session_id(result, effective_payload)
+                            final_result = self._normalize_high_risk_result(
+                                payload=effective_payload,
+                                result=result,
+                            )
+                            data = build_high_risk_done_event(
+                                trace_id=trace_id,
+                                result=final_result,
+                                payload=effective_payload,
+                                brain_provider=self._brain_provider(),
+                                default_transport="fastapi-brain",
+                                default_transport_source="fastapi-brain",
+                                default_consultation_source=_coerce_string(final_result.get("source")) or "mock",
+                                default_fallback_reason=_coerce_string(
+                                    safe_dict(safe_dict(final_result.get("providerTrace")).get("meta")).get("reason")
+                                )
+                                or _coerce_string(
+                                    safe_dict(final_result.get("providerTrace")).get("fallbackReason")
+                                )
+                                or "",
+                            )
+                            child_id = _extract_child_id(final_result, effective_payload)
+                            session_id = _extract_session_id(final_result, effective_payload)
                             duration_ms = max(0, int((perf_counter() - started_at) * 1000))
                             await self._safe_save_trace(
                                 trace_id=trace_id,
@@ -482,10 +566,10 @@ class Orchestrator:
                                 node_name="high-risk-consultation",
                                 action_type="high-risk-consultation",
                                 input_summary=_summarize_value(effective_payload),
-                                output_summary=_summarize_value(result),
+                                output_summary=_summarize_value(final_result),
                                 status="succeeded",
                                 duration_ms=duration_ms,
-                                metadata_json=_build_trace_metadata("high-risk-consultation", effective_payload, result),
+                                metadata_json=_build_trace_metadata("high-risk-consultation", effective_payload, final_result),
                             )
                             if child_id or session_id:
                                 await self._safe_save_snapshot(
@@ -496,7 +580,7 @@ class Orchestrator:
                                     snapshot_json={
                                         "task": "high-risk-consultation",
                                         "traceId": trace_id,
-                                        "result": result,
+                                        "result": final_result,
                                     },
                                 )
                     yield encode_sse(event, data)
@@ -532,16 +616,40 @@ class Orchestrator:
                 )
                 yield encode_sse(
                     "done",
-                    {
-                        "traceId": trace_id,
-                        "result": final_result,
-                        "memoryMeta": _extract_memory_meta(effective_payload),
-                        "realProvider": False,
-                        "fallback": True,
-                    },
+                    build_high_risk_done_event(
+                        trace_id=trace_id,
+                        result=final_result,
+                        payload=effective_payload,
+                        brain_provider=self._brain_provider(),
+                        default_transport="fastapi-brain",
+                        default_transport_source="fastapi-brain",
+                        default_consultation_source="high-risk-consultation",
+                        default_fallback_reason=f"stream-failed:{type(error).__name__}",
+                    ),
                 )
 
         return event_source()
+
+    async def high_risk_consultation_feed(
+        self,
+        *,
+        limit: int = 10,
+        child_id: str | None = None,
+        risk_level: str | None = None,
+        status: str | None = None,
+        owner_name: str | None = None,
+        escalated_only: bool = False,
+    ) -> dict[str, Any]:
+        return await list_high_risk_consultation_feed(
+            repositories=self.repositories,
+            limit=limit,
+            child_id=child_id,
+            risk_level=risk_level,
+            status=status,
+            owner_name=owner_name,
+            escalated_only=escalated_only,
+            brain_provider=self._brain_provider(),
+        )
 
     async def vision_meal(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace_id = _coerce_string(payload.get("trace_id")) or _coerce_string(payload.get("traceId")) or _create_trace_id("vision-meal")

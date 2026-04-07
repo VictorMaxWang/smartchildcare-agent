@@ -4,6 +4,7 @@ import {
   readBrainTransportHeaders,
   type BrainForwardResult,
 } from "@/lib/server/brain-client";
+import { normalizeHighRiskConsultationResult } from "@/lib/consultation/normalize-result";
 
 type ProviderTrace = {
   provider?: string;
@@ -14,6 +15,7 @@ type ProviderTrace = {
   transportSource?: string;
   consultationSource?: string;
   fallbackReason?: string;
+  brainProvider?: string;
   realProvider?: boolean;
   fallback?: boolean;
   [key: string]: unknown;
@@ -75,7 +77,9 @@ function streamResponse(events: StreamEvent[], status = 200, extraHeaders?: Head
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function asString(value: unknown) {
@@ -91,40 +95,11 @@ function getTraceId(value: unknown) {
   return traceId || `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function buildProviderTrace(
+function buildSummaryCard(
   result: Record<string, unknown>,
-  options?: {
-    transport?: string;
-    transportSource?: string;
-    consultationSource?: string;
-    fallbackReason?: string;
-  }
-): ProviderTrace {
-  const trace = asRecord(result.providerTrace);
-  const source = asString(trace.source) || "unknown";
-  const providerFallback = Boolean(trace.fallback);
-  const transport = asString(trace.transport) || options?.transport || "unknown";
-
-  return {
-    ...trace,
-    source,
-    provider: asString(trace.provider) || asString(trace.llm) || source,
-    model: asString(trace.model) || asString(result.model),
-    requestId: asString(trace.requestId) || asString(trace.request_id),
-    transport,
-    transportSource: asString(trace.transportSource) || options?.transportSource || transport,
-    consultationSource:
-      asString(trace.consultationSource) || options?.consultationSource || asString(result.source),
-    fallbackReason: asString(trace.fallbackReason) || options?.fallbackReason || "",
-    realProvider:
-      typeof trace.realProvider === "boolean"
-        ? Boolean(trace.realProvider)
-        : source === "vivo" && !providerFallback,
-    fallback: providerFallback || transport !== "fastapi-brain",
-  };
-}
-
-function buildSummaryCard(result: Record<string, unknown>, memoryMeta: Record<string, unknown>, providerTrace: ProviderTrace) {
+  memoryMeta: Record<string, unknown>,
+  providerTrace: ProviderTrace
+) {
   const coordinatorSummary = asRecord(result.coordinatorSummary);
   const continuityNotes = asStringArray(result.continuityNotes);
   const triggerReasons = asStringArray(result.triggerReasons);
@@ -132,7 +107,7 @@ function buildSummaryCard(result: Record<string, unknown>, memoryMeta: Record<st
 
   return {
     stage: "long_term_profile",
-    title: String(result.summary ? "会诊总览" : "会诊摘要"),
+    title: String(result.summary ? "\u4f1a\u8bca\u603b\u89c8" : "\u4f1a\u8bca\u6458\u8981"),
     summary: String(result.summary ?? coordinatorSummary.finalConclusion ?? ""),
     content: String(coordinatorSummary.finalConclusion ?? result.parentMessageDraft ?? ""),
     items: [...continuityNotes.slice(0, 2), ...triggerReasons.slice(0, 2), ...keyFindings.slice(0, 2)].filter(Boolean),
@@ -166,7 +141,7 @@ function buildRecentItems(result: Record<string, unknown>) {
 function buildFollowUpCard(result: Record<string, unknown>, providerTrace: ProviderTrace) {
   const interventionCard = asRecord(result.interventionCard);
   return {
-    title: String(interventionCard.title ?? "48 小时复查"),
+    title: String(interventionCard.title ?? "48 \u5c0f\u65f6\u590d\u67e5"),
     items: [
       String(interventionCard.todayInSchoolAction ?? ""),
       String(interventionCard.tonightHomeAction ?? ""),
@@ -192,7 +167,7 @@ function buildTerminalFallback(traceId: string, fallbackReason: string, message:
       event: "error",
       data: {
         stage: "current_recommendation",
-        title: "会诊失败",
+        title: "\u4f1a\u8bca\u5931\u8d25",
         message,
         traceId,
       },
@@ -211,6 +186,7 @@ function buildTerminalFallback(traceId: string, fallbackReason: string, message:
           transportSource: "next-server",
           consultationSource: "next-stream-fallback",
           fallbackReason,
+          brainProvider: "next-fallback",
           fallback: true,
           realProvider: false,
         },
@@ -257,28 +233,30 @@ async function buildFallbackEvents(
     );
   }
 
-  const result = (await response.json()) as Record<string, unknown>;
+  const rawResult = (await response.json()) as Record<string, unknown>;
   const responseTransport = readBrainTransportHeaders(response.headers);
-  const providerTrace = buildProviderTrace(result, {
-    transport: "next-stream-fallback",
-    transportSource: "next-server",
-    consultationSource:
-      responseTransport.transport || asString(result.source) || "next-json-fallback",
-    fallbackReason:
+  const result = normalizeHighRiskConsultationResult(rawResult, {
+    brainProvider: "next-fallback",
+    defaultTransport: "next-stream-fallback",
+    defaultTransportSource: "next-server",
+    defaultConsultationSource:
+      responseTransport.transport || asString(rawResult.source) || "next-json-fallback",
+    defaultFallbackReason:
       brainForward.fallbackReason ||
       responseTransport.fallbackReason ||
       "brain-proxy-unavailable",
   });
+  const providerTrace = asRecord(result.providerTrace) as ProviderTrace;
   const memoryMeta = asRecord(result.memoryMeta);
-  const childName = String(asRecord(result.interventionCard).title ?? "高风险会诊");
+  const childName = String(asRecord(result.interventionCard).title ?? "\u9ad8\u98ce\u9669\u4f1a\u8bca");
 
   return [
     {
       event: "status",
       data: {
         stage: "long_term_profile",
-        title: "长期画像",
-        message: `正在读取 ${childName} 的长期画像和记忆上下文`,
+        title: "\u957f\u671f\u753b\u50cf",
+        message: `\u6b63\u5728\u8bfb\u53d6 ${childName} \u7684\u957f\u671f\u753b\u50cf\u548c\u8bb0\u5fc6\u4e0a\u4e0b\u6587`,
         traceId,
         providerTrace,
         memory: memoryMeta,
@@ -288,8 +266,8 @@ async function buildFallbackEvents(
       event: "text",
       data: {
         stage: "long_term_profile",
-        title: "长期画像",
-        text: buildLongTermItems(result, memoryMeta).join("；") || String(result.summary ?? ""),
+        title: "\u957f\u671f\u753b\u50cf",
+        text: buildLongTermItems(result, memoryMeta).join("\u3001") || String(result.summary ?? ""),
         items: buildLongTermItems(result, memoryMeta),
         append: false,
         source: providerTrace.source ?? "unknown",
@@ -307,8 +285,8 @@ async function buildFallbackEvents(
       event: "status",
       data: {
         stage: "recent_context",
-        title: "最近会诊",
-        message: "正在整合最近会诊、近期快照和连续信号",
+        title: "\u6700\u8fd1\u4f1a\u8bca",
+        message: "\u6b63\u5728\u6574\u5408\u6700\u8fd1\u4f1a\u8bca\u3001\u8fd1\u671f\u5feb\u7167\u548c\u8fde\u7eed\u4fe1\u53f7",
         traceId,
         providerTrace,
         memory: memoryMeta,
@@ -318,9 +296,9 @@ async function buildFallbackEvents(
       event: "text",
       data: {
         stage: "recent_context",
-        title: "最近会诊",
+        title: "\u6700\u8fd1\u4f1a\u8bca",
         text:
-          buildRecentItems(result).join("；") ||
+          buildRecentItems(result).join("\u3001") ||
           String(asRecord(result.coordinatorSummary).finalConclusion ?? ""),
         items: buildRecentItems(result),
         append: false,
@@ -331,8 +309,9 @@ async function buildFallbackEvents(
       event: "status",
       data: {
         stage: "current_recommendation",
-        title: "当前建议",
-        message: "正在生成今天园内、今晚家庭和 48 小时复查建议",
+        title: "\u5f53\u524d\u5efa\u8bae",
+        message:
+          "\u6b63\u5728\u751f\u6210\u4eca\u5929\u56ed\u5185\u3001\u4eca\u665a\u5bb6\u5ead\u548c 48 \u5c0f\u65f6\u590d\u67e5\u5efa\u8bae",
         traceId,
         providerTrace,
         memory: memoryMeta,
@@ -342,7 +321,7 @@ async function buildFallbackEvents(
       event: "text",
       data: {
         stage: "current_recommendation",
-        title: "当前建议",
+        title: "\u5f53\u524d\u5efa\u8bae",
         text: String(result.summary ?? asRecord(result.coordinatorSummary).finalConclusion ?? ""),
         items: [
           ...asStringArray(result.todayInSchoolActions).slice(0, 2),
@@ -364,7 +343,7 @@ async function buildFallbackEvents(
     {
       event: "done",
       data: {
-        traceId: getTraceId(result.consultationId ?? payload.traceId),
+        traceId,
         result,
         providerTrace,
         memoryMeta,

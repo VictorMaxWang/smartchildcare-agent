@@ -526,6 +526,82 @@ export interface ParentMessageReflexionResponse {
   debugIterations?: ParentMessageDebugIteration[] | null;
 }
 
+export type ParentStoryBookMode = "storybook" | "card";
+export type ParentStoryBookResultSource = "ai" | "fallback" | "mock" | "rule" | "vivo";
+export type ParentStoryBookMediaStatus = "ready" | "mock" | "fallback" | "empty";
+export type ParentStoryBookHighlightKind =
+  | "todayGrowth"
+  | "warningSuggestion"
+  | "consultationSummary"
+  | "consultationAction"
+  | "guardianFeedback"
+  | "weeklyTrend";
+
+export interface ParentStoryBookHighlightCandidate {
+  kind: ParentStoryBookHighlightKind;
+  title: string;
+  detail: string;
+  priority: number;
+  source?: string;
+}
+
+export interface ParentStoryBookProviderMeta {
+  provider: string;
+  mode: string;
+  transport?: string;
+  imageProvider: string;
+  audioProvider: string;
+  requestSource?: string;
+  fallbackReason?: string | null;
+  realProvider: boolean;
+  highlightCount: number;
+  sceneCount: number;
+}
+
+export interface ParentStoryBookScene {
+  sceneIndex: number;
+  sceneTitle: string;
+  sceneText: string;
+  imagePrompt: string;
+  imageUrl?: string | null;
+  assetRef?: string | null;
+  imageStatus: ParentStoryBookMediaStatus;
+  audioUrl?: string | null;
+  audioRef?: string | null;
+  audioScript: string;
+  audioStatus: ParentStoryBookMediaStatus;
+  voiceStyle: string;
+  highlightSource: string;
+}
+
+export interface ParentStoryBookRequest {
+  childId?: string;
+  storyMode?: ParentStoryBookMode | "auto";
+  requestSource?: string;
+  snapshot: ChildSuggestionSnapshot;
+  highlightCandidates: ParentStoryBookHighlightCandidate[];
+  latestInterventionCard?: Record<string, unknown> | null;
+  latestConsultation?: ConsultationResult | null;
+  traceId?: string;
+  debugMemory?: boolean;
+}
+
+export interface ParentStoryBookResponse {
+  storyId: string;
+  childId: string;
+  mode: ParentStoryBookMode;
+  title: string;
+  summary: string;
+  moral: string;
+  parentNote: string;
+  source: ParentStoryBookResultSource;
+  fallback: boolean;
+  fallbackReason?: string | null;
+  generatedAt: string;
+  providerMeta: ParentStoryBookProviderMeta;
+  scenes: ParentStoryBookScene[];
+}
+
 export type ParentTrendIntent = "emotion" | "diet" | "sleep" | "health" | "growth_overall";
 export type ParentTrendLabel = "改善" | "波动" | "稳定" | "需关注";
 export type ParentTrendDirection = "up" | "down" | "flat" | "insufficient";

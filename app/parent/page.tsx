@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
+import { BookOpenText, BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import {
   AssistantEntryCard,
@@ -116,6 +116,7 @@ export default function ParentHomePage() {
   }
 
   const agentHref = `/parent/agent?child=${feed.child.id}`;
+  const storybookHref = `/parent/storybook?child=${feed.child.id}`;
   const primaryAgentLabel = previewResult ? "继续追问" : "进入 AI 助手";
   const displayInterventionCard = latestInterventionCard ?? previewResult?.interventionCard;
   const displayTonightTaskTitle = displayInterventionCard?.title ?? viewModel.tonightTask.title;
@@ -187,6 +188,36 @@ export default function ParentHomePage() {
               <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
                 <p className="text-base font-semibold text-slate-900">{previewResult?.title ?? viewModel.aiReminder.title}</p>
                 <p className="mt-3 text-sm leading-7 text-slate-600">{previewResult?.whyNow ?? viewModel.aiReminder.description}</p>
+              </div>
+            </SectionCard>
+
+            <SectionCard
+              title="今日成长小故事"
+              description="把今天的亮点写成 3 幕睡前绘本，家长在手机上滑一下就能看完。"
+              actions={<Badge variant="success">微绘本入口</Badge>}
+            >
+              <div className="rounded-[28px] border border-amber-100 bg-linear-to-br from-amber-50 via-white to-sky-50 p-5 shadow-sm">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+                    <BookOpenText className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-base font-semibold text-slate-900">{feed.child.name} 的晚安小绘本</p>
+                    <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">
+                      今天的成长记录、家庭任务和最近会诊会被整理成一页更好读的故事。先看完，再决定今晚只做哪一件小事。
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Badge variant="info">3 幕微绘本</Badge>
+                      <Badge variant="secondary">插图 / 配音预览</Badge>
+                      <Badge variant={latestConsultation ? "warning" : "success"}>
+                        {latestConsultation ? "复用会诊上下文" : "自动提取亮点"}
+                      </Badge>
+                    </div>
+                    <div className="mt-5">
+                      <InlineLinkButton href={storybookHref} label="打开今日微绘本" variant="premium" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </SectionCard>
 

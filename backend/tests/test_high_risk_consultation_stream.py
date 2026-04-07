@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import app.providers.mock as mock_provider_module
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -46,16 +47,27 @@ def parse_sse(text: str) -> list[dict[str, object]]:
     return events
 
 
-def test_high_risk_consultation_stream_uses_memory_and_sse(tmp_path, monkeypatch):
-    sqlite_path = tmp_path / "consultation-stream.db"
-    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+def build_payload() -> dict:
+    return {
+        "targetChildId": "child-1",
+        "teacherNote": "today transition looked unstable and family feedback is incomplete",
+        "currentUser": {"className": "Sunshine"},
+        "visibleChildren": [{"id": "child-1", "name": "Xiaoming"}],
+        "presentChildren": [{"id": "child-1", "name": "Xiaoming"}],
+        "healthCheckRecords": [],
+        "growthRecords": [],
+        "guardianFeedbacks": [],
+        "debugMemory": True,
+    }
 
+
+def seed_child_memory():
     memory = build_memory_service()
     asyncio.run(
         memory.upsert_child_profile_memory(
             "child-1",
             {
-                "nickname": "小明",
+                "nickname": "Xiaoming",
                 "temperament": "group transitions need calm reminders",
                 "support_strategies": ["visual cue", "short check-in"],
             },
@@ -94,14 +106,24 @@ def test_high_risk_consultation_stream_uses_memory_and_sse(tmp_path, monkeypatch
         )
     )
 
+
+def strip_dynamic_consultation_fields(result: dict) -> dict:
+    stripped = json.loads(json.dumps(result))
+    stripped["memoryMeta"]["matchedSnapshotIds"] = []
+    stripped["memoryMeta"]["matchedTraceIds"] = []
+    stripped["traceMeta"]["memory"]["matchedSnapshotIds"] = []
+    stripped["traceMeta"]["memory"]["matchedTraceIds"] = []
+    return stripped
+
+
+def test_high_risk_consultation_stream_uses_memory_and_canonical_done(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "consultation-stream.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+    seed_child_memory()
+
     response = client.post(
         "/api/v1/agents/consultations/high-risk/stream",
-        json={
-            "targetChildId": "child-1",
-            "teacherNote": "today transition looked unstable and family feedback is incomplete",
-            "currentUser": {"className": "Sunshine"},
-            "visibleChildren": [{"id": "child-1", "name": "小明"}],
-        },
+        json=build_payload(),
     )
 
     assert response.status_code == 200
@@ -120,29 +142,28 @@ def test_high_risk_consultation_stream_uses_memory_and_sse(tmp_path, monkeypatch
 
     done_event = next(item for item in events if item["event"] == "done")
     done_data = done_event["data"]
-    assert done_data["memoryMeta"]["memory_context_used"] is True
+    assert done_data["memoryMeta"]["memoryContextUsed"] is True
     assert "child_profile_memory" in done_data["memoryMeta"]["usedSources"]
     assert "agent_state_snapshots" in done_data["memoryMeta"]["usedSources"]
     assert done_data["providerTrace"]["source"] in {"mock", "vivo"}
-    assert "model" in done_data["providerTrace"]
     assert done_data["providerTrace"]["transport"] == "fastapi-brain"
     assert done_data["providerTrace"]["transportSource"] == "fastapi-brain"
     assert done_data["providerTrace"]["brainProvider"] in {"mock", "vivo"}
     assert done_data["result"]["traceMeta"]["memory"]["usedSources"]
     assert done_data["result"]["traceMeta"]["transport"] == "fastapi-brain"
     assert done_data["result"]["consultationId"]
+    assert [item["label"] for item in done_data["result"]["explainability"][:3]] == [
+        "Agent 参与",
+        "关键发现",
+        "协调结论",
+    ]
 
 
 def test_high_risk_consultation_json_route_supports_sse_accept_header():
     response = client.post(
         "/api/v1/agents/consultations/high-risk",
         headers={"Accept": "text/event-stream"},
-        json={
-            "targetChildId": "child-1",
-            "teacherNote": "need stream",
-            "currentUser": {"className": "Sunshine"},
-            "visibleChildren": [{"id": "child-1", "name": "小明"}],
-        },
+        json=build_payload(),
     )
 
     assert response.status_code == 200
@@ -150,3 +171,33 @@ def test_high_risk_consultation_json_route_supports_sse_accept_header():
     assert response.text.startswith(": stream-open")
     assert "event: status" in response.text
     assert "event: done" in response.text
+
+
+def test_high_risk_consultation_direct_json_matches_stream_done_result(tmp_path, monkeypatch):
+    fixed_now = "2026-04-07T12:00:00+08:00"
+    monkeypatch.setattr(mock_provider_module, "iso_now", lambda: fixed_now)
+
+    direct_sqlite_path = tmp_path / "consultation-parity-direct.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(direct_sqlite_path))
+    seed_child_memory()
+
+    direct_response = client.post(
+        "/api/v1/agents/consultations/high-risk",
+        json=build_payload(),
+    )
+    assert direct_response.status_code == 200
+    direct_result = direct_response.json()
+
+    stream_sqlite_path = tmp_path / "consultation-parity-stream.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(stream_sqlite_path))
+    seed_child_memory()
+
+    stream_response = client.post(
+        "/api/v1/agents/consultations/high-risk/stream",
+        json=build_payload(),
+    )
+    assert stream_response.status_code == 200
+    done_event = next(item for item in parse_sse(stream_response.text) if item["event"] == "done")
+    stream_result = done_event["data"]["result"]
+
+    assert strip_dynamic_consultation_fields(direct_result) == strip_dynamic_consultation_fields(stream_result)

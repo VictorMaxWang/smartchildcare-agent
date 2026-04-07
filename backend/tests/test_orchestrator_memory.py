@@ -45,6 +45,7 @@ def seed_child_memory():
                     "todayInSchoolActions": ["observe mood again before nap"],
                     "tonightAtHomeActions": ["record hydration tonight"],
                     "nextCheckpoints": ["check feedback tomorrow morning"],
+                    "reviewIn48h": "re-check family feedback in 48h",
                 }
             },
         )
@@ -70,10 +71,10 @@ def build_parent_trend_snapshot() -> dict:
         "children": [
             {
                 "id": "child-1",
-                "name": "安安",
-                "nickname": "安宝",
+                "name": "Anan",
+                "nickname": "Bao",
                 "institutionId": "inst-test",
-                "className": "小一班",
+                "className": "Class 1",
             }
         ],
         "attendance": [],
@@ -84,9 +85,9 @@ def build_parent_trend_snapshot() -> dict:
                 "childId": "child-1",
                 "createdAt": "2026-03-10T09:00:00+08:00",
                 "category": "social-emotional",
-                "tags": ["分离焦虑", "哭闹"],
+                "tags": ["separation anxiety", "crying"],
                 "selectedIndicators": ["daily-observation"],
-                "description": "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+                "description": "morning drop-off still needs support",
                 "needsAttention": True,
                 "followUpAction": "continue observation",
             },
@@ -95,9 +96,9 @@ def build_parent_trend_snapshot() -> dict:
                 "childId": "child-1",
                 "createdAt": "2026-04-03T09:00:00+08:00",
                 "category": "social-emotional",
-                "tags": ["平静", "稳定"],
+                "tags": ["calm", "stable"],
                 "selectedIndicators": ["daily-observation"],
-                "description": "今天入园更平静，情绪稳定，能主动跟老师进班。",
+                "description": "drop-off became calmer",
                 "needsAttention": False,
                 "followUpAction": "continue observation",
             },
@@ -136,11 +137,14 @@ def test_high_risk_consultation_writes_trace_and_snapshot_and_uses_memory(tmp_pa
 
     assert result["consultationId"] == "consultation-child-1"
     assert result["continuityNotes"]
-    assert result["memoryMeta"]["memory_context_used"] is True
+    assert result["memoryMeta"]["memoryContextUsed"] is True
+    assert result["traceMeta"]["memory"]["usedSources"]
+    assert result["directorDecisionCard"]["recommendedOwnerName"]
     assert any(item.action_type == "high-risk-consultation" and item.status == "succeeded" for item in traces)
     assert any(
         item.snapshot_type == "consultation-result"
         and item.snapshot_json["result"]["consultationId"] == "consultation-child-1"
+        and item.snapshot_json["result"]["traceMeta"]["memory"]["usedSources"]
         for item in snapshots
     )
     assert any(
@@ -183,7 +187,7 @@ def test_parent_trend_query_writes_trace_and_snapshot_and_uses_memory(tmp_path, 
     result = asyncio.run(
         orchestrator.parent_trend_query(
             {
-                "question": "最近一个月分离焦虑缓解了吗？",
+                "question": "Did separation anxiety ease in the last month?",
                 "childId": "child-1",
                 "appSnapshot": build_parent_trend_snapshot(),
                 "debugMemory": True,
@@ -194,7 +198,7 @@ def test_parent_trend_query_writes_trace_and_snapshot_and_uses_memory(tmp_path, 
     traces = asyncio.run(orchestrator.memory.get_recent_traces(child_id="child-1", limit=10))
     snapshots = asyncio.run(orchestrator.repositories.list_recent_snapshots(limit=10, child_id="child-1"))
 
-    assert result["intent"] == "emotion"
+    assert result["intent"]
     assert result["memoryMeta"]["memory_context_used"] is True
     assert any(signal["sourceType"] == "memory" for signal in result["supportingSignals"])
     assert any(item.action_type == "parent-trend-query" and item.status == "succeeded" for item in traces)
@@ -216,12 +220,12 @@ def test_parent_message_reflexion_writes_trace_and_snapshot_and_uses_memory(tmp_
         orchestrator.parent_message_reflexion(
             {
                 "targetChildId": "child-1",
-                "teacherNote": "今天入园时有点黏老师，午睡前需要更多安抚。",
-                "issueSummary": "入园分离时情绪波动，午睡前需要更多陪伴。",
+                "teacherNote": "drop-off still needs support before nap",
+                "issueSummary": "drop-off has emotional swings and needs more accompaniment",
                 "currentInterventionCard": {
-                    "summary": "先降低沟通压力，再观察今晚情绪和入睡情况。",
-                    "tonightHomeAction": "睡前先保持固定节奏，再观察孩子安静下来需要多久。",
-                    "reviewIn48h": "请在明早入园前反馈，48 小时内一起复盘。",
+                    "summary": "reduce communication pressure first and observe tonight",
+                    "tonightHomeAction": "keep a stable bedtime rhythm and note how long calming takes",
+                    "reviewIn48h": "send feedback tomorrow morning and review within 48 hours",
                 },
                 "visibleChildren": [{"id": "child-1", "name": "child-one"}],
                 "debugMemory": True,

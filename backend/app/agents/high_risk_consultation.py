@@ -8,6 +8,10 @@ from app.core.config import Settings, get_settings
 from app.providers.base import ProviderTextResult
 from app.providers.mock import build_mock_high_risk_bundle
 from app.providers.resolver import can_use_vivo_text_provider, resolve_text_provider
+from app.services.high_risk_consultation_contract import (
+    build_high_risk_done_event,
+    normalize_high_risk_consultation_result,
+)
 from app.tools.summary_tools import first_non_empty, safe_dict, safe_list, unique_texts
 
 
@@ -319,11 +323,38 @@ def _summary_card_payload(stage: str, title: str, *, content: str, items: list[s
     }
 
 
+def _brain_provider(settings: Settings) -> str:
+    return settings.brain_provider.strip().lower() or "unknown"
+
+
+def _normalize_consultation_result(
+    *,
+    payload: dict[str, Any],
+    result: dict[str, Any],
+    settings: Settings,
+    fallback_reason: str = "",
+) -> dict[str, Any]:
+    return normalize_high_risk_consultation_result(
+        result,
+        payload=payload,
+        brain_provider=_brain_provider(settings),
+        default_transport="fastapi-brain",
+        default_transport_source="fastapi-brain",
+        default_consultation_source=_coerce_text(result.get("source")) or "mock",
+        default_fallback_reason=fallback_reason,
+    )
+
+
 async def run_high_risk_consultation(payload: dict[str, Any]) -> dict[str, Any]:
     settings = get_settings()
     scaffold = build_mock_high_risk_bundle({**payload, "workflow": "high-risk-consultation"})
-    result, _, _ = _generate_narrative(payload, scaffold, settings)
-    return result
+    result, provider_result, _ = _generate_narrative(payload, scaffold, settings)
+    return _normalize_consultation_result(
+        payload=payload,
+        result=result,
+        settings=settings,
+        fallback_reason=_coerce_text(safe_dict(provider_result.meta).get("reason")),
+    )
 
 
 async def stream_high_risk_consultation(payload: dict[str, Any], trace_id: str) -> AsyncIterator[tuple[str, dict[str, Any]]]:
@@ -423,7 +454,14 @@ async def stream_high_risk_consultation(payload: dict[str, Any], trace_id: str) 
         },
     )
     result, provider_result, sections = _generate_narrative(payload, scaffold, settings)
+    result = _normalize_consultation_result(
+        payload=payload,
+        result=result,
+        settings=settings,
+        fallback_reason=_coerce_text(safe_dict(provider_result.meta).get("reason")),
+    )
     provider_trace = safe_dict(result.get("providerTrace"))
+    memory_meta = safe_dict(result.get("memoryMeta"))
     current_text = first_non_empty(
         [
             _coerce_text(result.get("summary")),
@@ -486,12 +524,14 @@ async def stream_high_risk_consultation(payload: dict[str, Any], trace_id: str) 
     )
     yield (
         "done",
-        {
-            "traceId": trace_id,
-            "result": result,
-            "providerTrace": provider_trace,
-            "memoryMeta": memory_meta,
-            "realProvider": bool(provider_trace.get("realProvider")),
-            "fallback": bool(provider_trace.get("fallback")),
-        },
+        build_high_risk_done_event(
+            trace_id=trace_id,
+            result=result,
+            payload=payload,
+            brain_provider=_brain_provider(settings),
+            default_transport="fastapi-brain",
+            default_transport_source="fastapi-brain",
+            default_consultation_source=_coerce_text(result.get("source")) or "mock",
+            default_fallback_reason=_coerce_text(safe_dict(provider_result.meta).get("reason")),
+        ),
     )

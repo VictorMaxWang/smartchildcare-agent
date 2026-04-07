@@ -60,7 +60,9 @@ export interface ConsultationProviderTrace {
 
 export type ConsultationApiResult = HighRiskConsultationResult & {
   interventionCard: InterventionCard;
-  providerTrace?: ConsultationProviderTrace;
+  providerTrace: ConsultationProviderTrace;
+  memoryMeta: MemoryContextMeta | Record<string, unknown>;
+  traceMeta: Record<string, unknown>;
 };
 
 export interface ConsultationStageStatusEvent {
@@ -210,6 +212,50 @@ function isStringArray(value: unknown): value is string[] {
 
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
+}
+
+function isExplainabilityArray(value: unknown): value is ExplainabilityItem[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        isRecord(item) &&
+        isNonEmptyString(item.label) &&
+        isNonEmptyString(item.detail)
+    )
+  );
+}
+
+function isProviderTraceLike(value: unknown) {
+  if (!isRecord(value)) return false;
+
+  return (
+    isNonEmptyString(value.provider) &&
+    isNonEmptyString(value.source) &&
+    isNonEmptyString(value.transport) &&
+    isNonEmptyString(value.transportSource) &&
+    isNonEmptyString(value.consultationSource) &&
+    isBoolean(value.realProvider) &&
+    isBoolean(value.fallback)
+  );
+}
+
+function isMemoryMetaLike(value: unknown) {
+  if (!isRecord(value)) return false;
+
+  return (
+    isNonEmptyString(value.backend) &&
+    isBoolean(value.degraded) &&
+    isStringArray(value.usedSources) &&
+    isStringArray(value.errors) &&
+    isStringArray(value.matchedSnapshotIds) &&
+    isStringArray(value.matchedTraceIds)
+  );
+}
+
+function isTraceMetaLike(value: unknown) {
+  if (!isRecord(value)) return false;
+  return isMemoryMetaLike(value.memory);
 }
 
 function isInterventionCardLike(value: unknown): value is InterventionCard {
@@ -393,10 +439,14 @@ export function getConsultationResultIssues(value: unknown) {
   if (!isStringArray(value.todayInSchoolActions)) issues.push("todayInSchoolActions");
   if (!isStringArray(value.tonightAtHomeActions)) issues.push("tonightAtHomeActions");
   if (!isStringArray(value.followUp48h)) issues.push("followUp48h");
+  if (!isExplainabilityArray(value.explainability)) issues.push("explainability");
   if (!isBoolean(value.shouldEscalateToAdmin)) issues.push("shouldEscalateToAdmin");
   if (!isCoordinatorSummaryLike(value.coordinatorSummary)) issues.push("coordinatorSummary");
   if (!isDirectorDecisionCardLike(value.directorDecisionCard)) issues.push("directorDecisionCard");
   if (!isInterventionCardLike(value.interventionCard)) issues.push("interventionCard");
+  if (!isProviderTraceLike(value.providerTrace)) issues.push("providerTrace");
+  if (!isMemoryMetaLike(value.memoryMeta)) issues.push("memoryMeta");
+  if (!isTraceMetaLike(value.traceMeta)) issues.push("traceMeta");
 
   return issues;
 }
