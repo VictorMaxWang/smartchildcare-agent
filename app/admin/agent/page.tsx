@@ -27,6 +27,7 @@ import {
   ADMIN_AGENT_QUICK_QUESTIONS,
   attachNotificationEventToResult,
 } from "@/lib/agent/admin-agent";
+import { useAdminConsultationFeed } from "@/lib/agent/use-admin-consultation-feed";
 import type {
   AdminAgentRequestPayload,
   AdminAgentResult,
@@ -112,8 +113,7 @@ export default function AdminAgentPage() {
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const initializedRef = useRef(false);
-  const latestConsultations = getLatestConsultations()
-    .filter((item) => item.shouldEscalateToAdmin);
+  const latestConsultations = getLatestConsultations();
 
   const payload = useMemo<AdminAgentRequestPayload>(
     () => ({
@@ -151,20 +151,62 @@ export default function AdminAgentPage() {
       visibleChildren,
     ]
   );
+  const consultationChildren = useMemo(
+    () =>
+      visibleChildren.map((child) => ({
+        id: child.id,
+        name: child.name,
+        className: child.className,
+      })),
+    [visibleChildren]
+  );
+  const consultationFeed = useAdminConsultationFeed({
+    enabled: notificationReady && visibleChildren.length > 0,
+    limit: 4,
+    escalatedOnly: true,
+  });
   const consultationPriorityItems = useMemo(
     () =>
       buildAdminConsultationPriorityItems({
-        consultations: latestConsultations,
-        children: visibleChildren.map((child) => ({
-          id: child.id,
-          name: child.name,
-          className: child.className,
-        })),
+        feedItems: consultationFeed.status === "ready" ? consultationFeed.items : undefined,
+        localConsultations: latestConsultations,
+        children: consultationChildren,
         notificationEvents,
         limit: 4,
+        useLocalFallback: consultationFeed.status === "unavailable",
       }),
-    [latestConsultations, notificationEvents, visibleChildren]
+    [
+      consultationChildren,
+      consultationFeed.items,
+      consultationFeed.status,
+      latestConsultations,
+      notificationEvents,
+    ]
   );
+  const consultationFeedBadge = useMemo(() => {
+    if (consultationFeed.status === "ready") {
+      return {
+        label: "backend feed",
+        variant: "success" as const,
+      };
+    }
+    if (consultationFeed.status === "unavailable" && latestConsultations.length > 0) {
+      return {
+        label: "local fallback",
+        variant: "outline" as const,
+      };
+    }
+    if (consultationFeed.status === "unavailable") {
+      return {
+        label: "feed unavailable",
+        variant: "warning" as const,
+      };
+    }
+    return {
+      label: "loading feed",
+      variant: "outline" as const,
+    };
+  }, [consultationFeed.status, latestConsultations.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -425,7 +467,26 @@ export default function AdminAgentPage() {
               description="把高风险会诊直接抬到园长 Agent 顶部，先看谁最值得今天推进，再继续追问和派单。"
               actions={<Badge variant="warning">会诊驱动</Badge>}
             >
-              <RiskPriorityBoard items={consultationPriorityItems} />
+              <RiskPriorityBoard
+                items={consultationPriorityItems}
+                isLoading={consultationFeed.status === "loading"}
+                sourceBadgeLabel={consultationFeedBadge.label}
+                sourceBadgeVariant={consultationFeedBadge.variant}
+                emptyTitle={
+                  consultationFeed.status === "unavailable"
+                    ? "高风险会诊 feed 暂时不可用"
+                    : consultationFeed.status === "ready"
+                      ? "当前 backend feed 暂无升级到园长侧的重点会诊"
+                      : undefined
+                }
+                emptyDescription={
+                  consultationFeed.status === "unavailable"
+                    ? "页面会在 transport 失败时回退到本地 consultation；如果这里仍为空，说明本地也没有可展示的高风险会诊。"
+                    : consultationFeed.status === "ready"
+                      ? "backend feed 已接管园长 Agent 顶部会诊区；当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
+                      : undefined
+                }
+              />
             </SectionCard>
 
             <SectionCard

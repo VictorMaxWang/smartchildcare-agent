@@ -54,6 +54,27 @@ class Settings(BaseSettings):
     vivo_llm_model: str = "Volc-DeepSeek-V3.2"
     vivo_ocr_path: str = "/ocr/general_recognition"
     vivo_embedding_model: str = "m3e-base"
+    storybook_image_provider: str = "mock"
+    storybook_audio_provider: str = "mock"
+    storybook_image_business_code: str = "pc"
+    storybook_image_style_config: str = "4cbc9165bc615ea0815301116e7925a3"
+    storybook_image_width: int = 768
+    storybook_image_height: int = 1024
+    storybook_image_poll_interval_ms: int = 1_200
+    storybook_image_poll_timeout_ms: int = 12_000
+    storybook_tts_engineid: str = "tts_humanoid_lam"
+    storybook_tts_voice: str = "F245_natural"
+    storybook_tts_fallback_engineid: str = "short_audio_synthesis_jovi"
+    storybook_tts_fallback_voice: str = "yige"
+    storybook_tts_speed: int = 50
+    storybook_tts_volume: int = 50
+    storybook_tts_model: str = "unknown"
+    storybook_tts_product: str = "unknown"
+    storybook_tts_package: str = "unknown"
+    storybook_tts_client_version: str = "unknown"
+    storybook_tts_system_version: str = "unknown"
+    storybook_tts_sdk_version: str = "unknown"
+    storybook_tts_android_version: str = "unknown"
 
     mysql_url: str | None = None
     database_url: str | None = None

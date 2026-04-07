@@ -268,7 +268,7 @@ function buildScene(
     audioUrl: null,
     audioRef: `storybook-audio-${index + 1}`,
     audioScript: audioScriptMap[index] ?? mainText,
-    audioStatus: "mock",
+    audioStatus: mode === "storybook" ? "fallback" : "mock",
     voiceStyle,
     highlightSource: highlight.source ?? highlight.kind,
   };
@@ -478,7 +478,12 @@ export function buildParentStoryBookResponse(
     : `${childName} 的今天适合用一张安静的成长卡轻轻收尾。`;
 
   const fallbackReason =
-    options?.fallbackReason ?? (highlightCandidates.length > 0 ? "local-rule-fallback" : "sparse-parent-context");
+    options?.fallbackReason ??
+    (mode === "card"
+      ? requestedMode === "card"
+        ? "card-mode-requested"
+        : "sparse-parent-context"
+      : "mock-storybook-pipeline");
   const transport = options?.transport ?? "next-json-fallback";
   const source = options?.source ?? "rule";
   const fallback = options?.fallback ?? true;
@@ -499,7 +504,7 @@ export function buildParentStoryBookResponse(
     fallbackReason,
     generatedAt,
     providerMeta: {
-      provider: "local-storybook-rule",
+      provider: "parent-storybook-rule",
       mode: "fallback",
       transport,
       imageProvider: "storybook-asset",

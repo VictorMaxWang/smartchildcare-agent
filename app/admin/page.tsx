@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { buildAdminConsultationPriorityItems } from "@/lib/agent/admin-consultation";
 import { buildAdminHomeViewModel } from "@/lib/agent/admin-agent";
+import { useAdminConsultationFeed } from "@/lib/agent/use-admin-consultation-feed";
 import type { AdminDispatchEvent, InstitutionPriorityItem } from "@/lib/agent/admin-types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
 
@@ -23,6 +24,7 @@ const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
   day: "numeric",
   weekday: "long",
 });
+const INITIAL_NOTIFICATION_EVENTS: AdminDispatchEvent[] = [];
 
 function PriorityLevelBadge({ level }: { level: InstitutionPriorityItem["priorityLevel"] }) {
   if (level === "P1") return <Badge variant="warning">P1</Badge>;
@@ -50,9 +52,12 @@ export default function AdminHomePage() {
     getSmartInsights,
     getLatestConsultations,
   } = useApp();
-  const [notificationEvents, setNotificationEvents] = useState<AdminDispatchEvent[]>([]);
+  const [notificationEvents, setNotificationEvents] =
+    useState<AdminDispatchEvent[]>(INITIAL_NOTIFICATION_EVENTS);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const latestConsultations = getLatestConsultations();
+  const notificationReady =
+    notificationError !== null || notificationEvents !== INITIAL_NOTIFICATION_EVENTS;
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +99,21 @@ export default function AdminHomePage() {
     };
   }, []);
 
+  const consultationChildren = useMemo(
+    () =>
+      visibleChildren.map((child) => ({
+        id: child.id,
+        name: child.name,
+        className: child.className,
+      })),
+    [visibleChildren]
+  );
+  const consultationFeed = useAdminConsultationFeed({
+    enabled: notificationReady && visibleChildren.length > 0,
+    limit: 4,
+    escalatedOnly: true,
+  });
+
   const home = useMemo(
     () =>
       buildAdminHomeViewModel({
@@ -134,17 +154,45 @@ export default function AdminHomePage() {
   const consultationPriorityItems = useMemo(
     () =>
       buildAdminConsultationPriorityItems({
-        consultations: latestConsultations,
-        children: visibleChildren.map((child) => ({
-          id: child.id,
-          name: child.name,
-          className: child.className,
-        })),
+        feedItems: consultationFeed.status === "ready" ? consultationFeed.items : undefined,
+        localConsultations: latestConsultations,
+        children: consultationChildren,
         notificationEvents,
         limit: 4,
+        useLocalFallback: consultationFeed.status === "unavailable",
       }),
-    [latestConsultations, notificationEvents, visibleChildren]
+    [
+      consultationChildren,
+      consultationFeed.items,
+      consultationFeed.status,
+      latestConsultations,
+      notificationEvents,
+    ]
   );
+  const consultationFeedBadge = useMemo(() => {
+    if (consultationFeed.status === "ready") {
+      return {
+        label: "backend feed",
+        variant: "success" as const,
+      };
+    }
+    if (consultationFeed.status === "unavailable" && latestConsultations.length > 0) {
+      return {
+        label: "local fallback",
+        variant: "outline" as const,
+      };
+    }
+    if (consultationFeed.status === "unavailable") {
+      return {
+        label: "feed unavailable",
+        variant: "warning" as const,
+      };
+    }
+    return {
+      label: "loading feed",
+      variant: "outline" as const,
+    };
+  }, [consultationFeed.status, latestConsultations.length]);
 
   if (visibleChildren.length === 0) {
     return (
@@ -185,7 +233,26 @@ export default function AdminHomePage() {
               description="把教师发起的一键会诊直接升级成园长今天最该盯的决策区，适合移动端录屏和答辩展示。"
               actions={<Badge variant="warning">AI 园长办公会</Badge>}
             >
-              <RiskPriorityBoard items={consultationPriorityItems} />
+              <RiskPriorityBoard
+                items={consultationPriorityItems}
+                isLoading={consultationFeed.status === "loading"}
+                sourceBadgeLabel={consultationFeedBadge.label}
+                sourceBadgeVariant={consultationFeedBadge.variant}
+                emptyTitle={
+                  consultationFeed.status === "unavailable"
+                    ? "高风险会诊 feed 暂时不可用"
+                    : consultationFeed.status === "ready"
+                      ? "当前 backend feed 暂无升级到园长侧的重点会诊"
+                      : undefined
+                }
+                emptyDescription={
+                  consultationFeed.status === "unavailable"
+                    ? "页面会在 transport 失败时回退到本地 consultation；如果这里仍为空，说明本地也没有可展示的高风险会诊。"
+                    : consultationFeed.status === "ready"
+                      ? "backend feed 已接管园长会诊区；当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
+                      : undefined
+                }
+              />
             </SectionCard>
 
             <SectionCard
