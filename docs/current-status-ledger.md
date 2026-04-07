@@ -107,8 +107,8 @@
   - 当前状态：通过
   - 备注：`parent-storybook/media` 路由冲突已收敛为单一路由；当前构建可完成
 - 定向 pytest
-  - 当前状态：`28` 项通过，`4` 项失败
-  - 失败集中在 `backend/tests/test_story_image_provider.py`
+  - 当前状态：`124` 项通过；`backend/tests/test_story_image_provider.py` `5` 项通过
+  - 备注：`parent_storybook` 相关最小测试集 `15` 项通过；当前未复现 story image 的 `4` 个旧失败
   - 覆盖：Teacher voice / 高风险会诊 / Admin consultation feed / Parent trend / Parent storybook / story image / vivo tts
 
 ### 本轮不做
@@ -122,8 +122,8 @@
 
 1. 完成本轮 README / docs / demo-script / checklist 收口
 2. 补一轮 auth / cookie smoke，并用最新 demo checklist 走一次 Parent storybook 全流程
-3. 将 `story_image_provider` 的 4 个失败测试交给对应线程处理
-4. 在上述问题修复后顺序复跑 `npm run build`
+3. 同步 `story_image_provider` 测试已收口的 ledger 口径，避免后续线程重复处理旧问题
+4. 如后续有代码改动，再顺序复跑 `npm run build`
 5. 按固定顺序做一次浏览器 walkthrough
 6. 按 `docs/freeze-checklists.md` 做一次录屏前检查
 7. 将 staging / TLS / SSH / 真实上游最终验收交给对应线程
