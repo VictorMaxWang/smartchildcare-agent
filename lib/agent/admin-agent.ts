@@ -89,11 +89,20 @@ function sortNotificationEvents(events: AdminDispatchEvent[]) {
   });
 }
 
+function isConsultationScopedNotificationEvent(event: AdminDispatchEvent) {
+  return Boolean(
+    event.source?.consultationId ||
+    (event.source?.relatedConsultationIds?.length ?? 0) > 0
+  );
+}
+
 function findEventForPriorityItem(item: InstitutionPriorityItem, events: AdminDispatchEvent[]) {
   return events.find(
     (event) =>
       (event.priorityItemId && event.priorityItemId === item.id) ||
-      (event.targetType === item.targetType && event.targetId === item.targetId)
+      (!isConsultationScopedNotificationEvent(event) &&
+        event.targetType === item.targetType &&
+        event.targetId === item.targetId)
   );
 }
 
@@ -769,7 +778,9 @@ export function attachNotificationEventToResult(
 ): AdminAgentResult {
   const nextActionItems = result.actionItems.map((item) =>
     item.dispatchPayload.priorityItemId === event.priorityItemId ||
-    (item.targetType === event.targetType && item.targetId === event.targetId)
+    (!isConsultationScopedNotificationEvent(event) &&
+      item.targetType === event.targetType &&
+      item.targetId === event.targetId)
       ? {
           ...item,
           status: mapEventStatusToActionStatus(event),

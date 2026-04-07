@@ -18,6 +18,9 @@ export default function RiskPriorityBoard({
   emptyDescription,
   sourceBadgeLabel,
   sourceBadgeVariant = "outline",
+  onCreateConsultationNotification,
+  isCreatingConsultationNotification,
+  notificationError,
 }: {
   items: AdminConsultationPriorityItem[];
   className?: string;
@@ -27,6 +30,9 @@ export default function RiskPriorityBoard({
   emptyDescription?: string;
   sourceBadgeLabel?: string;
   sourceBadgeVariant?: "success" | "warning" | "outline";
+  onCreateConsultationNotification?: (item: AdminConsultationPriorityItem) => unknown;
+  isCreatingConsultationNotification?: (consultationId: string) => boolean;
+  notificationError?: string | null;
 }) {
   if (items.length === 0) {
     return (
@@ -81,7 +87,12 @@ export default function RiskPriorityBoard({
             key={item.consultationId}
             className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]"
           >
-            <DirectorDecisionCard item={item} />
+            <DirectorDecisionCard
+              item={item}
+              onCreateConsultationNotification={onCreateConsultationNotification}
+              isCreatingNotification={isCreatingConsultationNotification?.(item.consultationId) ?? false}
+              notificationError={notificationError}
+            />
             <ConsultationTraceCard item={item} />
           </div>
         ))}

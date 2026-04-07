@@ -15,6 +15,7 @@ ParentStoryBookMode = Literal["storybook", "card"]
 ParentStoryBookRequestMode = Literal["storybook", "card", "auto"]
 ParentStoryBookResultSource = Literal["ai", "fallback", "mock", "rule", "vivo"]
 ParentStoryBookMediaStatus = Literal["ready", "mock", "fallback", "empty"]
+ParentStoryBookStylePreset = Literal["sunrise-watercolor", "moonlit-cutout", "forest-crayon"]
 ParentStoryBookHighlightKind = Literal[
     "todayGrowth",
     "warningSuggestion",
@@ -43,11 +44,14 @@ class ParentStoryBookProviderMeta(ParentStoryBookModel):
     transport: str | None = None
     image_provider: str
     audio_provider: str
+    style_preset: ParentStoryBookStylePreset | None = None
     request_source: str | None = None
     fallback_reason: str | None = None
     real_provider: bool = False
     highlight_count: int = 0
     scene_count: int = 0
+    cache_hit_count: int = 0
+    cache_window_seconds: int | None = None
 
 
 class ParentStoryBookScene(ParentStoryBookModel):
@@ -64,6 +68,8 @@ class ParentStoryBookScene(ParentStoryBookModel):
     audio_status: ParentStoryBookMediaStatus
     voice_style: str
     highlight_source: str
+    image_cache_hit: bool = False
+    audio_cache_hit: bool = False
 
 
 class ParentStoryBookRequest(ParentStoryBookModel):
@@ -75,6 +81,14 @@ class ParentStoryBookRequest(ParentStoryBookModel):
     request_source: str | None = Field(
         default=None,
         validation_alias=AliasChoices("requestSource", "request_source"),
+    )
+    style_preset: ParentStoryBookStylePreset | None = Field(
+        default=None,
+        validation_alias=AliasChoices("stylePreset", "style_preset"),
+    )
+    style_prompt: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("stylePrompt", "style_prompt"),
     )
     snapshot: JsonDict
     highlight_candidates: list[ParentStoryBookHighlightCandidate] = Field(
@@ -105,5 +119,6 @@ class ParentStoryBookResponse(ParentStoryBookModel):
     fallback: bool = False
     fallback_reason: str | None = None
     generated_at: str
+    style_preset: ParentStoryBookStylePreset | None = None
     provider_meta: ParentStoryBookProviderMeta
     scenes: list[ParentStoryBookScene] = Field(default_factory=list)

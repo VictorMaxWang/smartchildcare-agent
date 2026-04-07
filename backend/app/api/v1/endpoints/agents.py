@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from time import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.schemas.parent_message import ParentMessageReflexionRequest, ParentMessageReflexionResponse
@@ -10,6 +11,7 @@ from app.schemas.parent_storybook import ParentStoryBookRequest, ParentStoryBook
 from app.schemas.parent_trend import ParentTrendQueryRequest, ParentTrendQueryResponse
 from app.schemas.react_tools import ReactRunRequest, ReactRunResponse
 from app.services.orchestrator import Orchestrator, build_orchestrator
+from app.services.storybook_media_cache import get_storybook_media_cache
 
 router = APIRouter(tags=["agents"])
 
@@ -62,6 +64,22 @@ async def parent_storybook(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return ParentStoryBookResponse.model_validate(result)
+
+
+@router.get("/agents/parent/storybook/media/{media_key}")
+async def parent_storybook_media(media_key: str):
+    cached_asset = get_storybook_media_cache().get_audio_asset(media_key)
+    if not cached_asset:
+        raise HTTPException(status_code=404, detail="storybook media expired")
+
+    remaining_seconds = max(int(cached_asset.expires_at - time()), 0)
+    return Response(
+        content=cached_asset.audio_bytes,
+        media_type=cached_asset.content_type,
+        headers={
+            "Cache-Control": f"private, max-age={remaining_seconds}",
+        },
+    )
 
 
 @router.post("/agents/teacher/run")

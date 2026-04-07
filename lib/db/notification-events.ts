@@ -61,7 +61,7 @@ function asStringArray(value: unknown) {
   return result;
 }
 
-function normalizeSource(
+export function normalizeAdminNotificationSource(
   value: unknown
 ): AdminDispatchEvent["source"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -132,7 +132,7 @@ function mapRowToEvent(row: NotificationEventRow): AdminDispatchEvent {
     recommendedDeadline: row.recommended_deadline,
     reasonText: row.reason_text,
     evidence: decodeDatabaseJson(row.evidence_json) ?? [],
-    source: normalizeSource(decodeDatabaseJson(row.source_json)),
+    source: normalizeAdminNotificationSource(decodeDatabaseJson(row.source_json)),
     createdBy: row.created_by,
     updatedBy: row.updated_by,
     createdAt: formatDateValue(row.created_at) ?? new Date().toISOString(),

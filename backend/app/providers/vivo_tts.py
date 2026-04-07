@@ -43,14 +43,19 @@ def _stable_hash(value: str) -> str:
 
 
 def _build_wav_data_url(pcm_bytes: bytes) -> str:
+    wav_bytes = _build_wav_bytes(pcm_bytes)
+    wav_base64 = base64.b64encode(wav_bytes).decode("utf-8")
+    return f"data:audio/wav;base64,{wav_base64}"
+
+
+def _build_wav_bytes(pcm_bytes: bytes) -> bytes:
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
         wav_file.setnchannels(TTS_CHANNELS)
         wav_file.setsampwidth(TTS_SAMPLE_WIDTH)
         wav_file.setframerate(TTS_SAMPLE_RATE)
         wav_file.writeframes(pcm_bytes)
-    wav_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    return f"data:audio/wav;base64,{wav_base64}"
+    return buffer.getvalue()
 
 
 def _to_websocket_base_url(base_url: str) -> str:
@@ -197,11 +202,12 @@ class VivoTtsProvider:
                 pcm_bytes = b"".join(pcm_chunks)
                 if not pcm_bytes:
                     raise ProviderResponseError("Vivo TTS finished without audio data")
+                wav_bytes = _build_wav_bytes(pcm_bytes)
 
                 return {
                     "provider": self.provider_name,
                     "mode": "live",
-                    "audioUrl": _build_wav_data_url(pcm_bytes),
+                    "audioUrl": f"data:audio/wav;base64,{base64.b64encode(wav_bytes).decode('utf-8')}",
                     "audioRef": f"vivo-tts-{request_id}",
                     "audioScript": text,
                     "voiceStyle": voice_style or voice_name,
@@ -209,6 +215,8 @@ class VivoTtsProvider:
                     "voiceName": voice_name,
                     "requestId": request_id,
                     "appId": app_id,
+                    "audioBytes": wav_bytes,
+                    "audioContentType": "audio/wav",
                 }
         except InvalidStatus as exc:
             response = getattr(exc, "response", None)

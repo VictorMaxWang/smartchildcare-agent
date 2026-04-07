@@ -4,6 +4,7 @@ import asyncio
 
 from app.providers.base import ProviderResult
 from app.services.parent_storybook_service import run_parent_storybook
+from app.services.storybook_media_cache import get_storybook_media_cache
 
 
 def _base_payload() -> dict:
@@ -85,6 +86,8 @@ class _SceneProvider:
                 "audioScript": kwargs["audio_script"],
                 "audioStatus": status,
                 "voiceStyle": kwargs["voice_style"],
+                "audioBytes": b"RIFF" if status == "ready" else None,
+                "audioContentType": "audio/wav" if status == "ready" else None,
             },
             provider=self.provider_name,
             mode="live" if status == "ready" else "fallback",
@@ -134,7 +137,7 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
     assert result["scenes"][0]["imageStatus"] == "ready"
     assert result["scenes"][0]["audioStatus"] == "ready"
     assert result["scenes"][0]["imageUrl"].startswith("https://cdn.example.com/")
-    assert result["scenes"][0]["audioUrl"].startswith("data:audio/wav;base64,")
+    assert result["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
 
 
 def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatch):
@@ -175,3 +178,54 @@ def test_parent_storybook_service_degrades_to_card_when_context_is_sparse():
     assert result["fallback"] is True
     assert result["fallbackReason"] == "sparse-parent-context"
     assert result["providerMeta"]["mode"] == "fallback"
+
+
+def test_parent_storybook_service_includes_style_preset_in_prompt(monkeypatch):
+    image_provider = _SceneProvider(provider_name="vivo-story-image", image_status="ready")
+    audio_provider = _SceneProvider(provider_name="storybook-mock-preview", audio_status="fallback")
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = _base_payload()
+    payload["stylePreset"] = "moonlit-cutout"
+    result = asyncio.run(run_parent_storybook(payload))
+
+    assert result["stylePreset"] == "moonlit-cutout"
+    assert "月夜剪纸" in image_provider.calls[0]["image_prompt"]
+
+
+def test_parent_storybook_service_reuses_media_cache(monkeypatch):
+    image_provider = _SceneProvider(provider_name="vivo-story-image", image_status="ready")
+    audio_provider = _SceneProvider(provider_name="vivo-story-tts", audio_status="ready")
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    media_cache = get_storybook_media_cache()
+    media_cache._entries.clear()
+
+    first = asyncio.run(run_parent_storybook(_base_payload()))
+    second = asyncio.run(run_parent_storybook(_base_payload()))
+
+    assert first["providerMeta"]["cacheHitCount"] == 0
+    assert second["providerMeta"]["cacheHitCount"] == 0
+    assert image_provider.calls and len(image_provider.calls) == 6
+    assert audio_provider.calls and len(audio_provider.calls) == 6
+    assert len(media_cache._entries) == 3
+    assert second["scenes"][0]["imageCacheHit"] is False
+    assert second["scenes"][0]["audioCacheHit"] is False
+    assert first["scenes"][0]["audioUrl"] == second["scenes"][0]["audioUrl"]
+    assert second["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")

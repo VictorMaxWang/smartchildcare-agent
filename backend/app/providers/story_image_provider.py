@@ -15,6 +15,7 @@ from app.providers.base import (
     ProviderResult,
 )
 from app.providers.vivo_llm import VivoLlmProvider
+from app.services.storybook_runtime_cache import get_storybook_runtime_cache
 
 IMAGE_SUBMIT_PATH = "/api/v1/task_submit"
 IMAGE_PROGRESS_PATH = "/api/v1/task_progress"
@@ -69,6 +70,26 @@ def _build_default_prompt(
     )
 
 
+def _build_story_image_cache_key(
+    *,
+    prompt: str,
+    business_code: str,
+    style_config: str,
+    width: int,
+    height: int,
+) -> str:
+    seed = "::".join(
+        [
+            prompt,
+            business_code,
+            style_config,
+            str(width),
+            str(height),
+        ]
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
 class MockStoryImageProvider:
     provider_name = "storybook-asset"
     mode_name = "fallback"
@@ -101,6 +122,7 @@ class MockStoryImageProvider:
                 "imageUrl": asset_ref,
                 "assetRef": asset_ref,
                 "imageStatus": "fallback" if story_mode == "storybook" else "mock",
+                "cacheHit": False,
             },
             provider=self.provider_name,
             mode=self.mode_name,
@@ -138,6 +160,27 @@ class VivoStoryImageProvider:
             scene_title=scene_title,
             scene_text=scene_text,
         )
+        cache_key = _build_story_image_cache_key(
+            prompt=prompt,
+            business_code=self.settings.storybook_image_business_code,
+            style_config=self.settings.storybook_image_style_config,
+            width=self.settings.storybook_image_width,
+            height=self.settings.storybook_image_height,
+        )
+        cached_result = get_storybook_runtime_cache().get(cache_key)
+        if cached_result:
+            return ProviderResult(
+                output={
+                    **cached_result["output"],
+                    "cacheHit": True,
+                },
+                provider=self.provider_name,
+                mode=self.mode_name,
+                source="cache",
+                model=cached_result.get("model"),
+                request_id=cached_result.get("requestId"),
+            )
+
         app_id, app_key = self._require_credentials()
         request_id = uuid4().hex
 
@@ -193,17 +236,28 @@ class VivoStoryImageProvider:
                 if not images:
                     raise ProviderResponseError("Vivo story image task finished without images_url")
                 image_url = images[0]
-                return ProviderResult(
-                    output={
-                        "imagePrompt": prompt,
-                        "imageUrl": image_url,
-                        "assetRef": image_url,
-                        "imageStatus": "ready",
+                model_name = _normalize_text(progress_result.get("model")) or None
+                output = {
+                    "imagePrompt": prompt,
+                    "imageUrl": image_url,
+                    "assetRef": image_url,
+                    "imageStatus": "ready",
+                    "cacheHit": False,
+                }
+                get_storybook_runtime_cache().set(
+                    cache_key,
+                    {
+                        "output": output,
+                        "model": model_name,
+                        "requestId": request_id,
                     },
+                )
+                return ProviderResult(
+                    output=output,
                     provider=self.provider_name,
                     mode=self.mode_name,
                     source="vivo",
-                    model=_normalize_text(progress_result.get("model")) or None,
+                    model=model_name,
                     request_id=request_id,
                 )
 

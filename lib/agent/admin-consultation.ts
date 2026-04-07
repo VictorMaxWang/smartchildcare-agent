@@ -1,7 +1,9 @@
 import type { ConsultationResult, ExplainabilityItem } from "@/lib/ai/types";
 import type {
+  AdminDispatchCreatePayload,
   AdminDispatchEvent,
   AdminOwnerRole,
+  InstitutionPriorityEvidence,
 } from "@/lib/agent/admin-types";
 import { buildConsultationResultTraceViewModel } from "@/lib/consultation/trace-view-model";
 import type {
@@ -128,8 +130,16 @@ export interface AdminConsultationPriorityItem {
   shouldEscalateToAdmin: boolean;
   decision: AdminConsultationDecisionViewModel;
   trace: AdminConsultationTraceViewModel;
+  recommendedOwnerRole: AdminOwnerRole;
   dispatchEvent?: AdminDispatchEvent;
+  dispatchBindingScope?: AdminConsultationDispatchBindingScope;
+  notificationPayload?: AdminDispatchCreatePayload;
 }
+
+export type AdminConsultationDispatchBindingScope =
+  | "priority"
+  | "consultation"
+  | "child";
 
 const RISK_ORDER: Record<ConsultationResult["riskLevel"], number> = {
   high: 0,
@@ -141,6 +151,12 @@ const STATUS_ORDER: Record<AdminConsultationDecisionViewModel["status"], number>
   pending: 0,
   in_progress: 1,
   completed: 2,
+};
+
+const CONSULTATION_PRIORITY_SCORE: Record<ConsultationResult["riskLevel"], number> = {
+  high: 90,
+  medium: 70,
+  low: 50,
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -363,7 +379,7 @@ function matchesChildLevelSource(
   );
 }
 
-function resolveDispatchEvent(params: {
+function resolveDispatchBinding(params: {
   consultationId: string;
   childId: string;
   notificationEvents: AdminDispatchEvent[];
@@ -379,18 +395,37 @@ function resolveDispatchEvent(params: {
   const priorityMatch = notificationEvents.find(
     (event) => event.priorityItemId === consultationId
   );
-  if (priorityMatch) return priorityMatch;
+  if (priorityMatch) {
+    return {
+      event: priorityMatch,
+      scope: "priority" as const,
+    };
+  }
 
   const consultationSourceMatch = notificationEvents.find((event) =>
     matchesConsultationSource(event, consultationId)
   );
-  if (consultationSourceMatch) return consultationSourceMatch;
+  if (consultationSourceMatch) {
+    return {
+      event: consultationSourceMatch,
+      scope: "consultation" as const,
+    };
+  }
 
   if (visibleConsultationCountForChild !== 1) {
     return undefined;
   }
 
-  return notificationEvents.find((event) => matchesChildLevelSource(event, childId));
+  const childLevelMatch = notificationEvents.find((event) =>
+    matchesChildLevelSource(event, childId)
+  );
+
+  if (!childLevelMatch) return undefined;
+
+  return {
+    event: childLevelMatch,
+    scope: "child" as const,
+  };
 }
 
 function resolveDecisionStatus(params: {
@@ -871,11 +906,124 @@ function buildPrioritySortValue(item: AdminConsultationPriorityItem) {
   };
 }
 
+function buildConsultationRecommendedOwnerRole(params: {
+  dispatchEvent?: AdminDispatchEvent;
+  feedOwnerRole?: AdminOwnerRole;
+  directorDecisionOwnerRole?: AdminOwnerRole;
+  localConsultation?: ConsultationResult;
+}) {
+  return (
+    params.dispatchEvent?.recommendedOwnerRole ||
+    params.feedOwnerRole ||
+    params.directorDecisionOwnerRole ||
+    params.localConsultation?.directorDecisionCard.recommendedOwnerRole ||
+    "admin"
+  );
+}
+
+function buildConsultationNotificationEvidence(
+  item: Pick<AdminConsultationPriorityItem, "riskLevel" | "decision" | "trace">
+) {
+  const priorityScore = CONSULTATION_PRIORITY_SCORE[item.riskLevel];
+  const evidence: InstitutionPriorityEvidence[] = [
+    {
+      label: "会诊风险",
+      value: item.decision.riskLabel,
+      weight: priorityScore,
+      detail: item.decision.summary,
+    },
+  ];
+
+  const triggerReason = item.decision.triggerReasons[0];
+  if (triggerReason) {
+    evidence.push({
+      label: "触发原因",
+      value: triggerReason,
+      weight: Math.max(priorityScore - 20, 20),
+      detail: item.decision.whyHighPriority,
+    });
+  }
+
+  const keyFinding = item.decision.keyFindings[0] || item.trace.keyFindings[0];
+  if (keyFinding) {
+    evidence.push({
+      label: "关键发现",
+      value: keyFinding,
+      weight: Math.max(priorityScore - 35, 15),
+      detail: item.trace.collaborationSummary,
+    });
+  }
+
+  return evidence;
+}
+
+export function hasConsultationScopedNotification(
+  item: Pick<AdminConsultationPriorityItem, "dispatchBindingScope">
+) {
+  return (
+    item.dispatchBindingScope === "priority" ||
+    item.dispatchBindingScope === "consultation"
+  );
+}
+
+export function buildAdminConsultationNotificationPayload(params: {
+  item: Pick<
+    AdminConsultationPriorityItem,
+    | "consultationId"
+    | "childId"
+    | "riskLevel"
+    | "generatedAt"
+    | "decision"
+    | "trace"
+    | "recommendedOwnerRole"
+  >;
+  institutionName?: string;
+}): AdminDispatchCreatePayload {
+  const { item } = params;
+  const priorityScore = CONSULTATION_PRIORITY_SCORE[item.riskLevel];
+  const recommendedAction =
+    item.decision.schoolActions[0] ||
+    item.decision.homeActions[0] ||
+    item.decision.followUpActions[0] ||
+    item.trace.collaborationSummary ||
+    item.decision.summary;
+
+  return {
+    eventType: "admin_action",
+    priorityItemId: item.consultationId,
+    title: `${item.decision.priorityLabel}｜${item.decision.childName}重点会诊`,
+    summary: item.decision.summary,
+    targetType: "child",
+    targetId: item.childId,
+    targetName: item.decision.childName,
+    priorityLevel: item.decision.priorityLabel,
+    priorityScore,
+    recommendedOwnerRole: item.recommendedOwnerRole,
+    recommendedOwnerName: item.decision.recommendedOwnerName,
+    recommendedAction,
+    recommendedDeadline: item.decision.recommendedAt || item.generatedAt,
+    reasonText: item.decision.whyHighPriority,
+    evidence: buildConsultationNotificationEvidence(item),
+    source: {
+      institutionName: params.institutionName || "当前机构",
+      workflow: "daily-priority",
+      relatedChildIds: [item.childId],
+      relatedClassNames:
+        item.decision.className && item.decision.className !== "当前班级"
+          ? [item.decision.className]
+          : undefined,
+      consultationId: item.consultationId,
+      relatedConsultationIds: [item.consultationId],
+    },
+  };
+}
+
 export function buildAdminConsultationPriorityItems(params: {
   feedItems?: unknown[] | null;
   localConsultations?: ConsultationResult[];
   children: AdminConsultationChildMeta[];
   notificationEvents?: AdminDispatchEvent[];
+  institutionName?: string;
   limit?: number;
   useLocalFallback?: boolean;
 }) {
@@ -904,54 +1052,70 @@ export function buildAdminConsultationPriorityItems(params: {
           }
 
           const child = childMap.get(feedItem.childId);
-          const dispatchEvent = resolveDispatchEvent({
+          const dispatchBinding = resolveDispatchBinding({
             consultationId: feedItem.consultationId,
             childId: feedItem.childId,
             notificationEvents,
             visibleConsultationCountForChild:
               visibleConsultationCountByChildId.get(feedItem.childId) ?? 0,
           });
+          const dispatchEvent = dispatchBinding?.event;
           const localConsultation =
             localMaps.byConsultationId.get(feedItem.consultationId) ??
             localMaps.latestByChildId.get(feedItem.childId);
           const localTrace = localConsultation
             ? buildLocalTraceViewModel(localConsultation)
             : undefined;
+          const recommendedOwnerRole = buildConsultationRecommendedOwnerRole({
+            dispatchEvent,
+            feedOwnerRole: feedItem.ownerRole,
+            directorDecisionOwnerRole: feedItem.directorDecisionCard.recommendedOwnerRole,
+            localConsultation,
+          });
+          const priorityItem = {
+            consultationId: feedItem.consultationId,
+            childId: feedItem.childId,
+            riskLevel: feedItem.riskLevel,
+            generatedAt: feedItem.generatedAt,
+            shouldEscalateToAdmin: feedItem.shouldEscalateToAdmin,
+            decision: buildFeedDecisionViewModel({
+              feedItem,
+              child,
+              dispatchEvent,
+              localConsultation,
+            }),
+            trace: buildFeedTraceViewModel({
+              feedItem,
+              localTrace,
+            }),
+            recommendedOwnerRole,
+            dispatchEvent,
+            dispatchBindingScope: dispatchBinding?.scope,
+          } satisfies AdminConsultationPriorityItem;
 
           return [
             {
-              consultationId: feedItem.consultationId,
-              childId: feedItem.childId,
-              riskLevel: feedItem.riskLevel,
-              generatedAt: feedItem.generatedAt,
-              shouldEscalateToAdmin: feedItem.shouldEscalateToAdmin,
-              decision: buildFeedDecisionViewModel({
-                feedItem,
-                child,
-                dispatchEvent,
-                localConsultation,
+              ...priorityItem,
+              notificationPayload: buildAdminConsultationNotificationPayload({
+                item: priorityItem,
+                institutionName: params.institutionName,
               }),
-              trace: buildFeedTraceViewModel({
-                feedItem,
-                localTrace,
-              }),
-              dispatchEvent,
-            } satisfies AdminConsultationPriorityItem,
+            },
           ];
         })
     : params.useLocalFallback
       ? localConsultations
           .filter((consultation) => consultation.shouldEscalateToAdmin)
           .map((consultation) => {
-            const dispatchEvent = resolveDispatchEvent({
+            const dispatchBinding = resolveDispatchBinding({
               consultationId: consultation.consultationId,
               childId: consultation.childId,
               notificationEvents,
               visibleConsultationCountForChild:
                 visibleConsultationCountByChildId.get(consultation.childId) ?? 0,
             });
-
-            return {
+            const dispatchEvent = dispatchBinding?.event;
+            const priorityItem = {
               consultationId: consultation.consultationId,
               childId: consultation.childId,
               riskLevel: consultation.riskLevel,
@@ -963,8 +1127,21 @@ export function buildAdminConsultationPriorityItems(params: {
                 dispatchEvent,
               }),
               trace: buildLocalTraceViewModel(consultation),
+              recommendedOwnerRole: buildConsultationRecommendedOwnerRole({
+                dispatchEvent,
+                localConsultation: consultation,
+              }),
               dispatchEvent,
+              dispatchBindingScope: dispatchBinding?.scope,
             } satisfies AdminConsultationPriorityItem;
+
+            return {
+              ...priorityItem,
+              notificationPayload: buildAdminConsultationNotificationPayload({
+                item: priorityItem,
+                institutionName: params.institutionName,
+              }),
+            };
           })
       : [];
 

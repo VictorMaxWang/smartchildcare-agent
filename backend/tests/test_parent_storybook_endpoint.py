@@ -28,6 +28,7 @@ def build_payload() -> dict:
             }
         ],
         "requestSource": "pytest-endpoint",
+        "stylePreset": "forest-crayon",
     }
 
 
@@ -39,6 +40,7 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["storyId"]
     assert body["childId"] == "child-1"
     assert body["mode"] == "storybook"
+    assert body["stylePreset"] == "forest-crayon"
     assert len(body["scenes"]) == 3
     assert body["providerMeta"]["provider"] == "parent-storybook-rule"
     assert body["providerMeta"]["mode"] == "fallback"
@@ -72,6 +74,8 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
                     "audioScript": kwargs["audio_script"],
                     "audioStatus": "ready",
                     "voiceStyle": kwargs["voice_style"],
+                    "audioBytes": b"RIFF",
+                    "audioContentType": "audio/wav",
                 },
                 provider=self.provider_name,
                 mode="live",
@@ -97,6 +101,63 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
     assert body["fallback"] is False
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "ready"
+    assert body["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
+
+
+def test_parent_storybook_media_endpoint_serves_cached_audio(monkeypatch):
+    class _AudioProvider:
+        def __init__(self, *, provider_name: str, media_kind: str):
+            self.provider_name = provider_name
+            self.media_kind = media_kind
+
+        def render_scene(self, **kwargs):
+            if self.media_kind == "image":
+                return ProviderResult(
+                    output={
+                        "imagePrompt": kwargs["image_prompt"],
+                        "imageUrl": "https://cdn.example.com/story-live.png",
+                        "assetRef": "https://cdn.example.com/story-live.png",
+                        "imageStatus": "ready",
+                    },
+                    provider=self.provider_name,
+                    mode="live",
+                    source="vivo",
+                    model="live-image",
+                )
+            return ProviderResult(
+                output={
+                    "audioUrl": "data:audio/wav;base64,AAAA",
+                    "audioRef": "live-audio-1",
+                    "audioScript": kwargs["audio_script"],
+                    "audioStatus": "ready",
+                    "voiceStyle": kwargs["voice_style"],
+                    "audioBytes": b"RIFF",
+                    "audioContentType": "audio/wav",
+                },
+                provider=self.provider_name,
+                mode="live",
+                source="vivo",
+                model="live-audio",
+            )
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: _AudioProvider(provider_name="vivo-story-image", media_kind="image"),
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: _AudioProvider(provider_name="vivo-story-tts", media_kind="audio"),
+    )
+
+    response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
+    body = response.json()
+    media_url = body["scenes"][0]["audioUrl"]
+    media_key = media_url.rsplit("/", 1)[-1]
+    media_response = client.get(f"/api/v1/agents/parent/storybook/media/{media_key}")
+
+    assert media_response.status_code == 200
+    assert media_response.headers["content-type"] == "audio/wav"
+    assert media_response.content == b"RIFF"
 
 
 def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):

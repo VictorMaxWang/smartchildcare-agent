@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     storybook_tts_system_version: str = "unknown"
     storybook_tts_sdk_version: str = "unknown"
     storybook_tts_android_version: str = "unknown"
+    storybook_media_cache_ttl_seconds: int = 900
+    storybook_media_cache_max_entries: int = 48
 
     mysql_url: str | None = None
     database_url: str | None = None

@@ -22,18 +22,17 @@ import {
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { buildAdminConsultationPriorityItems } from "@/lib/agent/admin-consultation";
 import {
   ADMIN_AGENT_QUICK_QUESTIONS,
   attachNotificationEventToResult,
   attachNotificationEventsToResult,
 } from "@/lib/agent/admin-agent";
-import { useAdminWorkspaceLoader } from "@/lib/agent/use-admin-workspace-loader";
+import type { AdminConsultationPriorityItem } from "@/lib/agent/admin-consultation";
+import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
 import type {
   AdminAgentRequestPayload,
   AdminAgentResult,
   AdminDispatchEvent,
-  AdminDispatchUpdatePayload,
   AdminAgentActionItem,
   InstitutionPriorityItem,
 } from "@/lib/agent/admin-types";
@@ -90,13 +89,21 @@ export default function AdminAgentPage() {
     getLatestConsultations,
   } = useApp();
   const {
-    consultationFeed,
+    priorityItems: consultationPriorityItems,
+    feedStatus,
+    feedBadge,
     notificationEvents,
     notificationError,
     notificationReady,
-    upsertNotificationEvent,
-  } = useAdminWorkspaceLoader({
-    visibleChildrenCount: visibleChildren.length,
+    createNotification,
+    createConsultationScopedNotification,
+    updateNotificationStatus,
+    isCreatingNotification,
+    updatingEventId,
+  } = useAdminConsultationWorkspace({
+    institutionName: INSTITUTION_NAME,
+    visibleChildren,
+    localConsultations: getLatestConsultations(),
     consultationFeedOptions: {
       limit: 4,
       escalatedOnly: true,
@@ -106,10 +113,7 @@ export default function AdminAgentPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
-  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
-  const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const initializedRef = useRef(false);
-  const latestConsultations = getLatestConsultations();
 
   const payload = useMemo<AdminAgentRequestPayload>(
     () => ({
@@ -147,57 +151,6 @@ export default function AdminAgentPage() {
       visibleChildren,
     ]
   );
-  const consultationChildren = useMemo(
-    () =>
-      visibleChildren.map((child) => ({
-        id: child.id,
-        name: child.name,
-        className: child.className,
-      })),
-    [visibleChildren]
-  );
-  const consultationPriorityItems = useMemo(
-    () =>
-      buildAdminConsultationPriorityItems({
-        feedItems: consultationFeed.status === "ready" ? consultationFeed.items : undefined,
-        localConsultations: latestConsultations,
-        children: consultationChildren,
-        notificationEvents,
-        limit: 4,
-        useLocalFallback: consultationFeed.status === "unavailable",
-      }),
-    [
-      consultationChildren,
-      consultationFeed.items,
-      consultationFeed.status,
-      latestConsultations,
-      notificationEvents,
-    ]
-  );
-  const consultationFeedBadge = useMemo(() => {
-    if (consultationFeed.status === "ready") {
-      return {
-        label: "backend feed",
-        variant: "success" as const,
-      };
-    }
-    if (consultationFeed.status === "unavailable" && latestConsultations.length > 0) {
-      return {
-        label: "local fallback",
-        variant: "outline" as const,
-      };
-    }
-    if (consultationFeed.status === "unavailable") {
-      return {
-        label: "feed unavailable",
-        variant: "warning" as const,
-      };
-    }
-    return {
-      label: "loading feed",
-      variant: "outline" as const,
-    };
-  }, [consultationFeed.status, latestConsultations.length]);
 
   const runWorkflow = useCallback(async (
     workflow: AdminAgentRequestPayload["workflow"],
@@ -253,6 +206,18 @@ export default function AdminAgentPage() {
     }
   }, [history, notificationEvents, payload]);
 
+  const syncEventIntoAgentState = useCallback((event: AdminDispatchEvent) => {
+    setResult((previous) =>
+      previous ? attachNotificationEventToResult(previous, event) : previous
+    );
+    setHistory((previous) =>
+      previous.map((entry) => ({
+        ...entry,
+        result: attachNotificationEventToResult(entry.result, event),
+      }))
+    );
+  }, []);
+
   useEffect(() => {
     if (visibleChildren.length === 0 || initializedRef.current) return;
 
@@ -283,78 +248,39 @@ export default function AdminAgentPage() {
   }, [notificationEvents, notificationReady]);
 
   async function handleCreateDispatch(actionItem: AdminAgentActionItem) {
-    setDispatchingId(actionItem.id);
     setRequestError(null);
 
-    try {
-      const response = await fetch("/api/admin/notification-events", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(actionItem.dispatchPayload),
-      });
-      const data = (await response.json()) as { item?: AdminDispatchEvent; error?: string };
-
-      if (!response.ok || !data.item) {
-        setRequestError(data.error ?? "派单创建失败");
-        return;
-      }
-
-      upsertNotificationEvent(data.item!);
-      setResult((prev) => (prev ? attachNotificationEventToResult(prev, data.item!) : prev));
-      setHistory((prev) =>
-        prev.map((entry) => ({
-          ...entry,
-          result: attachNotificationEventToResult(entry.result, data.item!),
-        }))
-      );
-    } catch (error) {
-      console.error("[ADMIN_AGENT] Failed to create dispatch", error);
+    const nextEvent = await createNotification(actionItem.dispatchPayload, actionItem.id);
+    if (!nextEvent) {
       setRequestError("派单创建失败");
-    } finally {
-      setDispatchingId(null);
+      return;
     }
+
+    syncEventIntoAgentState(nextEvent);
   }
 
   async function handleUpdateEventStatus(eventId: string, status: AdminDispatchEvent["status"]) {
-    setUpdatingEventId(eventId);
     setRequestError(null);
 
-    const patchPayload: AdminDispatchUpdatePayload = {
-      id: eventId,
-      status,
-    };
-
-    try {
-      const response = await fetch("/api/admin/notification-events", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(patchPayload),
-      });
-      const data = (await response.json()) as { item?: AdminDispatchEvent; error?: string };
-
-      if (!response.ok || !data.item) {
-        setRequestError(data.error ?? "派单状态更新失败");
-        return;
-      }
-
-      upsertNotificationEvent(data.item!);
-      setResult((prev) => (prev ? attachNotificationEventToResult(prev, data.item!) : prev));
-      setHistory((prev) =>
-        prev.map((entry) => ({
-          ...entry,
-          result: attachNotificationEventToResult(entry.result, data.item!),
-        }))
-      );
-    } catch (error) {
-      console.error("[ADMIN_AGENT] Failed to update notification event", error);
+    const nextEvent = await updateNotificationStatus(eventId, status);
+    if (!nextEvent) {
       setRequestError("派单状态更新失败");
-    } finally {
-      setUpdatingEventId(null);
+      return;
     }
+
+    syncEventIntoAgentState(nextEvent);
+  }
+
+  async function handleCreateConsultationNotification(item: AdminConsultationPriorityItem) {
+    setRequestError(null);
+
+    const nextEvent = await createConsultationScopedNotification(item);
+    if (!nextEvent) {
+      setRequestError("会诊派单创建失败");
+      return;
+    }
+
+    syncEventIntoAgentState(nextEvent);
   }
 
   if (visibleChildren.length === 0) {
@@ -435,20 +361,23 @@ export default function AdminAgentPage() {
             >
               <RiskPriorityBoard
                 items={consultationPriorityItems}
-                isLoading={consultationFeed.status === "loading"}
-                sourceBadgeLabel={consultationFeedBadge.label}
-                sourceBadgeVariant={consultationFeedBadge.variant}
+                isLoading={feedStatus === "loading"}
+                sourceBadgeLabel={feedBadge.label}
+                sourceBadgeVariant={feedBadge.variant}
+                onCreateConsultationNotification={handleCreateConsultationNotification}
+                isCreatingConsultationNotification={isCreatingNotification}
+                notificationError={notificationError}
                 emptyTitle={
-                  consultationFeed.status === "unavailable"
+                  feedStatus === "unavailable"
                     ? "高风险会诊 feed 暂时不可用"
-                    : consultationFeed.status === "ready"
+                    : feedStatus === "ready"
                       ? "当前 backend feed 暂无升级到园长侧的重点会诊"
                       : undefined
                 }
                 emptyDescription={
-                  consultationFeed.status === "unavailable"
+                  feedStatus === "unavailable"
                     ? "页面会在 transport 失败时回退到本地 consultation；如果这里仍为空，说明本地也没有可展示的高风险会诊。"
-                    : consultationFeed.status === "ready"
+                    : feedStatus === "ready"
                       ? "backend feed 已接管园长 Agent 顶部会诊区；当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
                       : undefined
                 }
@@ -640,9 +569,17 @@ export default function AdminAgentPage() {
                             size="sm"
                             variant="premium"
                             onClick={() => void handleCreateDispatch(item)}
-                            disabled={Boolean(notificationError) || dispatchingId === item.id || Boolean(item.relatedEventId)}
+                            disabled={
+                              Boolean(notificationError) ||
+                              isCreatingNotification(item.id) ||
+                              Boolean(item.relatedEventId)
+                            }
                           >
-                            {dispatchingId === item.id ? "创建中…" : item.relatedEventId ? "已创建派单" : "生成派单"}
+                            {isCreatingNotification(item.id)
+                              ? "创建中…"
+                              : item.relatedEventId
+                                ? "已创建派单"
+                                : "生成派单"}
                           </Button>
                         </div>
                       </div>

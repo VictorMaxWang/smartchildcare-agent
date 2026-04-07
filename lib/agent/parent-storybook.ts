@@ -6,6 +6,7 @@ import type {
   ParentStoryBookResponse,
   ParentStoryBookScene,
   ParentStoryBookMediaStatus,
+  ParentStoryBookStylePreset,
 } from "@/lib/ai/types";
 import { buildParentAgentChildContext, buildParentChildSuggestionSnapshot } from "@/lib/agent/parent-agent";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
@@ -30,9 +31,45 @@ export interface ParentStoryBookPayloadInput {
   latestConsultation?: ConsultationResult | null;
   requestSource?: string;
   storyMode?: ParentStoryBookMode;
+  stylePreset?: ParentStoryBookStylePreset;
+  stylePrompt?: string;
   traceId?: string;
   debugMemory?: boolean;
 }
+
+export interface ParentStoryBookStylePresetDefinition {
+  id: ParentStoryBookStylePreset;
+  label: string;
+  shortLabel: string;
+  description: string;
+  stylePrompt: string;
+}
+
+export const DEFAULT_PARENT_STORYBOOK_STYLE_PRESET: ParentStoryBookStylePreset = "sunrise-watercolor";
+
+export const PARENT_STORYBOOK_STYLE_PRESETS: ParentStoryBookStylePresetDefinition[] = [
+  {
+    id: "sunrise-watercolor",
+    label: "晨光水彩",
+    shortLabel: "晨光",
+    description: "暖黄水彩与高光晕染，更适合比赛录屏里的治愈成长瞬间。",
+    stylePrompt: "画面风格偏晨光水彩，暖金色高光，边缘柔和，像纸上晕染开的儿童绘本插图。",
+  },
+  {
+    id: "moonlit-cutout",
+    label: "月夜剪纸",
+    shortLabel: "月夜",
+    description: "靛蓝夜色与层叠纸艺质感，突出睡前故事和晚安情绪。",
+    stylePrompt: "画面风格偏月夜剪纸，靛蓝与奶白层叠，夜空柔雾感明显，像立体纸艺儿童绘本。",
+  },
+  {
+    id: "forest-crayon",
+    label: "森林蜡笔",
+    shortLabel: "森林",
+    description: "浅绿与木质色调配合蜡笔笔触，适合切出更活泼的一套演示画风。",
+    stylePrompt: "画面风格偏森林蜡笔，浅绿和木质色调，保留明显手绘蜡笔纹理和轻冒险氛围。",
+  },
+];
 
 function stableHash(value: string) {
   let hash = 2166136261;
@@ -51,6 +88,20 @@ function buildStableTimestamp(seed: string) {
 
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+export function resolveParentStoryBookStylePreset(value?: string | null): ParentStoryBookStylePreset {
+  const normalized = normalizeText(value);
+  const matched = PARENT_STORYBOOK_STYLE_PRESETS.find((item) => item.id === normalized);
+  return matched?.id ?? DEFAULT_PARENT_STORYBOOK_STYLE_PRESET;
+}
+
+export function getParentStoryBookStylePresetDefinition(value?: string | null) {
+  const preset = resolveParentStoryBookStylePreset(value);
+  return (
+    PARENT_STORYBOOK_STYLE_PRESETS.find((item) => item.id === preset) ??
+    PARENT_STORYBOOK_STYLE_PRESETS[0]
+  );
 }
 
 function pickFirstString(values: Array<unknown>) {
@@ -223,17 +274,29 @@ function buildScene(
     childName: string;
     className?: string;
     mode: ParentStoryBookMode;
+    stylePrompt?: string;
     highlight: ParentStoryBookHighlightCandidate;
     nextHighlight?: ParentStoryBookHighlightCandidate;
     closingNote: string;
     parentNote: string;
   }
 ): ParentStoryBookScene {
-  const { index, childName, className, mode, highlight, nextHighlight, closingNote, parentNote } = params;
+  const {
+    index,
+    childName,
+    className,
+    mode,
+    stylePrompt,
+    highlight,
+    nextHighlight,
+    closingNote,
+    parentNote,
+  } = params;
   const mainText = pickCandidateDetail(highlight);
   const supportingText = pickCandidateDetail(nextHighlight);
   const imageRef = resolveSceneImageRef(mode, index);
   const voiceStyle = index === 2 ? "gentle-bedtime" : index === 1 ? "warm-storytelling" : "calm-encouraging";
+  const presetPrompt = normalizeText(stylePrompt);
 
   const sceneTitleMap: Record<number, string> = {
     0: "今天的小亮点",
@@ -261,7 +324,12 @@ function buildScene(
     sceneIndex: index + 1,
     sceneTitle: sceneTitleMap[index] ?? "成长片段",
     sceneText: sceneTextMap[index] ?? mainText,
-    imagePrompt: `温暖绘本风，${childName}${className ? ` 在 ${className}` : ""}，${mainText || "柔和的成长瞬间"}，奶油色与浅蓝色，安静、安全、童趣，适合家长睡前阅读`,
+    imagePrompt: [
+      presetPrompt,
+      `温暖绘本风，${childName}${className ? ` 在 ${className}` : ""}，${mainText || "柔和的成长瞬间"}，奶油色与浅蓝色，安静、安全、童趣，适合家长睡前阅读`,
+    ]
+      .filter(Boolean)
+      .join("；"),
     imageUrl: imageRef,
     assetRef: imageRef,
     imageStatus: mode === "storybook" ? "fallback" : "mock",
@@ -278,11 +346,12 @@ function buildScenes(params: {
   childName: string;
   className?: string;
   mode: ParentStoryBookMode;
+  stylePrompt?: string;
   highlightCandidates: ParentStoryBookHighlightCandidate[];
   closingNote: string;
   parentNote: string;
 }) {
-  const { childName, className, mode, highlightCandidates, closingNote, parentNote } = params;
+  const { childName, className, mode, stylePrompt, highlightCandidates, closingNote, parentNote } = params;
   if (mode === "card") {
     const highlight = highlightCandidates[0] ?? {
       kind: "todayGrowth" as const,
@@ -297,6 +366,7 @@ function buildScenes(params: {
         childName,
         className,
         mode,
+        stylePrompt,
         highlight,
         closingNote,
         parentNote,
@@ -337,6 +407,7 @@ function buildScenes(params: {
       childName,
       className,
       mode,
+      stylePrompt,
       highlight: safeFirst,
       nextHighlight: safeSecond,
       closingNote,
@@ -347,6 +418,7 @@ function buildScenes(params: {
       childName,
       className,
       mode,
+      stylePrompt,
       highlight: safeSecond,
       nextHighlight: safeThird,
       closingNote,
@@ -357,6 +429,7 @@ function buildScenes(params: {
       childName,
       className,
       mode,
+      stylePrompt,
       highlight: safeThird,
       nextHighlight: safeFirst,
       closingNote,
@@ -416,11 +489,15 @@ export function buildParentStoryBookRequestFromFeed(input: ParentStoryBookPayloa
     latestConsultation: input.latestConsultation,
   });
   const storyMode = input.storyMode ?? buildStoryMode(input.feed.child.id, highlightCandidates, snapshot);
+  const stylePreset = resolveParentStoryBookStylePreset(input.stylePreset);
+  const stylePrompt = normalizeText(input.stylePrompt) || getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
 
   return {
     childId: input.feed.child.id,
     storyMode,
     requestSource: input.requestSource ?? "parent-home",
+    stylePreset,
+    stylePrompt,
     snapshot,
     highlightCandidates,
     latestInterventionCard: input.latestInterventionCard ? { ...input.latestInterventionCard } : null,
@@ -448,9 +525,13 @@ export function buildParentStoryBookResponse(
   const requestedMode = request.storyMode === "auto" ? undefined : request.storyMode;
   const computedMode = buildStoryMode(child.id, highlightCandidates, request.snapshot);
   const mode = requestedMode === "card" ? "card" : computedMode;
+  const stylePreset = resolveParentStoryBookStylePreset(request.stylePreset);
+  const stylePrompt = normalizeText(request.stylePrompt) || getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
   const storySeed = [
     request.childId ?? child.id ?? "guest",
     mode,
+    stylePreset,
+    stylePrompt,
     childName,
     className ?? "",
     highlightCandidates.map((item) => `${item.kind}:${item.title}:${item.detail}`).join("|"),
@@ -468,6 +549,7 @@ export function buildParentStoryBookResponse(
     childName,
     className,
     mode,
+    stylePrompt,
     highlightCandidates,
     closingNote,
     parentNote,
@@ -503,6 +585,7 @@ export function buildParentStoryBookResponse(
     fallback,
     fallbackReason,
     generatedAt,
+    stylePreset,
     providerMeta: {
       provider: "parent-storybook-rule",
       mode: "fallback",
@@ -514,8 +597,14 @@ export function buildParentStoryBookResponse(
       realProvider: false,
       highlightCount: highlightCandidates.length,
       sceneCount: scenes.length,
+      cacheHitCount: 0,
+      cacheWindowSeconds: 0,
     },
-    scenes,
+    scenes: scenes.map((scene) => ({
+      ...scene,
+      imageCacheHit: false,
+      audioCacheHit: false,
+    })),
   };
 }
 
@@ -531,6 +620,8 @@ export function buildParentStoryBookScenesPreview(input: {
       ...scene,
       imageStatus: input.imageStatus ?? scene.imageStatus,
       audioStatus: input.audioStatus ?? scene.audioStatus,
+      imageCacheHit: false,
+      audioCacheHit: false,
     })),
   } satisfies ParentStoryBookResponse;
 }

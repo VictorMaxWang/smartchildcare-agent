@@ -5,6 +5,7 @@ import pytest
 from app.core.config import Settings
 from app.providers.base import ProviderAuthenticationError, ProviderResponseError
 from app.providers.story_image_provider import VivoStoryImageProvider
+from app.services.storybook_runtime_cache import get_storybook_runtime_cache
 
 
 class _FakeResponse:
@@ -27,6 +28,13 @@ def _settings(**overrides) -> Settings:
     }
     base.update(overrides)
     return Settings(**base)
+
+
+@pytest.fixture(autouse=True)
+def clear_storybook_runtime_cache():
+    get_storybook_runtime_cache().clear()
+    yield
+    get_storybook_runtime_cache().clear()
 
 
 def test_vivo_story_image_provider_returns_ready_image(monkeypatch: pytest.MonkeyPatch):

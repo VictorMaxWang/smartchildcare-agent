@@ -1,13 +1,15 @@
 # Teacher Demo Script
 
+本稿服从 `docs/demo-script.md`，只保留 Teacher 相关 drill-down。
+
 ## 目标
 
-- 展示教师如何快速记录
+- 展示教师如何低成本记录
 - 展示高风险会诊如何成为当前最强 Agent workflow
 
-## 路线 A：Teacher 语音入口主线
+## 路线 A：Teacher 语音主线
 
-### 起点页面
+### 起点
 
 - `/teacher`
 
@@ -26,9 +28,10 @@
 - “这里我们让老师像用手机语音助手一样先说出来，系统再把它转成结构化草稿。”
 - “下一步不是继续堆文本，而是直接进入教师 Agent 页做确认和流转。”
 
-### 画面必须保留
+### 镜头必须保留
 
 - 语音层状态
+- transcript
 - 结构化草稿
 - warnings
 - 草稿源
@@ -39,7 +42,7 @@
 
 ## 路线 B：高风险会诊主线
 
-### 起点页面
+### 起点
 
 - `/teacher/high-risk-consultation`
 
@@ -59,13 +62,14 @@
 - “结果不是一段长文本，而是教师动作、家长今夜任务和园长决策卡。”
 - “这条链路是当前最强的 Agent workflow，也是整套作品的第一展示位。”
 
-### 画面必须保留
+### 镜头必须保留
 
 - stage 推进
 - summary card
 - follow-up card
 - intervention card
-- 如果在 debug 模式下，还要保留 `providerTrace` 与 `memoryMeta`
+- `providerTrace`
+- `memoryMeta`
 
 ### fallback 讲法
 

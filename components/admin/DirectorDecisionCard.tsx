@@ -3,8 +3,12 @@
 import type { ReactNode } from "react";
 import { CalendarClock, Home, School, ShieldAlert, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { AdminConsultationPriorityItem } from "@/lib/agent/admin-consultation";
+import {
+  hasConsultationScopedNotification,
+  type AdminConsultationPriorityItem,
+} from "@/lib/agent/admin-consultation";
 import { cn } from "@/lib/utils";
 
 function getRiskBadgeVariant(item: AdminConsultationPriorityItem["decision"]["riskLevel"]) {
@@ -54,11 +58,20 @@ function ActionColumn({
 export default function DirectorDecisionCard({
   item,
   className,
+  onCreateConsultationNotification,
+  isCreatingNotification = false,
+  notificationError,
 }: {
   item: AdminConsultationPriorityItem;
   className?: string;
+  onCreateConsultationNotification?: (item: AdminConsultationPriorityItem) => unknown;
+  isCreatingNotification?: boolean;
+  notificationError?: string | null;
 }) {
   const { decision } = item;
+  const hasConsultationNotification = hasConsultationScopedNotification(item);
+  const hasChildLevelFallbackNotification =
+    item.dispatchBindingScope === "child" && Boolean(item.dispatchEvent);
 
   return (
     <Card
@@ -177,7 +190,40 @@ export default function DirectorDecisionCard({
         <p className="text-xs text-slate-500">
           会诊生成时间：{decision.generatedAtLabel}
           {decision.statusSource === "dispatch" ? " | 状态已与派单同步" : ""}
+          {hasChildLevelFallbackNotification ? " | 当前仅 child 级绑定" : ""}
         </p>
+
+        <div className="rounded-2xl border border-slate-100 bg-white/90 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-900">会诊派单入口</p>
+              <p className="text-sm text-slate-600">
+                直接把当前会诊沉淀成 consultation-scoped notification，优先绑定 consultationId。
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="premium"
+              onClick={() => void onCreateConsultationNotification?.(item)}
+              disabled={
+                !onCreateConsultationNotification ||
+                !item.notificationPayload ||
+                isCreatingNotification ||
+                hasConsultationNotification
+              }
+            >
+              {isCreatingNotification
+                ? "创建中…"
+                : hasConsultationNotification
+                  ? "已创建会诊派单"
+                  : "创建会诊派单"}
+            </Button>
+          </div>
+          {notificationError ? (
+            <p className="mt-3 text-xs leading-5 text-rose-600">{notificationError}</p>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );

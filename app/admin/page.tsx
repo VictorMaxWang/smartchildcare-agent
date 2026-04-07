@@ -13,9 +13,8 @@ import {
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
-import { buildAdminConsultationPriorityItems } from "@/lib/agent/admin-consultation";
 import { buildAdminHomeViewModel } from "@/lib/agent/admin-agent";
-import { useAdminWorkspaceLoader } from "@/lib/agent/use-admin-workspace-loader";
+import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
 import type { AdminDispatchEvent, InstitutionPriorityItem } from "@/lib/agent/admin-types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
 
@@ -53,26 +52,22 @@ export default function AdminHomePage() {
   } = useApp();
   const latestConsultations = getLatestConsultations();
   const {
-    consultationFeed,
+    priorityItems: consultationPriorityItems,
+    feedStatus,
+    feedBadge,
     notificationEvents,
     notificationError,
-  } = useAdminWorkspaceLoader({
-    visibleChildrenCount: visibleChildren.length,
+    createConsultationScopedNotification,
+    isCreatingNotification,
+  } = useAdminConsultationWorkspace({
+    institutionName: INSTITUTION_NAME,
+    visibleChildren,
+    localConsultations: latestConsultations,
     consultationFeedOptions: {
       limit: 4,
       escalatedOnly: true,
     },
   });
-
-  const consultationChildren = useMemo(
-    () =>
-      visibleChildren.map((child) => ({
-        id: child.id,
-        name: child.name,
-        className: child.className,
-      })),
-    [visibleChildren]
-  );
   const home = useMemo(
     () =>
       buildAdminHomeViewModel({
@@ -110,48 +105,6 @@ export default function AdminHomePage() {
       visibleChildren,
     ]
   );
-  const consultationPriorityItems = useMemo(
-    () =>
-      buildAdminConsultationPriorityItems({
-        feedItems: consultationFeed.status === "ready" ? consultationFeed.items : undefined,
-        localConsultations: latestConsultations,
-        children: consultationChildren,
-        notificationEvents,
-        limit: 4,
-        useLocalFallback: consultationFeed.status === "unavailable",
-      }),
-    [
-      consultationChildren,
-      consultationFeed.items,
-      consultationFeed.status,
-      latestConsultations,
-      notificationEvents,
-    ]
-  );
-  const consultationFeedBadge = useMemo(() => {
-    if (consultationFeed.status === "ready") {
-      return {
-        label: "backend feed",
-        variant: "success" as const,
-      };
-    }
-    if (consultationFeed.status === "unavailable" && latestConsultations.length > 0) {
-      return {
-        label: "local fallback",
-        variant: "outline" as const,
-      };
-    }
-    if (consultationFeed.status === "unavailable") {
-      return {
-        label: "feed unavailable",
-        variant: "warning" as const,
-      };
-    }
-    return {
-      label: "loading feed",
-      variant: "outline" as const,
-    };
-  }, [consultationFeed.status, latestConsultations.length]);
 
   if (visibleChildren.length === 0) {
     return (
@@ -194,20 +147,23 @@ export default function AdminHomePage() {
             >
               <RiskPriorityBoard
                 items={consultationPriorityItems}
-                isLoading={consultationFeed.status === "loading"}
-                sourceBadgeLabel={consultationFeedBadge.label}
-                sourceBadgeVariant={consultationFeedBadge.variant}
+                isLoading={feedStatus === "loading"}
+                sourceBadgeLabel={feedBadge.label}
+                sourceBadgeVariant={feedBadge.variant}
+                onCreateConsultationNotification={createConsultationScopedNotification}
+                isCreatingConsultationNotification={isCreatingNotification}
+                notificationError={notificationError}
                 emptyTitle={
-                  consultationFeed.status === "unavailable"
+                  feedStatus === "unavailable"
                     ? "高风险会诊 feed 暂时不可用"
-                    : consultationFeed.status === "ready"
+                    : feedStatus === "ready"
                       ? "当前 backend feed 暂无升级到园长侧的重点会诊"
                       : undefined
                 }
                 emptyDescription={
-                  consultationFeed.status === "unavailable"
+                  feedStatus === "unavailable"
                     ? "页面会在 transport 失败时回退到本地 consultation；如果这里仍为空，说明本地也没有可展示的高风险会诊。"
-                    : consultationFeed.status === "ready"
+                    : feedStatus === "ready"
                       ? "backend feed 已接管园长会诊区；当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
                       : undefined
                 }

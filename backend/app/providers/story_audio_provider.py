@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from app.core.config import Settings
 from app.providers.base import ProviderResult
 from app.providers.vivo_tts import VivoTtsProvider
+from app.services.storybook_runtime_cache import get_storybook_runtime_cache
 
 
 def _normalize_text(value: Any) -> str:
@@ -31,6 +33,27 @@ def _build_mock_audio_script(
     scene_text: str,
 ) -> str:
     return f"{child_name} 的第 {scene_index + 1} 幕：{scene_title}。{scene_text[:110]}".strip()
+
+
+def _build_story_audio_cache_key(
+    *,
+    script: str,
+    voice_style: str,
+    settings: Settings,
+) -> str:
+    seed = "::".join(
+        [
+            script,
+            voice_style,
+            settings.storybook_tts_engineid,
+            settings.storybook_tts_voice,
+            settings.storybook_tts_fallback_engineid,
+            settings.storybook_tts_fallback_voice,
+            settings.storybook_tts_model,
+            settings.storybook_tts_product,
+        ]
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
 
 class MockStoryAudioProvider:
@@ -66,6 +89,7 @@ class MockStoryAudioProvider:
                 "audioScript": script,
                 "audioStatus": "fallback" if story_mode == "storybook" else "mock",
                 "voiceStyle": resolved_voice_style,
+                "cacheHit": False,
             },
             provider=self.provider_name,
             mode=self.mode_name,
@@ -104,6 +128,26 @@ class VivoStoryAudioProvider:
             scene_title=scene_title,
             scene_text=scene_text,
         )
+        resolved_voice_style = voice_style or self.settings.storybook_tts_voice
+        cache_key = _build_story_audio_cache_key(
+            script=script,
+            voice_style=resolved_voice_style,
+            settings=self.settings,
+        )
+        cached_result = get_storybook_runtime_cache().get(cache_key)
+        if cached_result:
+            return ProviderResult(
+                output={
+                    **cached_result["output"],
+                    "cacheHit": True,
+                },
+                provider=self.provider_name,
+                mode=self.mode_name,
+                source="cache",
+                model=cached_result.get("model"),
+                request_id=cached_result.get("requestId"),
+            )
+
         tts_result = self._tts_provider.synthesize(
             text=script,
             child_id=child_id,
@@ -111,18 +155,31 @@ class VivoStoryAudioProvider:
             scene_index=scene_index,
             voice_style=voice_style,
         )
-        return ProviderResult(
-            output={
-                "audioUrl": tts_result["audioUrl"],
-                "audioRef": tts_result["audioRef"],
-                "audioScript": script,
-                "audioStatus": "ready",
-                "voiceStyle": tts_result.get("voiceStyle") or voice_style or self.settings.storybook_tts_voice,
+        model_name = f"{tts_result.get('engineId')}/{tts_result.get('voiceName')}"
+        output = {
+            "audioUrl": tts_result["audioUrl"],
+            "audioRef": tts_result["audioRef"],
+            "audioScript": script,
+            "audioStatus": "ready",
+            "voiceStyle": tts_result.get("voiceStyle") or voice_style or self.settings.storybook_tts_voice,
+            "audioBytes": tts_result.get("audioBytes"),
+            "audioContentType": tts_result.get("audioContentType") or "audio/wav",
+            "cacheHit": False,
+        }
+        get_storybook_runtime_cache().set(
+            cache_key,
+            {
+                "output": output,
+                "model": model_name,
+                "requestId": tts_result.get("requestId"),
             },
+        )
+        return ProviderResult(
+            output=output,
             provider=self.provider_name,
             mode=self.mode_name,
             source="vivo",
-            model=f"{tts_result.get('engineId')}/{tts_result.get('voiceName')}",
+            model=model_name,
             request_id=tts_result.get("requestId"),
         )
 

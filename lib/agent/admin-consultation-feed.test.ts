@@ -14,43 +14,62 @@ function buildLocalConsultation(
   return {
     consultationId: "consult-1",
     triggerReason: "连续两天情绪波动",
-    triggerType: ["health-abnormal"],
+    triggerType: ["continuous-abnormality"],
     triggerReasons: ["连续两天情绪波动", "晨检备注出现异常"],
     participants: [
-      { id: "health", label: "Health Agent", role: "health" },
-      { id: "parent", label: "Parent Agent", role: "parent" },
+      { id: "health-agent", label: "Health Agent" },
+      { id: "coparenting-agent", label: "Parent Agent" },
     ],
     childId: "child-1",
     riskLevel: "high",
     agentFindings: [
       {
-        agent: "health",
-        summary: "晨检情绪偏低",
-        riskLevel: "high",
+        agentId: "health-agent",
+        title: "晨检情绪偏低",
+        riskExplanation: "连续两次晨检异常，需要尽快复核。",
+        signals: ["连续两次晨检异常"],
+        actions: ["加强晨检记录"],
+        observationPoints: ["晨检情绪"],
         evidence: ["连续两次晨检异常"],
       },
     ],
     summary: "需尽快跟进幼儿情绪与家园协同。",
     keyFindings: ["情绪波动持续", "需要家园同步观察"],
     healthAgentView: {
+      role: "HealthObservationAgent",
+      title: "Health Agent",
       summary: "晨检异常",
+      signals: ["连续两次晨检异常"],
+      actions: ["加强晨检记录"],
+      observationPoints: ["晨检情绪"],
       evidence: ["连续两次晨检异常"],
-      action: "加强晨检记录",
     },
     dietBehaviorAgentView: {
+      role: "DietBehaviorAgent",
+      title: "Diet Agent",
       summary: "午餐进食一般",
+      signals: ["饮水偏少"],
+      actions: ["补充观察饮水"],
+      observationPoints: ["饮水量"],
       evidence: ["饮水偏少"],
-      action: "补充观察饮水",
     },
     parentCommunicationAgentView: {
+      role: "ParentCommunicationAgent",
+      title: "Parent Agent",
       summary: "家长反馈延迟",
+      signals: ["连续两天未反馈"],
+      actions: ["发送简短回访"],
+      observationPoints: ["今晚反馈"],
       evidence: ["连续两天未反馈"],
-      action: "发送简短回访",
     },
     inSchoolActionAgentView: {
+      role: "InSchoolActionAgent",
+      title: "Execution Agent",
       summary: "园内情绪安抚",
+      signals: ["午休前哭闹"],
+      actions: ["安排固定安抚动作"],
+      observationPoints: ["午休过渡"],
       evidence: ["午休前哭闹"],
-      action: "安排固定安抚动作",
     },
     todayInSchoolActions: ["午休前先做安抚过渡"],
     tonightAtHomeActions: ["晚间记录入睡前情绪变化"],
@@ -193,6 +212,7 @@ test("normalizeAdminConsultationFeedItem keeps valid feed payloads and rejects m
 
 test("buildAdminConsultationPriorityItems prefers backend-native actions, sync targets and consultation-level overlay", () => {
   const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
     feedItems: [
       {
         consultationId: "consult-1",
@@ -288,10 +308,18 @@ test("buildAdminConsultationPriorityItems prefers backend-native actions, sync t
     "家长端今晚任务",
     "园长端决策卡",
   ]);
+  assert.equal(items[0]?.dispatchBindingScope, "consultation");
+  assert.equal(items[0]?.notificationPayload?.priorityItemId, "consult-1");
+  assert.equal(items[0]?.notificationPayload?.priorityScore, 90);
+  assert.equal(items[0]?.notificationPayload?.source.consultationId, "consult-1");
+  assert.deepEqual(items[0]?.notificationPayload?.source.relatedConsultationIds, ["consult-1"]);
+  assert.deepEqual(items[0]?.notificationPayload?.source.relatedChildIds, ["child-1"]);
+  assert.deepEqual(items[0]?.notificationPayload?.source.relatedClassNames, ["向日葵班"]);
 });
 
 test("buildAdminConsultationPriorityItems filters malformed feed rows and keeps partial rows renderable", () => {
   const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
     feedItems: [
       {
         consultationId: "consult-2",
@@ -318,10 +346,12 @@ test("buildAdminConsultationPriorityItems filters malformed feed rows and keeps 
   assert.equal(items[0]?.trace.providerState, "unknown");
   assert.equal(items[0]?.trace.memoryState, "unknown");
   assert.deepEqual(items[0]?.trace.explainability, []);
+  assert.equal(items[0]?.notificationPayload?.priorityScore, 70);
 });
 
 test("buildAdminConsultationPriorityItems refuses ambiguous child-level overlay when a child has multiple consultations", () => {
   const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
     feedItems: [
       {
         consultationId: "consult-1",
@@ -374,4 +404,8 @@ test("buildAdminConsultationPriorityItems refuses ambiguous child-level overlay 
   assert.equal(items[0]?.decision.recommendedOwnerName, "陈园长");
   assert.equal(items[1]?.decision.status, "pending");
   assert.equal(items[1]?.decision.recommendedOwnerName, "陈园长");
+  assert.equal(items[0]?.dispatchBindingScope, undefined);
+  assert.equal(items[1]?.dispatchBindingScope, undefined);
+  assert.equal(items[0]?.notificationPayload?.priorityItemId, "consult-1");
+  assert.equal(items[1]?.notificationPayload?.priorityItemId, "consult-2");
 });

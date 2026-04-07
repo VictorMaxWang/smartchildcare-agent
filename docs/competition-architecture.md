@@ -2,7 +2,7 @@
 
 ## 1. 项目定位
 
-SmartChildcare Agent 是一个面向托育机构场景的移动端优先 AI 助手 / Agent 系统。它的目标不是把托育工作重新做成一个更复杂的后台，而是把教师、家长、园长最关键的判断、沟通、干预和复盘流程压缩成适合录屏和答辩的产品主路径。
+SmartChildcare Agent 是一个面向托育机构场景的移动端优先 AI 助手 / Agent 系统。它的目标不是把托育工作重新做成一个更复杂的后台，而是把教师、家长、园长最关键的判断、沟通、干预和复盘流程压缩成适合录屏、答辩和 freeze 前交接的产品主路径。
 
 当前默认代码事实以 `2026-04-07` 仓库为准。
 
@@ -28,9 +28,9 @@ SmartChildcare Agent 当前更强调：
 - Admin 首页 `app/admin/page.tsx` 围绕机构优先级、重点会诊和派单组织
 - 三个 `/agent` 页面都在把结构化上下文变成结构化行动
 
-## 3. 当前比赛叙事收敛为 4 条主线
+## 3. 当前比赛叙事收敛为 5 条展示路径
 
-### 3.1 Teacher 语音入口主线
+### 3.1 Teacher 语音主线
 
 - 起点：`/teacher`
 - 目标：把老师的碎片观察快速变成结构化草稿
@@ -64,29 +64,35 @@ SmartChildcare Agent 当前更强调：
   - `app/api/ai/high-risk-consultation/feed`
   - `backend/app/api/v1/endpoints/agents.py`
   - `components/admin/RiskPriorityBoard.tsx`
-  - `lib/agent/use-admin-consultation-feed.ts`
+  - `lib/agent/use-admin-workspace-loader.ts`
 - 亮点：会诊结果的二次决策化呈现，是第二展示位
-- 保守口径：不扩写成 `T9C` 低层字段已彻底打通
+- 保守口径：不扩写成 `T9D` / `T9C` 主战场已完成
 
-### 3.4 Parent 趋势线 / 微绘本主线
+### 3.4 Parent 趋势线主线
 
-- 起点：`/parent`
-- 目标：同时承担 wow factor 和今夜行动闭环
-- 页面：
-  - `/parent/storybook`
-  - `/parent/agent`
-  - `TrendLineChart`
-  - `StoryBookViewer`
+- 起点：`/parent/agent?child=c-1`
+- 目标：把趋势解释与今晚行动闭环压到同一页
+- 页面：`/parent/agent`、`TrendLineChart`、趋势回复卡、反馈入口
+- 关键链路：
+  - `app/api/ai/parent-trend-query`
+  - `backend/app/services/parent_trend_service.py`
+  - `components/parent/ParentTrendResponseCard.tsx`
+  - `components/parent/TrendLineChart.tsx`
+- 亮点：趋势解释 + `source` / `dataQuality` / `warnings` 显性暴露
+- 保守口径：Parent trend 必须走 FastAPI brain；`demo_snapshot` 是 backend 降级，不是本地伪造
+
+### 3.5 Parent 微绘本主线
+
+- 起点：`/parent/storybook?child=c-1`
+- 目标：用 wow factor 把成长亮点、会诊与今晚任务转成家长愿意看的入口
+- 页面：`/parent`、`/parent/storybook`、`StoryBookViewer`
 - 关键链路：
   - `app/api/ai/parent-storybook`
   - `backend/app/services/parent_storybook_service.py`
-  - `app/api/ai/parent-trend-query`
-  - `backend/app/services/parent_trend_service.py`
-- 亮点：故事化呈现 + 趋势解释 + 今夜反馈
-- 保守口径：
-  - Parent trend 必须走 FastAPI brain
-  - Parent storybook 有本地 fallback
-  - 图像 / 配音与上游 live 仍未 fully verified
+  - `backend/app/providers/story_image_provider.py`
+  - `backend/app/providers/story_audio_provider.py`
+- 亮点：3 幕故事化呈现 + image/audio/provider 状态可见
+- 保守口径：允许 `next-json-fallback` 与 media fallback；图像 / 配音与上游 live 仍未 fully verified
 
 ## 4. 架构分层
 
@@ -169,15 +175,15 @@ SmartChildcare Agent 当前更强调：
 - SessionMemory / vector store 仍是轻量骨架
 - 当前应写成“记忆中枢基础已具备，并开始接入主工作流”
 
-## 5. 真实链路与 fallback 地图
+## 5. 正常路径 / fallback / 当前允许表述
 
-| 链路 | 正常路径 | fallback / degraded 路径 | 当前应如何表述 |
-| --- | --- | --- | --- |
-| Teacher voice | UI -> `/api/ai/teacher-voice-understand` -> FastAPI -> `teacher_voice_understand` -> ASR provider | Next 本地 best-effort fallback，可继续生成结构化草稿 | 主线可演示；ASR live upstream 未 fully verified |
-| 高风险会诊 | UI -> `/api/ai/high-risk-consultation/stream` -> FastAPI stream -> orchestrator -> consultation agents | `next-stream-fallback`、demo trace、fixture | 当前最强 Agent workflow；不把 fallback 当成远端验收 |
-| Admin feed | UI -> `/api/ai/high-risk-consultation/feed` -> FastAPI feed | route unavailable 时，UI 复用本地 consultation 做展示级 fallback | 第二展示位稳定；不宣称 T9C fully 打通 |
-| Parent trend | UI -> `/api/ai/parent-trend-query` -> FastAPI trend service | Next 本地 fallback 被刻意禁用；结果中的 `demo_snapshot` 属于 backend 数据降级 | 有展示能力，但必须保留 `source` / `dataQuality` / `warnings` |
-| Parent storybook | UI -> `/api/ai/parent-storybook` -> FastAPI storybook service -> story image / audio provider | `next-json-fallback` + rule / asset / mock pipeline | wow factor 已形成，但图像 / 配音与 live provider 仍有边界 |
+| 路径 | 正常路径 | fallback / degraded | 当前允许表述 | 仍需人工验证 |
+| --- | --- | --- | --- | --- |
+| Teacher voice | UI -> `/api/ai/teacher-voice-understand` -> FastAPI -> `teacher_voice_understand` -> ASR provider | Next 本地 best-effort fallback，可继续生成结构化草稿 | 主线可演示；ASR live upstream 未 fully verified | 真录音授权、结果弹层、草稿保存 |
+| 高风险会诊 | UI -> `/api/ai/high-risk-consultation/stream` -> FastAPI stream -> orchestrator -> consultation agents | `next-stream-fallback`、demo trace、fixture | 当前最强 Agent workflow；不把 fallback 当成远端验收 | stage 顺序、`providerTrace`、`memoryMeta` |
+| Admin feed | UI -> `/api/ai/high-risk-consultation/feed` -> FastAPI feed | route unavailable 时，UI 复用本地 consultation 做展示级 fallback | 第二展示位稳定；不宣称 `T9D` / `T9C` fully 打通 | source badge、优先级条目、Agent 承接 |
+| Parent trend | UI -> `/api/ai/parent-trend-query` -> FastAPI trend service | Next 本地 fallback 禁用；`demo_snapshot` 属于 backend 数据降级 | 有展示能力，但必须保留 `source` / `dataQuality` / `warnings` | 趋势快问、图表状态、反馈入口 |
+| Parent storybook | UI -> `/api/ai/parent-storybook` -> FastAPI storybook service -> story image / audio provider | `next-json-fallback` + rule / asset / mock / media fallback | wow factor 已形成，但图像 / 配音与 live provider 仍有边界 | scene、image/audio 状态、provider 标识 |
 
 ## 6. vivo 能力映射
 
@@ -206,16 +212,17 @@ SmartChildcare Agent 当前更强调：
 1. Teacher 语音入口说明“老师如何低成本记录”
 2. 高风险会诊说明“系统如何自动组织多 Agent 决策”
 3. Admin 决策区说明“会诊结果如何进入机构级行动”
-4. Parent 微绘本 / 趋势线说明“家长如何理解、执行、反馈”
+4. Parent 微绘本说明“家长为什么愿意看、看得懂”
+5. Parent 趋势线说明“家长如何执行、反馈并回流给老师”
 
 这样可以把三端闭环讲成：
 
-`教师发现问题 -> Agent 会诊 -> 园长排序决策 -> 家长看到故事和任务 -> 家长反馈 -> 再回流给教师`
+`教师发现问题 -> Agent 会诊 -> 园长排序决策 -> 家长看到故事 -> 家长追问趋势并执行 -> 家长反馈 -> 再回流给教师`
 
 ## 8. 当前最该避免的误表述
 
 - 不要把 staging 写成 fully healthy / fully switched
-- 不要把 `vivo_llm` / `vivo_asr` / `vivo_tts` 写成 fully live
+- 不要把 `vivo_llm` / `vivo_asr` / `vivo_tts` / story image 写成 fully live
 - 不要把 Parent trend 写成“本地也能完整跑”
 - 不要把 Parent storybook 写成“图像 / 配音已真实稳定走 vivo”
-- 不要把 Admin 第二展示位写成 `T9C` 主战场已完成
+- 不要把 Admin 第二展示位写成 `T9D` / `T9C` 主战场已完成

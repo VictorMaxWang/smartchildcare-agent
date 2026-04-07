@@ -1,49 +1,180 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, MoonStar, Play, RotateCcw, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, AudioLines, LoaderCircle, Pause, Play, Radio, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ParentStoryBookResponse, ParentStoryBookScene } from "@/lib/ai/types";
+import { PARENT_STORYBOOK_PRESETS, splitStoryBookCaptionSegments } from "@/lib/agent/parent-storybook-presets";
+import type { ParentStoryBookResponse, ParentStoryBookScene, ParentStoryBookStylePreset } from "@/lib/ai/types";
 import { cn } from "@/lib/utils";
 
 type StoryBookViewerStatus = "loading" | "storybook" | "card" | "error";
+type PlaybackState = "idle" | "loading" | "playing" | "paused" | "preview";
+
+const PREVIEW_STEP_SECONDS = 1.6;
+
+function getTheme(preset: ParentStoryBookStylePreset) {
+  if (preset === "moonlit-cutout") {
+    return {
+      page: "bg-[radial-gradient(circle_at_top,_rgba(219,234,254,0.95),_rgba(191,219,254,0.8)_32%,_rgba(224,231,255,0.72)_60%,_rgba(248,250,252,1)_100%)]",
+      panel: "bg-white/76 border-white/70",
+      accent: "bg-sky-600 text-white hover:bg-sky-600/90",
+      quiet: "border-sky-200/80 bg-white/80 text-sky-900 hover:bg-sky-50",
+      dot: "bg-sky-600",
+      dotIdle: "bg-sky-100",
+      chip: "bg-sky-100 text-sky-700",
+      caption: "border-sky-200 bg-sky-50 text-sky-950",
+      progress: "bg-gradient-to-r from-sky-600 via-indigo-500 to-slate-500",
+    };
+  }
+  if (preset === "forest-crayon") {
+    return {
+      page: "bg-[radial-gradient(circle_at_top_right,_rgba(220,252,231,0.92),_rgba(187,247,208,0.75)_32%,_rgba(254,249,195,0.65)_60%,_rgba(248,250,252,1)_100%)]",
+      panel: "bg-white/76 border-white/70",
+      accent: "bg-emerald-600 text-white hover:bg-emerald-600/90",
+      quiet: "border-emerald-200/80 bg-white/80 text-emerald-900 hover:bg-emerald-50",
+      dot: "bg-emerald-600",
+      dotIdle: "bg-emerald-100",
+      chip: "bg-emerald-100 text-emerald-700",
+      caption: "border-emerald-200 bg-emerald-50 text-emerald-950",
+      progress: "bg-gradient-to-r from-emerald-600 via-lime-500 to-amber-400",
+    };
+  }
+  return {
+    page: "bg-[radial-gradient(circle_at_top_left,_rgba(255,245,220,0.95),_rgba(254,226,226,0.72)_35%,_rgba(224,242,254,0.9)_70%,_rgba(248,250,252,1)_100%)]",
+    panel: "bg-white/78 border-white/72",
+    accent: "bg-amber-500 text-white hover:bg-amber-500/90",
+    quiet: "border-amber-200/80 bg-white/80 text-amber-900 hover:bg-amber-50",
+    dot: "bg-amber-500",
+    dotIdle: "bg-amber-100",
+    chip: "bg-amber-100 text-amber-700",
+    caption: "border-amber-200 bg-amber-50 text-amber-950",
+    progress: "bg-gradient-to-r from-amber-500 via-orange-400 to-rose-400",
+  };
+}
+
+function formatSeconds(value: number) {
+  const safe = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+  const minutes = Math.floor(safe / 60).toString().padStart(2, "0");
+  const seconds = (safe % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function presetLabel(id: ParentStoryBookStylePreset) {
+  if (id === "moonlit-cutout") return "Moonlit";
+  if (id === "forest-crayon") return "Forest";
+  return "Sunrise";
+}
 
 export default function StoryBookViewer({
   status,
   story,
   errorMessage,
+  refreshMessage,
+  cacheState,
+  isRefreshing = false,
+  selectedPreset,
+  selectedPresetId,
+  onPresetChange,
+  onSelectPreset,
   onRetry,
   parentHref = "/parent",
 }: {
   status: StoryBookViewerStatus;
   story?: ParentStoryBookResponse | null;
   errorMessage?: string | null;
+  refreshMessage?: string | null;
+  cacheState?: { kind: "none" | "hit" | "saved"; savedAt?: number };
+  isRefreshing?: boolean;
+  selectedPreset?: ParentStoryBookStylePreset;
+  selectedPresetId?: ParentStoryBookStylePreset;
+  onPresetChange?: (preset: ParentStoryBookStylePreset) => void;
+  onSelectPreset?: (preset: ParentStoryBookStylePreset) => void;
   onRetry?: () => void;
   parentHref?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const previewTimeoutRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewTimerRef = useRef<number | null>(null);
+  const tokenRef = useRef(0);
+
   const [activeIndex, setActiveIndex] = useState(0);
-  const [previewSceneIndex, setPreviewSceneIndex] = useState<number | null>(null);
-  const [previewText, setPreviewText] = useState<string>("");
+  const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
+  const [playbackSceneIndex, setPlaybackSceneIndex] = useState<number | null>(null);
+  const [captionIndex, setCaptionIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   const scenes = story?.scenes ?? [];
-  const mode = story?.mode ?? status;
-  const childLabel = useMemo(() => story?.title?.replace(/\s*的.*$/, "") || "今日", [story]);
+  const presetId = selectedPreset ?? selectedPresetId ?? story?.stylePreset ?? "sunrise-watercolor";
+  const theme = getTheme(presetId);
+  const isCard = (story?.mode ?? status) === "card";
+  const cacheBadge = cacheState?.kind ?? "none";
+  const handlePresetSelect = onPresetChange ?? onSelectPreset;
+
+  function invalidate() {
+    tokenRef.current += 1;
+    return tokenRef.current;
+  }
+
+  function clearPreview() {
+    if (previewTimerRef.current) {
+      window.clearInterval(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+  }
+
+  function clearAudio() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.onloadedmetadata = null;
+    audio.onplaying = null;
+    audio.onpause = null;
+    audio.ontimeupdate = null;
+    audio.onended = null;
+    audio.onerror = null;
+    audio.removeAttribute("src");
+    audio.load();
+    audioRef.current = null;
+  }
+
+  function stopPlayback() {
+    invalidate();
+    clearPreview();
+    clearAudio();
+    setPlaybackState("idle");
+    setPlaybackSceneIndex(null);
+    setCaptionIndex(0);
+    setProgress(0);
+    setCurrentTime(0);
+    setDuration(0);
+  }
 
   useEffect(() => {
+    return () => {
+      invalidate();
+      clearPreview();
+      clearAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    invalidate();
+    clearPreview();
+    clearAudio();
     const resetTimer = window.setTimeout(() => {
+      setPlaybackState("idle");
+      setPlaybackSceneIndex(null);
+      setCaptionIndex(0);
+      setProgress(0);
+      setCurrentTime(0);
+      setDuration(0);
       setActiveIndex(0);
-      setPreviewSceneIndex(null);
-      setPreviewText("");
-      if (previewTimeoutRef.current) {
-        window.clearTimeout(previewTimeoutRef.current);
-        previewTimeoutRef.current = null;
-      }
     }, 0);
 
     return () => {
@@ -51,15 +182,7 @@ export default function StoryBookViewer({
     };
   }, [story?.storyId, status]);
 
-  useEffect(() => {
-    return () => {
-      if (previewTimeoutRef.current) {
-        window.clearTimeout(previewTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  function scrollToIndex(index: number) {
+  function scrollToScene(index: number) {
     const container = scrollRef.current;
     if (!container) return;
     const nextChild = container.children.item(index) as HTMLElement | null;
@@ -67,455 +190,289 @@ export default function StoryBookViewer({
     setActiveIndex(index);
   }
 
-  function handleScroll() {
-    const container = scrollRef.current;
-    if (!container || container.children.length === 0) return;
-    const width = container.clientWidth || 1;
-    const nextIndex = Math.round(container.scrollLeft / width);
-    if (nextIndex !== activeIndex) {
-      setActiveIndex(Math.min(container.children.length - 1, Math.max(0, nextIndex)));
-    }
+  function startPreview(scene: ParentStoryBookScene, index: number) {
+    const token = invalidate();
+    clearAudio();
+    clearPreview();
+    const segments = splitStoryBookCaptionSegments(scene.audioScript || scene.sceneText);
+    const safeSegments = segments.length > 0 ? segments : [scene.audioScript || scene.sceneText];
+    setPlaybackSceneIndex(index);
+    setPlaybackState("preview");
+    setCaptionIndex(0);
+    setProgress(safeSegments.length ? 1 / safeSegments.length : 1);
+    setCurrentTime(0);
+    setDuration(safeSegments.length * PREVIEW_STEP_SECONDS);
+
+    let step = 0;
+    previewTimerRef.current = window.setInterval(() => {
+      if (tokenRef.current !== token) return;
+      step += 1;
+      if (step >= safeSegments.length) {
+        stopPlayback();
+        return;
+      }
+      setCaptionIndex(step);
+      setProgress((step + 1) / safeSegments.length);
+      setCurrentTime(step * PREVIEW_STEP_SECONDS);
+    }, PREVIEW_STEP_SECONDS * 1000);
   }
 
-  function triggerPreview(scene: ParentStoryBookScene, index: number) {
-    if (previewTimeoutRef.current) {
-      window.clearTimeout(previewTimeoutRef.current);
+  function startAudio(scene: ParentStoryBookScene, index: number) {
+    if (!scene.audioUrl) {
+      startPreview(scene, index);
+      return;
     }
+    const token = invalidate();
+    clearPreview();
+    clearAudio();
+    const audio = new Audio(scene.audioUrl);
+    const segments = splitStoryBookCaptionSegments(scene.audioScript || scene.sceneText);
+    const safeSegments = segments.length > 0 ? segments : [scene.audioScript || scene.sceneText];
+    audioRef.current = audio;
+    setPlaybackSceneIndex(index);
+    setPlaybackState("loading");
+    setCaptionIndex(0);
+    setProgress(0);
+    setCurrentTime(0);
+    setDuration(0);
 
-    setPreviewSceneIndex(index);
-    setPreviewText(scene.audioScript);
-
-    previewTimeoutRef.current = window.setTimeout(() => {
-      setPreviewSceneIndex(null);
-      setPreviewText("");
-      previewTimeoutRef.current = null;
-    }, 4200);
+    audio.onloadedmetadata = () => {
+      if (tokenRef.current !== token) return;
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : safeSegments.length * PREVIEW_STEP_SECONDS);
+    };
+    audio.onplaying = () => {
+      if (tokenRef.current !== token) return;
+      setPlaybackState("playing");
+    };
+    audio.onpause = () => {
+      if (tokenRef.current !== token || audio.ended) return;
+      setPlaybackState("paused");
+    };
+    audio.ontimeupdate = () => {
+      if (tokenRef.current !== token) return;
+      const safeDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : safeSegments.length * PREVIEW_STEP_SECONDS;
+      const nextProgress = safeDuration > 0 ? Math.min(audio.currentTime / safeDuration, 1) : 0;
+      const nextCaption = safeSegments.length > 1 ? Math.min(safeSegments.length - 1, Math.floor(nextProgress * safeSegments.length)) : 0;
+      setDuration(safeDuration);
+      setCurrentTime(audio.currentTime);
+      setProgress(nextProgress);
+      setCaptionIndex(nextCaption);
+    };
+    audio.onended = () => {
+      if (tokenRef.current !== token) return;
+      stopPlayback();
+    };
+    audio.onerror = () => {
+      if (tokenRef.current !== token) return;
+      startPreview(scene, index);
+    };
+    audio.play().catch(() => {
+      if (tokenRef.current !== token) return;
+      startPreview(scene, index);
+    });
   }
 
   function handlePlay(scene: ParentStoryBookScene, index: number) {
-    if (scene.audioStatus === "ready" && scene.audioUrl) {
-      try {
-        const audio = new Audio(scene.audioUrl);
-        audio.play().catch(() => triggerPreview(scene, index));
-        setPreviewSceneIndex(index);
-        setPreviewText(scene.audioScript);
-        previewTimeoutRef.current = window.setTimeout(() => {
-          setPreviewSceneIndex(null);
-          setPreviewText("");
-          previewTimeoutRef.current = null;
-        }, 5000);
+    if (playbackSceneIndex === index) {
+      if (playbackState === "playing" || playbackState === "loading") {
+        audioRef.current?.pause();
         return;
-      } catch {
-        // fall through to preview mode
+      }
+      if (playbackState === "paused" && audioRef.current) {
+        void audioRef.current.play().catch(() => startPreview(scene, index));
+        return;
+      }
+      if (playbackState === "preview") {
+        stopPlayback();
+        return;
       }
     }
-
-    triggerPreview(scene, index);
+    scrollToScene(index);
+    if (scene.audioStatus === "ready" && scene.audioUrl) {
+      startAudio(scene, index);
+      return;
+    }
+    startPreview(scene, index);
   }
 
   if (status === "loading") {
-    return <LoadingState parentHref={parentHref} />;
+    return <StateShell kind="loading" parentHref={parentHref} pageClass={theme.page} panelClass={theme.panel} quietClass={theme.quiet} />;
   }
-
-  if (status === "error") {
-    return (
-      <ErrorState
-        parentHref={parentHref}
-        errorMessage={errorMessage}
-        onRetry={onRetry}
-      />
-    );
-  }
-
-  if (!story) {
-    return <ErrorState parentHref={parentHref} errorMessage="暂时没有可展示的绘本内容。" onRetry={onRetry} />;
-  }
-
-  if (mode === "card") {
-    return (
-      <div className="min-h-[100svh] bg-[radial-gradient(circle_at_top_left,_rgba(255,247,237,0.98),_rgba(241,245,249,1)_40%,_rgba(226,232,240,1)_100%)] px-4 py-4 sm:px-6 sm:py-6">
-        <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-3xl flex-col justify-between gap-4">
-          <TopBar story={story} parentHref={parentHref} />
-          <Card className="overflow-hidden border-white/80 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
-            <CardContent className="space-y-4 p-4 sm:p-6">
-              <SceneArtwork scene={story.scenes[0]} active />
-              <div className="flex items-center gap-2">
-                <Badge variant="info">成长小卡</Badge>
-                <Badge variant="secondary">{story.providerMeta.provider}</Badge>
-              </div>
-              <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{story.title}</h2>
-              <p className="text-sm leading-7 text-slate-600">{story.summary}</p>
-              <div className="rounded-3xl bg-slate-50 p-4">
-                <p className="text-xs font-medium tracking-[0.16em] text-slate-400">MORAL</p>
-                <p className="mt-2 text-base leading-7 text-slate-800">{story.moral}</p>
-              </div>
-              <div className="rounded-3xl border border-amber-100 bg-amber-50/80 p-4">
-                <p className="text-xs font-medium tracking-[0.16em] text-amber-700">PARENT NOTE</p>
-                <p className="mt-2 text-sm leading-7 text-amber-900">{story.parentNote}</p>
-              </div>
-              <ScenePlayBlock
-                scene={story.scenes[0]}
-                index={0}
-                previewSceneIndex={previewSceneIndex}
-                previewText={previewText}
-                onPlay={handlePlay}
-              />
-            </CardContent>
-          </Card>
-          <FooterActions parentHref={parentHref} onRetry={onRetry} />
-        </div>
-      </div>
-    );
+  if (status === "error" || !story) {
+    return <StateShell kind="error" parentHref={parentHref} pageClass={theme.page} panelClass={theme.panel} quietClass={theme.quiet} accentClass={theme.accent} errorMessage={errorMessage} onRetry={onRetry} />;
   }
 
   return (
-    <div className="min-h-[100svh] bg-[radial-gradient(circle_at_top,_rgba(255,251,235,0.96),_rgba(224,242,254,0.9)_46%,_rgba(241,245,249,1)_100%)] px-4 py-4 sm:px-6 sm:py-6">
+    <div className={cn("min-h-[100svh] px-4 py-4 sm:px-6 sm:py-6", theme.page)}>
       <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-3xl flex-col gap-4">
-        <TopBar story={story} parentHref={parentHref} />
+        <div className="flex items-center justify-between gap-3">
+          <Button asChild variant="outline" className={cn("rounded-full shadow-sm", theme.quiet)}>
+            <Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />Home</Link>
+          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant="info"><Sparkles className="mr-1.5 h-3.5 w-3.5" />{isCard ? "Story Card" : "Demo Storybook"}</Badge>
+            <Badge variant={story.providerMeta.mode === "live" ? "success" : story.providerMeta.mode === "mixed" ? "warning" : "secondary"}><Radio className="mr-1.5 h-3.5 w-3.5" />{story.providerMeta.mode}</Badge>
+          </div>
+        </div>
 
-        <Card className="overflow-hidden border-white/80 bg-white/85 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur">
-          <CardHeader className="space-y-4 pb-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="info">三幕微绘本</Badge>
-                  <Badge variant={story.fallback ? "warning" : "success"}>
-                    {story.fallback ? "规则生成" : "AI 绘本"}
-                  </Badge>
-                  <Badge variant="secondary">{story.providerMeta.imageProvider}</Badge>
-                </div>
-                <CardTitle className="text-2xl tracking-tight text-slate-900">{story.title}</CardTitle>
-                <CardDescription className="max-w-2xl text-sm leading-6 text-slate-600">
-                  {story.summary}
-                </CardDescription>
+        <Card className={cn("overflow-hidden backdrop-blur-xl", theme.panel)}>
+          <CardHeader className="space-y-4 pb-4">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={story.cacheMeta?.storyResponse === "hit" ? "success" : "outline"}>cache {story.cacheMeta?.storyResponse ?? "bypass"}</Badge>
+                {story.providerMeta.cacheHitCount ? <Badge variant="success">provider cache {story.providerMeta.cacheHitCount}</Badge> : null}
+                <Badge variant="secondary">{story.providerMeta.imageProvider}</Badge>
+                <Badge variant="secondary">{story.providerMeta.audioProvider}</Badge>
               </div>
-              <div className="hidden sm:block">
-                <Badge variant="outline" className="rounded-full px-3 py-1">
-                  {activeIndex + 1}/{scenes.length}
-                </Badge>
-              </div>
+              <CardTitle className="text-2xl tracking-tight text-slate-950">{story.title}</CardTitle>
+              <CardDescription className="max-w-2xl text-sm leading-6 text-slate-600">{story.summary}</CardDescription>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {scenes.map((scene, index) => (
-                <button
-                  key={scene.sceneIndex}
-                  type="button"
-                  onClick={() => scrollToIndex(index)}
-                  className={cn(
-                    "h-2.5 rounded-full transition-all",
-                    index === activeIndex ? "w-8 bg-slate-900" : "w-2.5 bg-slate-300"
-                  )}
-                  aria-label={`切换到第 ${index + 1} 幕`}
-                />
-              ))}
+            <div className="space-y-3 rounded-[28px] border border-white/60 bg-white/55 p-3">
+              <div className="flex flex-wrap gap-2">
+                {PARENT_STORYBOOK_PRESETS.map((item) => (
+                  <button key={item.id} type="button" onClick={() => handlePresetSelect?.(item.id)} className={cn("rounded-2xl border px-3 py-2 text-left text-sm transition-all", item.id === presetId ? "border-slate-900 bg-white text-slate-950 shadow-sm" : "border-white/60 bg-white/55 text-slate-600")}>
+                    <div className="font-semibold">{presetLabel(item.id)}</div>
+                    <div className="mt-1 text-xs opacity-80">{item.id}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs leading-6 text-slate-500">Switch preset for recording. Theme stays visible even when media falls back.</p>
             </div>
+
+            {refreshMessage ? <div className="rounded-3xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm leading-6 text-amber-900">{refreshMessage}</div> : null}
+            {isRefreshing ? <div className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" />Refreshing preset while keeping the previous story visible.</div> : null}
+            {cacheBadge !== "none" ? <div className="text-xs text-slate-500">client cache {cacheBadge}</div> : null}
           </CardHeader>
 
           <CardContent className="pb-6">
-            <div
-              ref={scrollRef}
-              onScroll={handleScroll}
-              className="storybook-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
-            >
-              {scenes.map((scene, index) => (
-                <article
-                  key={scene.sceneIndex}
-                  className="min-w-full snap-center rounded-[28px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 p-4 shadow-sm"
-                >
-                  <SceneHeader scene={scene} index={index} active={index === activeIndex} />
-                  <div className="mt-4">
-                    <SceneArtwork scene={scene} active={index === activeIndex} />
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    <p className="text-lg font-semibold text-slate-900">{scene.sceneTitle}</p>
-                    <p className="text-sm leading-7 text-slate-600">{scene.sceneText}</p>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant="secondary">{scene.voiceStyle}</Badge>
-                      <Badge variant={scene.imageStatus === "ready" ? "success" : "warning"}>{scene.imageStatus}</Badge>
-                      <Badge variant={scene.audioStatus === "ready" ? "success" : "warning"}>{scene.audioStatus}</Badge>
+            <div ref={scrollRef} onScroll={() => {
+              const node = scrollRef.current;
+              if (!node) return;
+              const nextIndex = Math.round(node.scrollLeft / (node.clientWidth || 1));
+              if (nextIndex !== activeIndex) setActiveIndex(nextIndex);
+            }} className={cn("storybook-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-2", isCard ? "pointer-events-none overflow-hidden" : "")}>
+              {scenes.map((scene, index) => {
+                const isActive = index === activeIndex;
+                const isPlaying = playbackSceneIndex === index && playbackState !== "idle";
+                const segments = splitStoryBookCaptionSegments(scene.audioScript || scene.sceneText);
+                return (
+                  <article key={scene.sceneIndex} className={cn("min-w-full snap-center rounded-[30px] border border-white/60 p-4 transition-all duration-300 sm:p-5", isActive ? "translate-y-0 scale-100 bg-white/84 shadow-[0_22px_70px_rgba(15,23,42,0.12)]" : "translate-y-1 scale-[0.985] bg-white/68 shadow-[0_12px_40px_rgba(15,23,42,0.06)]")}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={isActive ? "success" : "secondary"}>Scene {index + 1}</Badge>
+                        <Badge variant="outline" className={theme.chip}>{scene.highlightSource}</Badge>
+                        {isPlaying ? <Badge variant="info"><AudioLines className="mr-1.5 h-3.5 w-3.5" />narration</Badge> : null}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={scene.imageStatus === "ready" ? "success" : "warning"}>{scene.imageStatus}</Badge>
+                        <Badge variant={scene.audioStatus === "ready" ? "success" : "warning"}>{scene.audioStatus}</Badge>
+                      </div>
                     </div>
-                  </div>
-                  <ScenePlayBlock
-                    scene={scene}
-                    index={index}
-                    previewSceneIndex={previewSceneIndex}
-                    previewText={previewText}
-                    onPlay={handlePlay}
-                  />
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-full"
-                      onClick={() => scrollToIndex(Math.max(0, index - 1))}
-                      disabled={index === 0}
-                    >
-                      <ArrowLeft className="mr-2 h-4 w-4" />
-                      上一幕
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="premium"
-                      className="rounded-full"
-                      onClick={() => handlePlay(scene, index)}
-                    >
-                      <Play className="mr-2 h-4 w-4" />
-                      {scene.audioStatus === "ready" ? "播放旁白" : "试听预览"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-full"
-                      onClick={() => scrollToIndex(Math.min(scenes.length - 1, index + 1))}
-                      disabled={index === scenes.length - 1}
-                    >
-                      下一幕
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Button>
-                  </div>
-                </article>
-              ))}
+
+                    <div className="relative mt-4 h-64 overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-sm sm:h-80">
+                      <Image src={scene.imageUrl || scene.assetRef || "/storybook/card.svg"} alt={scene.sceneTitle} fill sizes="(max-width: 640px) 100vw, 768px" className={cn("object-cover transition-transform duration-500", isActive ? "scale-[1.01]" : "scale-100")} unoptimized />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/55 to-transparent px-4 py-4"><p className="text-sm font-semibold text-white">{scene.sceneTitle}</p></div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <p className="text-base leading-7 text-slate-700">{scene.sceneText}</p>
+                      <div className="rounded-[28px] border border-white/70 bg-white/72 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-950">Caption Follow</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {scene.audioStatus === "ready" ? isPlaying ? playbackState === "paused" ? "Real audio paused" : "Real audio playing" : "Real audio ready" : isPlaying ? "Caption preview running" : "Preview mode"}
+                            </p>
+                          </div>
+                          <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => handlePlay(scene, index)}>
+                            {isPlaying && playbackState !== "paused" ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
+                            {scene.audioStatus === "ready" ? "Narration" : "Preview"}
+                          </Button>
+                        </div>
+
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className={cn("h-full rounded-full transition-[width] duration-300", theme.progress)} style={{ width: `${Math.max(playbackSceneIndex === index ? progress * 100 : 0, isPlaying ? 8 : 0)}%` }} /></div>
+                        <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-slate-400"><span>{scene.voiceStyle}</span><span>{playbackSceneIndex === index && duration > 0 ? `${formatSeconds(currentTime)} / ${formatSeconds(duration)}` : "ready"}</span></div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {(segments.length > 0 ? segments : [scene.sceneText]).map((segment, segmentIndex) => (
+                            <span key={`${scene.sceneIndex}-${segmentIndex}`} className={cn("rounded-2xl border px-3 py-2 text-sm leading-6 transition-all duration-300", isPlaying && segmentIndex === captionIndex ? theme.caption : "border-white/60 bg-white/70 text-slate-600")}>{segment}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                      <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => scrollToScene(Math.max(0, index - 1))} disabled={index === 0}><ArrowLeft className="mr-2 h-4 w-4" />Prev</Button>
+                      <Button type="button" className={cn("rounded-full shadow-sm", theme.accent)} onClick={() => handlePlay(scene, index)}>
+                        {isPlaying && playbackState !== "paused" ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
+                        {scene.audioStatus === "ready" ? isPlaying && playbackState !== "paused" ? "Pause" : playbackState === "paused" && playbackSceneIndex === index ? "Resume" : "Play" : isPlaying ? "Stop Preview" : "Preview"}
+                      </Button>
+                      <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => scrollToScene(Math.min(scenes.length - 1, index + 1))} disabled={index === scenes.length - 1}>Next<ArrowRight className="ml-2 h-4 w-4" /></Button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline">来源：{story.providerMeta.provider}</Badge>
-                <Badge variant="outline">场景 {scenes.length} 幕</Badge>
-                <Badge variant={story.fallback ? "warning" : "success"}>
-                  {story.fallback ? "本地回退可演示" : "可继续追问"}
-                </Badge>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button asChild variant="outline" className="rounded-full">
-                  <Link href={parentHref}>
-                    <ArrowLeft className="mr-2 h-4 w-4" />
-                    返回家长首页
-                  </Link>
-                </Button>
-                {onRetry ? (
-                  <Button type="button" variant="premium" className="rounded-full" onClick={onRetry}>
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    重新生成
-                  </Button>
-                ) : null}
-              </div>
+            {!isCard ? <div className="mt-4 flex items-center justify-between gap-3"><div className="flex flex-wrap gap-2">{scenes.map((scene, index) => <button key={scene.sceneIndex} type="button" onClick={() => scrollToScene(index)} className={cn("h-2.5 rounded-full transition-all", index === activeIndex ? `w-10 ${theme.dot}` : `w-2.5 ${theme.dotIdle}`)} aria-label={`Go to scene ${index + 1}`} />)}</div><p className="text-xs text-slate-500">Swipe or tap buttons. Motion stays light for mobile.</p></div> : null}
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <Card className={cn("border-white/70", theme.panel)}><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-2"><Badge variant={story.providerMeta.realProvider ? "success" : "warning"}>{story.providerMeta.realProvider ? "Real provider involved" : "Fallback ready"}</Badge><Badge variant="outline">scene {story.providerMeta.sceneCount}</Badge><Badge variant="outline">highlight {story.providerMeta.highlightCount}</Badge></div><p className="text-sm leading-7 text-slate-600">{story.providerMeta.mode === "live" ? "All scenes have real image and real narration." : story.providerMeta.mode === "mixed" ? "Some scenes hit real media, some stayed on fallback. This is the intended mixed demo state." : "The whole story is fallback, but the demo flow remains intact."}</p></CardContent></Card>
+              <Card className={cn("border-white/70", theme.panel)}><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-2"><Badge variant="outline">audio {story.cacheMeta?.audioDelivery ?? "preview-only"}</Badge><Badge variant="outline">response {story.cacheMeta?.storyResponse ?? "bypass"}</Badge><Badge variant="outline">TTL {Math.round((story.providerMeta.cacheWindowSeconds ?? 0) / 60)}m</Badge></div><p className="text-sm leading-7 text-slate-600">{story.cacheMeta?.audioDelivery === "stream-url" ? "Ready audio is delivered through a short media URL, not a large data URL." : "No ready audio is available, so the viewer falls back to subtitle preview."}</p></CardContent></Card>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-white/80 bg-white/70 shadow-sm backdrop-blur">
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
-              <MoonStar className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-slate-900">睡前一句话</p>
-              <p className="mt-1 truncate text-sm text-slate-600">{story.parentNote}</p>
-            </div>
-            <Badge variant="secondary" className="shrink-0">
-              {childLabel}
-            </Badge>
-          </CardContent>
-        </Card>
-
-        <FooterActions parentHref={parentHref} onRetry={onRetry} />
-      </div>
-    </div>
-  );
-}
-
-function TopBar({ story, parentHref }: { story: ParentStoryBookResponse; parentHref: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <Button asChild variant="outline" className="rounded-full border-white/70 bg-white/80 shadow-sm">
-        <Link href={parentHref}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          家长首页
-        </Link>
-      </Button>
-      <div className="flex items-center gap-2">
-        <Badge variant="info" className="rounded-full px-3 py-1">
-          <Sparkles className="mr-1 h-3.5 w-3.5" />
-          {story.mode === "storybook" ? "今日微绘本" : "成长故事卡"}
-        </Badge>
-      </div>
-    </div>
-  );
-}
-
-function SceneHeader({
-  scene,
-  index,
-  active,
-}: {
-  scene: ParentStoryBookScene;
-  index: number;
-  active: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <Badge variant={active ? "success" : "secondary"}>第 {index + 1} 幕</Badge>
-        <Badge variant="outline">{scene.highlightSource}</Badge>
-      </div>
-      <Badge variant="outline">{scene.sceneIndex}</Badge>
-    </div>
-  );
-}
-
-function SceneArtwork({ scene, active }: { scene: ParentStoryBookScene; active: boolean }) {
-  const imageSrc = scene.imageUrl || scene.assetRef || "/storybook/card.svg";
-  return (
-    <div
-      className={cn(
-        "relative h-60 overflow-hidden rounded-[24px] border border-slate-100 bg-white sm:h-72",
-        active ? "shadow-[0_16px_60px_rgba(15,23,42,0.12)]" : "shadow-sm"
-      )}
-    >
-      <Image
-        src={imageSrc}
-        alt={scene.sceneTitle}
-        fill
-        sizes="(max-width: 640px) 100vw, 768px"
-        className="object-cover"
-        unoptimized
-      />
-      <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-slate-950/60 to-transparent px-4 py-3">
-        <p className="text-sm font-medium text-white/90">{scene.sceneTitle}</p>
-      </div>
-    </div>
-  );
-}
-
-function ScenePlayBlock({
-  scene,
-  index,
-  previewSceneIndex,
-  previewText,
-  onPlay,
-}: {
-  scene: ParentStoryBookScene;
-  index: number;
-  previewSceneIndex: number | null;
-  previewText: string;
-  onPlay: (scene: ParentStoryBookScene, index: number) => void;
-}) {
-  const isPreviewing = previewSceneIndex === index;
-
-  return (
-    <div className="mt-4 rounded-3xl border border-slate-100 bg-white/85 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">旁白播放</p>
-          <p className="text-xs text-slate-500">{scene.audioStatus === "ready" ? "真实音频可播" : "当前使用预览文案"}</p>
+        <div className="flex items-center justify-between gap-3">
+          <Button asChild variant="outline" className={cn("rounded-full", theme.quiet)}><Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />Back</Link></Button>
+          {onRetry ? <Button type="button" className={cn("rounded-full shadow-sm", theme.accent)} onClick={onRetry}><RotateCcw className="mr-2 h-4 w-4" />Retry</Button> : null}
         </div>
-        <Button type="button" variant="outline" className="rounded-full" onClick={() => onPlay(scene, index)}>
-          <Play className="mr-2 h-4 w-4" />
-          {scene.audioStatus === "ready" ? "播放" : "预览"}
-        </Button>
-      </div>
-      {isPreviewing ? (
-        <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-700">
-          {previewText}
-        </div>
-      ) : (
-        <div className="mt-3 rounded-2xl border border-dashed border-slate-200 p-3 text-sm leading-6 text-slate-500">
-          点击播放会先展示一段可录屏的讲述预览。
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FooterActions({ parentHref, onRetry }: { parentHref: string; onRetry?: () => void }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <Button asChild variant="outline" className="rounded-full">
-        <Link href={parentHref}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          返回家长页
-        </Link>
-      </Button>
-      {onRetry ? (
-        <Button type="button" variant="premium" className="rounded-full" onClick={onRetry}>
-          <RotateCcw className="mr-2 h-4 w-4" />
-          重试
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
-function LoadingState({ parentHref }: { parentHref: string }) {
-  return (
-    <div className="min-h-[100svh] bg-[radial-gradient(circle_at_top,_rgba(255,251,235,0.96),_rgba(241,245,249,1)_100%)] px-4 py-4 sm:px-6 sm:py-6">
-      <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-3xl flex-col justify-between gap-4">
-        <TopBarSkeleton parentHref={parentHref} />
-        <Card className="border-white/80 bg-white/85 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-          <CardContent className="space-y-4 p-4 sm:p-6">
-            <div className="h-6 w-40 animate-pulse rounded-full bg-slate-200" />
-            <div className="h-4 w-full animate-pulse rounded-full bg-slate-200" />
-            <div className="h-4 w-5/6 animate-pulse rounded-full bg-slate-200" />
-            <div className="h-64 rounded-[24px] bg-slate-100" />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="h-12 animate-pulse rounded-2xl bg-slate-100" />
-              <div className="h-12 animate-pulse rounded-2xl bg-slate-100" />
-              <div className="h-12 animate-pulse rounded-2xl bg-slate-100" />
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );
 }
 
-function ErrorState({
+function StateShell({
+  kind,
   parentHref,
+  pageClass,
+  panelClass,
+  quietClass,
+  accentClass,
   errorMessage,
   onRetry,
 }: {
+  kind: "loading" | "error";
   parentHref: string;
+  pageClass: string;
+  panelClass: string;
+  quietClass: string;
+  accentClass?: string;
   errorMessage?: string | null;
   onRetry?: () => void;
 }) {
+  if (kind === "loading") {
+    return (
+      <div className={cn("min-h-[100svh] px-4 py-4 sm:px-6 sm:py-6", pageClass)}>
+        <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-3xl flex-col justify-between gap-4">
+          <Button asChild variant="outline" className={cn("w-fit rounded-full", quietClass)}><Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />Home</Link></Button>
+          <Card className={cn("backdrop-blur-xl", panelClass)}><CardContent className="space-y-4 p-4 sm:p-6"><div className="h-6 w-40 animate-pulse rounded-full bg-slate-200" /><div className="h-4 w-full animate-pulse rounded-full bg-slate-200" /><div className="h-4 w-5/6 animate-pulse rounded-full bg-slate-200" /><div className="h-72 rounded-[28px] bg-slate-100" /><div className="grid gap-3 sm:grid-cols-3"><div className="h-14 animate-pulse rounded-2xl bg-slate-100" /><div className="h-14 animate-pulse rounded-2xl bg-slate-100" /><div className="h-14 animate-pulse rounded-2xl bg-slate-100" /></div></CardContent></Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-[100svh] bg-[radial-gradient(circle_at_top,_rgba(254,242,242,0.95),_rgba(241,245,249,1)_100%)] px-4 py-4 sm:px-6 sm:py-6">
+    <div className={cn("min-h-[100svh] px-4 py-4 sm:px-6 sm:py-6", pageClass)}>
       <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-2xl flex-col justify-center gap-4">
-        <Card className="border-rose-100 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-          <CardHeader>
-            <CardTitle className="text-2xl text-slate-900">绘本暂时没生成出来</CardTitle>
-            <CardDescription className="text-sm leading-6 text-slate-600">
-              {errorMessage ?? "我们先回到家长首页，再试一次。"}
-            </CardDescription>
-          </CardHeader>
+        <Card className={cn("backdrop-blur-xl", panelClass)}>
+          <CardHeader><CardTitle className="text-2xl text-slate-950">Storybook unavailable</CardTitle><CardDescription className="text-sm leading-6 text-slate-600">{errorMessage ?? "Go back and try again."}</CardDescription></CardHeader>
           <CardContent className="flex flex-wrap gap-3">
-            <Button asChild variant="outline" className="rounded-full">
-              <Link href={parentHref}>返回家长首页</Link>
-            </Button>
-            {onRetry ? (
-              <Button type="button" variant="premium" className="rounded-full" onClick={onRetry}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                再试一次
-              </Button>
-            ) : null}
+            <Button asChild variant="outline" className={cn("rounded-full", quietClass)}><Link href={parentHref}>Back home</Link></Button>
+            {onRetry ? <Button type="button" className={cn("rounded-full shadow-sm", accentClass)} onClick={onRetry}><RotateCcw className="mr-2 h-4 w-4" />Retry</Button> : null}
           </CardContent>
         </Card>
       </div>
-    </div>
-  );
-}
-
-function TopBarSkeleton({ parentHref }: { parentHref: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <Button asChild variant="outline" className="rounded-full border-white/70 bg-white/80 shadow-sm">
-        <Link href={parentHref}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          家长首页
-        </Link>
-      </Button>
-      <div className="h-9 w-28 animate-pulse rounded-full bg-white/80" />
     </div>
   );
 }

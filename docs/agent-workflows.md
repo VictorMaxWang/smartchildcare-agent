@@ -1,8 +1,8 @@
 # SmartChildcare Agent 工作流地图
 
-本文只整理当前 4 条主链的真实代码落点、route、service、provider / memory 与 fallback 边界，用于交接和后续 freeze。
+本文只整理 freeze 前最关键的 5 条展示路径：真实代码落点、route、service、provider / memory 与 fallback 边界，用于交接、录屏和答辩。
 
-## 1. Teacher 语音入口主线
+## 1. Teacher 语音主线
 
 ### UI 页面
 
@@ -63,7 +63,7 @@
 
 ### Fallback 边界
 
-- `trace=debug&traceCase=...` 只用于页面级演练
+- `trace=debug&traceCase=...` 只用于页面演练
 - `providerTrace.transport=next-stream-fallback` 说明走了页面级 fallback
 - 当前不能把 debug case / fallback 讲成远端 brain 全链路验收
 
@@ -74,7 +74,6 @@
 - `app/admin/page.tsx`
 - `app/admin/agent/page.tsx`
 - `components/admin/RiskPriorityBoard.tsx`
-- `lib/agent/use-admin-consultation-feed.ts`
 
 ### Next route
 
@@ -97,13 +96,12 @@
 - feed route 本身在 brain 不可用时返回 unavailable
 - UI 层会根据 `latestConsultations` 做展示级 local fallback
 - 当前应表述为“Admin 第二展示位稳定可演示”
-- 当前不应表述为 `T9C` 已彻底打通
+- 当前不应表述为 `T9D` / `T9C` 已彻底打通
 
 ## 4. Parent 趋势线主线
 
 ### UI 页面
 
-- `app/parent/page.tsx`
 - `app/parent/agent/page.tsx`
 - `components/parent/ParentTrendResponseCard.tsx`
 - `components/parent/TrendLineChart.tsx`
@@ -127,7 +125,7 @@
 ### Fallback 边界
 
 - Next 本地 fallback 被明确禁用
-- 如果 brain 不可用，route 会直接返回 503
+- 如果 brain 不可用，route 会直接返回 `503`
 - `demo_snapshot` 属于 backend 结果降级，不是前端本地伪造数据
 - 录屏时必须保留 `source`、`fallback`、`dataQuality`、`warnings`
 
@@ -159,7 +157,7 @@
 ### Fallback 边界
 
 - Next route 在 brain 不可用时支持 `next-json-fallback`
-- service 允许 rule / asset / mock / fallback
+- service 允许 rule / asset / mock / media fallback
 - 当前可表述为“Parent 微绘本已具展示能力并形成 wow factor”
 - 当前不可表述为“图像 / 配音上游 fully live”
 
@@ -179,7 +177,7 @@
 - vivo 已 fully live
 - Parent trend 有完整本地 fallback
 - Parent storybook 图像 / 配音已完成真实上游验收
-- Admin 第二展示位等于 `T9C` 已结束
+- Admin 第二展示位等于 `T9D` / `T9C` 已结束
 
 ## 7. 当前建议的最小人工 walkthrough
 

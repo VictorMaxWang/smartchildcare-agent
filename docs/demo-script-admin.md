@@ -1,5 +1,7 @@
 # Admin Demo Script
 
+本稿服从 `docs/demo-script.md`，只保留 Admin 决策区的 drill-down。
+
 ## 目标
 
 - 把高风险会诊结果转成园长能执行的决策卡
@@ -7,7 +9,7 @@
 
 ## 主路线：Admin 决策区
 
-### 起点页面
+### 起点
 
 - `/admin`
 
@@ -25,7 +27,7 @@
 - “这里的目标不是做一个更复杂的园务后台，而是把会诊结果压缩成园长办公会式的决策卡。”
 - “所以 Admin 是第二展示位，它承接前面的会诊，而不是和会诊抢主线。”
 
-### 画面必须保留
+### 镜头必须保留
 
 - `RiskPriorityBoard`
 - source badge
@@ -40,7 +42,7 @@
 
 ### fallback 讲法
 
-- “如果这里出现 local fallback，说明展示层在复用现有 consultation 结果，不代表 T9C 或远端聚合已经 fully 打通。”
+- “如果这里出现 local fallback，说明展示层在复用现有 consultation 结果，不代表 `T9D` / `T9C` 或远端聚合已经 fully 打通。”
 
 ## Admin 段收尾
 

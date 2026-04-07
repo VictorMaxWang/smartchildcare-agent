@@ -529,6 +529,10 @@ export interface ParentMessageReflexionResponse {
 export type ParentStoryBookMode = "storybook" | "card";
 export type ParentStoryBookResultSource = "ai" | "fallback" | "mock" | "rule" | "vivo";
 export type ParentStoryBookMediaStatus = "ready" | "mock" | "fallback" | "empty";
+export type ParentStoryBookStylePreset =
+  | "sunrise-watercolor"
+  | "moonlit-cutout"
+  | "forest-crayon";
 export type ParentStoryBookHighlightKind =
   | "todayGrowth"
   | "warningSuggestion"
@@ -551,11 +555,21 @@ export interface ParentStoryBookProviderMeta {
   transport?: string;
   imageProvider: string;
   audioProvider: string;
+  stylePreset?: ParentStoryBookStylePreset;
   requestSource?: string;
   fallbackReason?: string | null;
   realProvider: boolean;
   highlightCount: number;
   sceneCount: number;
+  cacheHitCount?: number;
+  cacheWindowSeconds?: number;
+}
+
+export interface ParentStoryBookCacheMeta {
+  storyResponse: "hit" | "miss" | "bypass";
+  audioDelivery: "stream-url" | "inline-data-url" | "preview-only";
+  ttlSeconds: number;
+  realSceneCount: number;
 }
 
 export interface ParentStoryBookScene {
@@ -572,12 +586,16 @@ export interface ParentStoryBookScene {
   audioStatus: ParentStoryBookMediaStatus;
   voiceStyle: string;
   highlightSource: string;
+  imageCacheHit?: boolean;
+  audioCacheHit?: boolean;
 }
 
 export interface ParentStoryBookRequest {
   childId?: string;
   storyMode?: ParentStoryBookMode | "auto";
   requestSource?: string;
+  stylePreset?: ParentStoryBookStylePreset;
+  stylePrompt?: string;
   snapshot: ChildSuggestionSnapshot;
   highlightCandidates: ParentStoryBookHighlightCandidate[];
   latestInterventionCard?: Record<string, unknown> | null;
@@ -598,8 +616,10 @@ export interface ParentStoryBookResponse {
   fallback: boolean;
   fallbackReason?: string | null;
   generatedAt: string;
+  stylePreset?: ParentStoryBookStylePreset;
   providerMeta: ParentStoryBookProviderMeta;
   scenes: ParentStoryBookScene[];
+  cacheMeta?: ParentStoryBookCacheMeta;
 }
 
 export type ParentTrendIntent = "emotion" | "diet" | "sleep" | "health" | "growth_overall";

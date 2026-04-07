@@ -8,6 +8,15 @@ from typing import Any
 from app.core.config import get_settings
 from app.providers.story_audio_provider import MockStoryAudioProvider, resolve_story_audio_provider
 from app.providers.story_image_provider import MockStoryImageProvider, resolve_story_image_provider
+from app.services.storybook_media_cache import get_storybook_media_cache
+
+DEFAULT_STYLE_PRESET = "sunrise-watercolor"
+STYLE_PRESET_PROMPTS = {
+    "sunrise-watercolor": "晨光水彩儿童绘本风，暖金高光，纸面晕染，柔和治愈。",
+    "moonlit-cutout": "月夜剪纸儿童绘本风，静蓝夜色，奶白层叠，像立体纸艺舞台。",
+    "forest-crayon": "森林蜡笔儿童绘本风，浅绿木色，明显手绘蜡笔纹理，活泼但温和。",
+}
+PROVIDER_CACHE_WINDOW_SECONDS = 15 * 60
 
 
 def _payload_get(payload: dict[str, Any], *keys: str) -> Any:
@@ -27,8 +36,8 @@ def _normalize_text(value: Any) -> str:
     return " ".join(_coerce_text(value).split())
 
 
-def _stable_hash(seed: str) -> str:
-    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+def _stable_hash(seed: str, *, length: int = 12) -> str:
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:length]
 
 
 def _stable_timestamp(seed: str) -> str:
@@ -74,13 +83,19 @@ def _normalize_highlights(payload: dict[str, Any]) -> list[dict[str, Any]]:
             detail = _normalize_text(item.get("detail") or item.get("title"))
             if not detail:
                 continue
+            try:
+                priority = int(item.get("priority") or 99)
+            except (TypeError, ValueError):
+                priority = 99
             results.append(
                 {
                     "kind": _normalize_text(item.get("kind")) or "todayGrowth",
                     "title": _normalize_text(item.get("title")) or "今日亮点",
                     "detail": detail,
-                    "priority": int(item.get("priority") or 99),
-                    "source": _normalize_text(item.get("source")) or _normalize_text(item.get("kind")) or "highlight",
+                    "priority": priority,
+                    "source": _normalize_text(item.get("source"))
+                    or _normalize_text(item.get("kind"))
+                    or "highlight",
                 }
             )
 
@@ -98,15 +113,25 @@ def _normalize_card(value: Any) -> dict[str, Any]:
 
 
 def _memory_prompt_context(payload: dict[str, Any]) -> dict[str, list[str]]:
-    memory_context = _payload_get(payload, "memory_context")
+    memory_context = _payload_get(payload, "memoryContext", "memory_context")
     if not isinstance(memory_context, dict):
-        return {"longTermTraits": [], "recentContinuitySignals": [], "lastConsultationTakeaways": [], "openLoops": []}
+        return {
+            "longTermTraits": [],
+            "recentContinuitySignals": [],
+            "lastConsultationTakeaways": [],
+            "openLoops": [],
+        }
 
     prompt_context = memory_context.get("promptContext")
     if not isinstance(prompt_context, dict):
         prompt_context = memory_context.get("prompt_context")
     if not isinstance(prompt_context, dict):
-        return {"longTermTraits": [], "recentContinuitySignals": [], "lastConsultationTakeaways": [], "openLoops": []}
+        return {
+            "longTermTraits": [],
+            "recentContinuitySignals": [],
+            "lastConsultationTakeaways": [],
+            "openLoops": [],
+        }
 
     result: dict[str, list[str]] = {}
     for key in ("longTermTraits", "recentContinuitySignals", "lastConsultationTakeaways", "openLoops"):
@@ -119,6 +144,20 @@ def _memory_prompt_context(payload: dict[str, Any]) -> dict[str, list[str]]:
         else:
             result[key] = []
     return result
+
+
+def _resolve_style_preset(payload: dict[str, Any]) -> str:
+    requested = _normalize_text(_payload_get(payload, "stylePreset", "style_preset"))
+    if requested in STYLE_PRESET_PROMPTS:
+        return requested
+    return DEFAULT_STYLE_PRESET
+
+
+def _resolve_style_prompt(payload: dict[str, Any], style_preset: str) -> str:
+    explicit = _normalize_text(_payload_get(payload, "stylePrompt", "style_prompt"))
+    if explicit:
+        return explicit
+    return STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET])
 
 
 def _build_story_mode(payload: dict[str, Any], highlights: list[dict[str, Any]]) -> str:
@@ -149,7 +188,7 @@ def _build_parent_note(
     latest_consultation: dict[str, Any],
 ) -> str:
     if mode == "card":
-        return f"今晚先读一张轻量成长故事卡，帮 {child_name} 把今天值得记住的小进步收好。"
+        return f"今晚先读一张轻量成长故事卡，帮 {child_name} 把今天最值得记住的小进步收好。"
 
     action = (
         _normalize_text(latest_intervention_card.get("tonightHomeAction"))
@@ -179,7 +218,7 @@ def _build_scene_script(
 
     if index == 0:
         title = "今天的小亮点"
-        text = f"{child_name}{f' 在{class_name}' if class_name else ''} 今天最值得被看见的是：{primary}。这像一颗轻轻亮起来的小星星。"
+        text = f"{child_name}{f' 在 {class_name}' if class_name else ''} 今天最值得被看见的是：{primary}。这像一颗轻轻亮起来的小星星。"
     elif index == 1:
         title = "有人陪着慢慢来"
         support = next_detail or "老师和家人的稳定陪伴，让这份努力更容易发生。"
@@ -206,14 +245,17 @@ def _build_scene_image_prompt(
     class_name: str | None,
     scene_title: str,
     scene_text: str,
+    style_prompt: str,
 ) -> str:
-    return (
-        f"温柔儿童绘本插图，主角是{child_name}"
+    parts = [style_prompt]
+    parts.append(
+        f"儿童绘本插图，主角是{child_name}"
         f"{f'，场景为{class_name}' if class_name else ''}，"
         f"分镜标题“{scene_title}”，"
-        f"文案核心“{scene_text[:90]}”，"
-        "真实儿童绘本质感，暖黄与浅蓝色调，适合移动端家长睡前阅读。"
+        f"核心文案“{scene_text[:90]}”，"
+        "适合移动端家长睡前阅读，情绪温柔、清晰、可录屏展示。"
     )
+    return " ".join(part for part in parts if part)
 
 
 def _build_scene_audio_script(
@@ -237,9 +279,12 @@ def _scene_blueprint(
     highlights: list[dict[str, Any]],
     memory_hint: str,
     parent_note: str,
+    style_prompt: str,
 ) -> dict[str, Any]:
     scene_title, base_scene_text = _build_scene_script(index, child_name, class_name or "", highlights, memory_hint)
     scene_text = base_scene_text if index < scene_total - 1 else f"{base_scene_text} {parent_note}"
+    highlight = highlights[min(index, len(highlights) - 1)]
+
     return {
         "story_id": story_id,
         "child_id": child_id,
@@ -253,6 +298,7 @@ def _scene_blueprint(
             class_name=class_name,
             scene_title=scene_title,
             scene_text=base_scene_text,
+            style_prompt=style_prompt,
         ),
         "audio_script": _build_scene_audio_script(
             child_name=child_name,
@@ -260,8 +306,8 @@ def _scene_blueprint(
             scene_title=scene_title,
             scene_text=base_scene_text,
         ),
-        "highlight_source": _normalize_text(highlights[min(index, len(highlights) - 1)].get("source"))
-        or _normalize_text(highlights[min(index, len(highlights) - 1)].get("kind"))
+        "highlight_source": _normalize_text(highlight.get("source"))
+        or _normalize_text(highlight.get("kind"))
         or "highlight",
     }
 
@@ -304,6 +350,49 @@ def _provider_label(
     return fallback_name
 
 
+def _build_media_key(*, story_id: str, scene_index: int, audio_script: str) -> str:
+    seed = "::".join([story_id, str(scene_index), audio_script[:96]])
+    return f"storybook-media-{_stable_hash(seed, length=16)}"
+
+
+def _maybe_store_audio_asset(
+    *,
+    story_id: str,
+    scene_index: int,
+    audio_script: str,
+    voice_style: str,
+    audio_status: str,
+    audio_result: Any,
+) -> tuple[str | None, str | None]:
+    audio_url = audio_result.output.get("audioUrl")
+    audio_ref = _coerce_text(audio_result.output.get("audioRef")) or None
+
+    if audio_status != "ready":
+        return audio_url, audio_ref
+
+    audio_bytes = audio_result.output.get("audioBytes")
+    if not isinstance(audio_bytes, (bytes, bytearray)) or len(audio_bytes) == 0:
+        return audio_url, audio_ref
+
+    media_key = _build_media_key(
+        story_id=story_id,
+        scene_index=scene_index,
+        audio_script=audio_script,
+    )
+    content_type = _normalize_text(audio_result.output.get("audioContentType")) or "audio/wav"
+    get_storybook_media_cache().put_audio(
+        media_key,
+        payload={
+            "storyId": story_id,
+            "sceneIndex": scene_index + 1,
+            "voiceStyle": voice_style,
+        },
+        audio_bytes=bytes(audio_bytes),
+        content_type=content_type,
+    )
+    return f"/api/ai/parent-storybook/media/{media_key}", media_key
+
+
 async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = _payload_get(payload, "snapshot")
     if not isinstance(snapshot, dict):
@@ -319,7 +408,9 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     requested_mode = _coerce_text(_payload_get(payload, "storyMode", "story_mode"))
     highlights = _normalize_highlights(payload)
     mode = _build_story_mode(payload, highlights)
-    latest_intervention_card = _normalize_card(_payload_get(payload, "latestInterventionCard", "latest_intervention_card"))
+    latest_intervention_card = _normalize_card(
+        _payload_get(payload, "latestInterventionCard", "latest_intervention_card")
+    )
     latest_consultation = _normalize_card(_payload_get(payload, "latestConsultation", "latest_consultation"))
     memory_context = _memory_prompt_context(payload)
     memory_hint = (
@@ -327,6 +418,8 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         or (memory_context["lastConsultationTakeaways"][0] if memory_context["lastConsultationTakeaways"] else "")
         or (memory_context["longTermTraits"][0] if memory_context["longTermTraits"] else "")
     )
+    style_preset = _resolve_style_preset(payload)
+    style_prompt = _resolve_style_prompt(payload, style_preset)
     parent_note = _build_parent_note(child_name, mode, highlights, latest_intervention_card, latest_consultation)
     moral = _build_moral(child_name, highlights)
 
@@ -334,6 +427,8 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         [
             child_id or "unknown-child",
             mode,
+            style_preset,
+            style_prompt,
             child_name,
             class_name or "",
             "|".join(f"{item['kind']}:{item['title']}:{item['detail']}" for item in highlights),
@@ -372,6 +467,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             highlights=highlights,
             memory_hint=memory_hint,
             parent_note=parent_note,
+            style_prompt=style_prompt,
         )
         for index in range(scene_total)
     ]
@@ -416,8 +512,24 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
 
     rendered_results = await asyncio.gather(*(render_scene(blueprint) for blueprint in blueprints))
 
+    cache_hit_count = 0
     scenes: list[dict[str, Any]] = []
     for blueprint, (image_result, audio_result) in zip(blueprints, rendered_results, strict=True):
+        image_cache_hit = bool(image_result.output.get("cacheHit"))
+        audio_cache_hit = bool(audio_result.output.get("cacheHit"))
+        cache_hit_count += int(image_cache_hit) + int(audio_cache_hit)
+
+        image_status = image_result.output.get("imageStatus", "fallback")
+        audio_status = audio_result.output.get("audioStatus", "fallback")
+        audio_url, cached_audio_ref = _maybe_store_audio_asset(
+            story_id=story_id,
+            scene_index=blueprint["scene_index"],
+            audio_script=audio_result.output.get("audioScript") or blueprint["audio_script"],
+            voice_style=audio_result.output.get("voiceStyle") or blueprint["voice_style"],
+            audio_status=audio_status,
+            audio_result=audio_result,
+        )
+
         scenes.append(
             {
                 "sceneIndex": blueprint["scene_index"] + 1,
@@ -426,13 +538,15 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 "imagePrompt": image_result.output.get("imagePrompt") or blueprint["image_prompt"],
                 "imageUrl": image_result.output.get("imageUrl"),
                 "assetRef": image_result.output.get("assetRef"),
-                "imageStatus": image_result.output.get("imageStatus", "fallback"),
-                "audioUrl": audio_result.output.get("audioUrl"),
-                "audioRef": audio_result.output.get("audioRef"),
+                "imageStatus": image_status,
+                "audioUrl": audio_url,
+                "audioRef": cached_audio_ref or audio_result.output.get("audioRef"),
                 "audioScript": audio_result.output.get("audioScript") or blueprint["audio_script"],
-                "audioStatus": audio_result.output.get("audioStatus", "fallback"),
+                "audioStatus": audio_status,
                 "voiceStyle": audio_result.output.get("voiceStyle") or blueprint["voice_style"],
                 "highlightSource": blueprint["highlight_source"],
+                "imageCacheHit": image_cache_hit,
+                "audioCacheHit": audio_cache_hit,
             }
         )
 
@@ -444,7 +558,6 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     provider_mode = _provider_mode_from_scenes(scenes)
-    fallback_reason: str | None
     if provider_mode == "live":
         fallback_reason = None
     elif provider_mode == "mixed":
@@ -468,6 +581,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         "fallback": provider_mode != "live",
         "fallbackReason": fallback_reason,
         "generatedAt": generated_at,
+        "stylePreset": style_preset,
         "providerMeta": {
             "provider": "parent-storybook-rule",
             "mode": provider_mode,
@@ -484,11 +598,18 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 scenes=scenes,
                 status_key="audioStatus",
             ),
-            "requestSource": _normalize_text(_payload_get(payload, "requestSource", "request_source")) or "parent-storybook",
+            "stylePreset": style_preset,
+            "requestSource": _normalize_text(_payload_get(payload, "requestSource", "request_source"))
+            or "parent-storybook",
             "fallbackReason": fallback_reason,
             "realProvider": provider_mode in {"live", "mixed"},
             "highlightCount": len(highlights),
             "sceneCount": len(scenes),
+            "cacheHitCount": cache_hit_count,
+            "cacheWindowSeconds": max(
+                PROVIDER_CACHE_WINDOW_SECONDS,
+                int(settings.storybook_media_cache_ttl_seconds or 0),
+            ),
         },
         "scenes": scenes,
     }
