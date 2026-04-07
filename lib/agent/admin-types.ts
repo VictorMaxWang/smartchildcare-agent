@@ -130,6 +130,8 @@ export interface AdminDispatchCreatePayload {
     workflow: AdminAgentWorkflowType;
     relatedChildIds?: string[];
     relatedClassNames?: string[];
+    consultationId?: string;
+    relatedConsultationIds?: string[];
   };
 }
 
@@ -165,6 +167,8 @@ export interface AdminDispatchEvent {
     workflow?: AdminAgentWorkflowType | string;
     relatedChildIds?: string[];
     relatedClassNames?: string[];
+    consultationId?: string;
+    relatedConsultationIds?: string[];
   } | null;
   createdBy: string;
   updatedBy: string;

@@ -1,369 +1,221 @@
 # SmartChildcare Agent 比赛架构总说明
 
-## 1. 项目背景与定位
-SmartChildcare Agent 是一个面向托育机构场景的移动端优先 AI 助手 / Agent 系统。它的目标不是做“更复杂的后台”，而是把教师、家长、园长在日常托育工作中最关键的判断、沟通、干预与复盘流程，压缩成适合移动端演示和比赛答辩的产品化路径。
+## 1. 项目定位
 
-当前默认协作仓库是：`VictorMaxWang/smartchildcare-agent`。
+SmartChildcare Agent 是一个面向托育机构场景的移动端优先 AI 助手 / Agent 系统。它的目标不是把托育工作重新做成一个更复杂的后台，而是把教师、家长、园长最关键的判断、沟通、干预和复盘流程压缩成适合录屏和答辩的产品主路径。
 
-当前仓库的真实代码状态已经具备这个方向的基本骨架：
-- 前端使用 Next.js App Router、TypeScript、React 19、Tailwind。
-- 角色端已经分为教师、家长、园长三条主线。
-- AI 路由已存在于 Next 侧，同时预埋了 FastAPI brain 与 proxy/fallback 机制。
-- 高风险儿童一键会诊、多智能体判断、Intervention Card、mobile draft / reminder 等能力已进入仓库主线。
-- Admin 决策区 / 风险优先级 / 会诊 trace 面板已经成为园长侧第二条强展示线，用来承接高风险会诊结果的决策化呈现。
+当前默认代码事实以 `2026-04-07` 仓库为准。
 
-因此，本项目当前最合理的定位是：
-- 一个面向 vivo AIGC 创新赛的移动端托育 AI 助手产品原型。
-- 一个以 Agent 工作流、跨角色闭环和可演示性为核心的比赛型系统。
-- 一个尽量复用现有仓库、按最小可运行增量持续推进的工程基座。
+核心闭环是：
 
-## 2. 为什么它不是普通托育后台，而是移动端托育 AI 助手
-普通托育后台强调的是“记录、统计、管理”。SmartChildcare Agent 当前的产品方向更强调“识别、判断、建议、行动、反馈、复盘”。
+`机构记录 -> 系统分析 -> AI 建议 / Agent 工作流 -> 家长反馈 -> 托育行动闭环`
 
-从当前仓库可见，这种差异已经被写进了页面结构：
-- 教师首页 `app/teacher/page.tsx` 不是静态总览，而是围绕异常儿童、未晨检、待复查、待沟通家长组织页面。
-- 家长首页 `app/parent/page.tsx` 不是普通信息汇总，而是围绕“今晚该做什么、为什么现在做、做完如何反馈”组织页面。
-- 园长首页 `app/admin/page.tsx` 不是常规数据大盘，而是围绕优先级排序、风险儿童、问题班级、待处理派单组织页面。
-- Admin 决策区 / 风险优先级 / 会诊 trace 面板则是园长侧第二强展示位，用来把高风险会诊结果压缩成可录屏、可答辩的决策卡。
-- 三个 `/agent` 页面都在尝试把结构化上下文转成结构化行动，而不是让用户自己在系统里拼装判断。
+## 2. 为什么它不是普通托育后台
 
-因此，项目的核心不是“把托育数据做成数字化”，而是“把托育判断与干预流程做成可由 Agent 驱动的产品主路径”。
+普通后台强调“记录、统计、管理”。
 
-## 3. 目标比赛与评审导向
-当前最优先服务的比赛目标是 vivo 赞助的 AIGC 创新赛。
+SmartChildcare Agent 当前更强调：
 
-比赛导向对实现策略的影响如下：
-- 优先做 3 分钟内能讲清楚的主路径，而不是做大而全系统。
-- 优先强调移动端产品感，而不是 PC 后台完整性。
-- 优先体现 Agent 工作流、跨角色协同、结构化输出和可解释性。
-- 优先把 vivo 能力映射到清晰的产品入口，而不是停留在抽象“可接入”层面。
-- 优先最大化复用现有仓库，让已有页面、AI routes、bridge、store、backend brain 成为比赛版本的基础设施。
+- 先捕捉，再确认
+- 先看优先级，再执行
+- 先给今夜动作，再收反馈
+- 用结构化卡片和可解释 trace 替代长篇静态报表
 
-当前比赛阶段的默认取舍：
-- 如果一个能力能显著增强 Teacher / Parent / Admin 三端闭环，就优先。
-- 如果一个能力只能增强工程纯度、不能增强 demo 叙事，就后置。
-- 如果一个能力需要大范围改写现有角色结构，就后置。
+从代码落点看，这个判断已经被写进页面结构：
 
-## 4. 当前仓库现状扫描总结
-### 已有能力
-- 角色级首页、角色级 Agent 页面、登录与 session 流程已存在。
-- Next 侧 AI routes 已覆盖建议、追问、教师 Agent、园长 Agent、周报、高风险会诊、多模态和 SSE；`app/api/ai/high-risk-consultation/stream/route.ts` 与 `lib/bridge/use-agent-stream.ts` 已形成 T1 流式基础。
-- 高风险会诊已经做出“真 vivo（代码目标）+ 真 memory context + 真 SSE + 前端动态卡片”的金链路基础，并带有 QA / trace / debug 面板。
-- Teacher 端 `VoiceAssistantFAB` 语音球、上传接口、理解接口与 teacher layout 全局入口已落地；`T4C` 已完成，`T5A` 已完成其过渡作用，`T5` 已完成主接线；当前 Teacher 主线进入录屏 / 验收收口阶段，但仍不写成 fully verified。
-- `child_profile_memory`、snapshots、trace、repository / data access 与 memory context 构建已落地，consultation / follow-up / weekly report 已开始消费 memory context。
-- backend 已具备 tool layer + ReAct runner + trace，可演示“会查、会写、会触发动作”；通知仍未接真实发送通道。
-- staging 侧 strict observability、域名 / runbook / smoke 文档已收口，但远端 rebuild / Caddy reload / release remote-brain-proxy 真验收仍待 SSH。
+- Teacher 首页 `app/teacher/page.tsx` 围绕异常儿童、未晨检、待复查和待沟通家长组织
+- Parent 首页 `app/parent/page.tsx` 围绕今夜任务、趋势入口和微绘本 wow factor 组织
+- Admin 首页 `app/admin/page.tsx` 围绕机构优先级、重点会诊和派单组织
+- 三个 `/agent` 页面都在把结构化上下文变成结构化行动
 
-### 已有角色端
-- 教师端
-  - `app/teacher/page.tsx`
-  - `app/teacher/agent/page.tsx`
-  - `app/teacher/high-risk-consultation/page.tsx`
-- 家长端
-  - `app/parent/page.tsx`
-  - `app/parent/agent/page.tsx`
-- 园长端
-  - `app/admin/page.tsx`
-  - `app/admin/agent/page.tsx`
+## 3. 当前比赛叙事收敛为 4 条主线
 
-### 已有 AI 路由 / 页面
-- Next AI routes
-  - `app/api/ai/suggestions/route.ts`
-  - `app/api/ai/follow-up/route.ts`
-  - `app/api/ai/teacher-agent/route.ts`
-  - `app/api/ai/admin-agent/route.ts`
-  - `app/api/ai/weekly-report/route.ts`
-  - `app/api/ai/high-risk-consultation/route.ts`
-  - `app/api/ai/high-risk-consultation/stream/route.ts`
-  - `app/api/ai/teacher-voice-upload/route.ts`
-  - `app/api/ai/teacher-voice-understand/route.ts`
-  - `app/api/ai/vision-meal/route.ts`
-  - `app/api/ai/diet-evaluation/route.ts`
-  - `app/api/ai/stream/route.ts`
-- 相关后台派单路由
-  - `app/api/admin/notification-events/route.ts`
+### 3.1 Teacher 语音入口主线
 
-### 已有可复用模块
-- UI / 页面骨架
-  - `components/role-shell/RoleScaffold.tsx`
-  - `components/agent/InterventionCardPanel.tsx`
-  - `components/teacher/TeacherAgentResultCard.tsx`
-  - `components/teacher/TeacherVoiceAssistantLayer.tsx`
-  - `components/teacher/VoiceAssistantFAB.tsx`
-  - `components/consultation/*`
-  - `components/MobileNav.tsx`
-- 视图聚合与状态
-  - `lib/view-models/role-home.ts`
-  - `lib/store.tsx`
-  - `lib/persistence/snapshot.ts`
-  - `lib/persistence/bootstrap.ts`
-- Agent 与业务逻辑
-  - `lib/agent/parent-agent.ts`
-  - `lib/agent/teacher-agent.ts`
-  - `lib/agent/admin-agent.ts`
-  - `lib/agent/high-risk-consultation.ts`
-  - `lib/agent/consultation/*`
-  - `lib/agent/intervention-card.ts`
-- 移动端能力
-  - `lib/mobile/local-draft-cache.ts`
-  - `lib/mobile/reminders.ts`
-  - `lib/mobile/teacher-voice-audio.ts`
-  - `lib/mobile/teacher-voice-understand.ts`
-  - `lib/mobile/voice-assistant-upload.ts`
-  - `lib/mobile/voice-input.ts`
-  - `lib/bridge/use-agent-stream.ts`
-- 后端桥接与 brain
-  - `lib/server/brain-client.ts`
-  - `backend/app/services/orchestrator.py`
+- 起点：`/teacher`
+- 目标：把老师的碎片观察快速变成结构化草稿
+- 页面：Teacher 全局语音入口、Teacher Agent 草稿确认
+- 关键链路：
+  - `app/api/ai/teacher-voice-understand`
+  - `backend/app/api/v1/endpoints/teacher_voice.py`
   - `backend/app/services/teacher_voice_understand.py`
-  - `backend/app/services/react_runner.py`
-  - `backend/app/providers/*`
-  - `backend/app/memory/*`
-  - `backend/tests/*`
+- 亮点：先捕捉，再确认；移动端产品感强
+- 保守口径：ASR live upstream 未 fully verified
 
-## 5. 三层架构总览
-当前最适合比赛叙事的架构划分是三层：
+### 3.2 高风险会诊主线
 
-### 交互感知层
-职责：移动端页面、角色视角、卡片流组织、结构化结果渲染、弱网草稿与提醒。
+- 起点：`/teacher/high-risk-consultation`
+- 目标：展示当前最强的 Multi-Agent workflow
+- 页面：stage 推进、summary card、48 小时复查、intervention card、trace / debug
+- 关键链路：
+  - `app/api/ai/high-risk-consultation/stream`
+  - `backend/app/api/v1/endpoints/agents.py`
+  - `lib/agent/high-risk-consultation.ts`
+  - `backend/app/services/orchestrator.py`
+- 亮点：memory context + SSE + explainability + 多角色动作卡
+- 保守口径：debug case / next fallback 不等于远端真链路验收
+
+### 3.3 Admin 决策区主线
+
+- 起点：`/admin`
+- 目标：把高风险会诊结果转成园长办公会式决策卡
+- 页面：`RiskPriorityBoard`、source badge、优先级条目、派单 / 周报入口
+- 关键链路：
+  - `app/api/ai/high-risk-consultation/feed`
+  - `backend/app/api/v1/endpoints/agents.py`
+  - `components/admin/RiskPriorityBoard.tsx`
+  - `lib/agent/use-admin-consultation-feed.ts`
+- 亮点：会诊结果的二次决策化呈现，是第二展示位
+- 保守口径：不扩写成 `T9C` 低层字段已彻底打通
+
+### 3.4 Parent 趋势线 / 微绘本主线
+
+- 起点：`/parent`
+- 目标：同时承担 wow factor 和今夜行动闭环
+- 页面：
+  - `/parent/storybook`
+  - `/parent/agent`
+  - `TrendLineChart`
+  - `StoryBookViewer`
+- 关键链路：
+  - `app/api/ai/parent-storybook`
+  - `backend/app/services/parent_storybook_service.py`
+  - `app/api/ai/parent-trend-query`
+  - `backend/app/services/parent_trend_service.py`
+- 亮点：故事化呈现 + 趋势解释 + 今夜反馈
+- 保守口径：
+  - Parent trend 必须走 FastAPI brain
+  - Parent storybook 有本地 fallback
+  - 图像 / 配音与上游 live 仍未 fully verified
+
+## 4. 架构分层
+
+### 4.1 交互感知层
+
+职责：
+
+- 移动端页面与角色视角
+- 卡片流组织
+- 结构化结果渲染
+- 弱网草稿和提醒
 
 主要落点：
-- `app/*` 页面与 `app/api/*` route handlers
-- `components/role-shell/RoleScaffold.tsx`
-- `components/agent/InterventionCardPanel.tsx`
-- `components/teacher/TeacherVoiceAssistantLayer.tsx`
+
+- `app/*`
+- `components/role-shell/*`
+- `components/teacher/*`
 - `components/consultation/*`
+- `components/admin/*`
+- `components/parent/*`
 - `lib/store.tsx`
 - `lib/mobile/*`
 
-特点：
-- 以 mobile-first 卡片流为核心。
-- 强调一屏一任务、一页一主线。
-- 尽量用结构化卡片替代长文本。
+### 4.2 Next 桥接层
 
-### AI 大脑层
-职责：workflow 编排、provider 调用、streaming、memory 接口、mock/real fallback。
+职责：
+
+- 统一对前端暴露 `/api/ai/*`
+- 优先转发到 FastAPI brain
+- 在允许的场景提供本地 fallback
+
+当前关键 route：
+
+- `/api/ai/teacher-voice-understand`
+- `/api/ai/high-risk-consultation`
+- `/api/ai/high-risk-consultation/stream`
+- `/api/ai/high-risk-consultation/feed`
+- `/api/ai/parent-trend-query`
+- `/api/ai/parent-storybook`
+- `/api/ai/teacher-agent`
+- `/api/ai/admin-agent`
+
+### 4.3 FastAPI brain
+
+职责：
+
+- workflow 编排
+- provider 调用
+- memory context 合并
+- SSE 输出
+- trace / repository / tool use
 
 主要落点：
-- `lib/server/brain-client.ts`
+
 - `backend/app/api/v1/endpoints/*`
 - `backend/app/services/orchestrator.py`
-- `backend/app/agents/*`
-- `backend/app/providers/*`
+- `backend/app/services/teacher_voice_understand.py`
+- `backend/app/services/parent_trend_service.py`
+- `backend/app/services/parent_storybook_service.py`
+- `backend/app/services/react_runner.py`
 
-特点：
-- Next 侧 route 先尝试转发到 FastAPI brain。
-- FastAPI 不可用时，回退到 Next 本地 handler。
-- 当前 brain 已经从“纯 mock 架子”进入“主链可演示、live 验证仍需保守”的阶段。
+### 4.4 记忆中枢
 
-### 记忆中枢
-职责：保存状态、保留上下文、支持后续 trace / retrieval / multi-turn 迭代。
+职责：
+
+- 保存 snapshot / trace / child profile memory
+- 为 consultation / follow-up / weekly report 提供上下文
 
 主要落点：
-- 前端本地记忆：`lib/store.tsx` 中的 `localStorage` snapshot
-- 远端业务快照：`app/api/state/route.ts` + MySQL
-- 后端画像 / 快照 / trace：`backend/app/db/memory_store.py`、`backend/app/services/memory_service.py`
-- 后端会话记忆：`backend/app/memory/session_memory.py`
-- 后端向量占位：`backend/app/memory/vector_store.py`
-- 后端 repository：`backend/app/db/repositories.py`、`backend/app/db/childcare_repository.py`
 
-当前状态要保守表达：
-- MySQL snapshot 是真实可用路径之一。
-- `child_profile_memory`、snapshots、trace 已具备正式接口与测试。
-- SessionMemory 和 vector store 仍是轻量骨架。
-- 记忆中枢是“已经有方向和入口，并开始接入主工作流”，不是“已经 fully live 的统一记忆平台”。
+- `backend/app/db/memory_store.py`
+- `backend/app/services/memory_service.py`
+- `backend/app/memory/session_memory.py`
+- `backend/app/memory/vector_store.py`
+- `app/api/state/route.ts`
 
-```mermaid
-flowchart TD
-    A["交互感知层\nNext.js / TypeScript / Mobile-first UI"] --> B["AI 大脑层\nNext API -> FastAPI Brain -> Providers"]
-    B --> C["记忆中枢\nMySQL Snapshot / local JSON / SessionMemory / Vector Placeholder"]
-    B --> D["结构化结果\nIntervention Card / Consultation / Draft / Reminder"]
-    D --> A
-```
+保守口径：
 
-## 6. 关键 Agentic 模式
-### Routing
-当前路由分发已经具备基础形态：
-- 教师 Agent 根据 workflow 在“家长沟通建议 / 今日跟进行动 / 周总结”之间切换。
-- 园长 Agent 根据 workflow 在“今日优先级 / 周报 / 追问”之间切换。
-- Teacher voice understanding backend 已具备 `ASR -> router -> prompt_chain` 的结构化理解链。
-- Next route 根据 `BRAIN_API_BASE_URL` 决定是走 FastAPI brain 还是本地 fallback。
+- `child_profile_memory` / snapshots / trace 已落地
+- SessionMemory / vector store 仍是轻量骨架
+- 当前应写成“记忆中枢基础已具备，并开始接入主工作流”
 
-### Prompt Chaining
-当前仓库已经出现明确的链式结构：
-- 家长链路：suggestion -> follow-up -> intervention card -> feedback -> 下一轮 follow-up。
-- 教师链路：teacher snapshot -> consultation input -> high-risk consultation -> intervention card。
-- 语音链路：voice upload -> teacher voice understand -> draft seed -> 后续 T5 确认流。
-- 园长链路：priority summary -> action items -> notification events / dispatch。
+## 5. 真实链路与 fallback 地图
 
-### Evaluator-Optimizer / Reflexion
-这一模式当前更适合作为演进方向，而不是已完成能力。
+| 链路 | 正常路径 | fallback / degraded 路径 | 当前应如何表述 |
+| --- | --- | --- | --- |
+| Teacher voice | UI -> `/api/ai/teacher-voice-understand` -> FastAPI -> `teacher_voice_understand` -> ASR provider | Next 本地 best-effort fallback，可继续生成结构化草稿 | 主线可演示；ASR live upstream 未 fully verified |
+| 高风险会诊 | UI -> `/api/ai/high-risk-consultation/stream` -> FastAPI stream -> orchestrator -> consultation agents | `next-stream-fallback`、demo trace、fixture | 当前最强 Agent workflow；不把 fallback 当成远端验收 |
+| Admin feed | UI -> `/api/ai/high-risk-consultation/feed` -> FastAPI feed | route unavailable 时，UI 复用本地 consultation 做展示级 fallback | 第二展示位稳定；不宣称 T9C fully 打通 |
+| Parent trend | UI -> `/api/ai/parent-trend-query` -> FastAPI trend service | Next 本地 fallback 被刻意禁用；结果中的 `demo_snapshot` 属于 backend 数据降级 | 有展示能力，但必须保留 `source` / `dataQuality` / `warnings` |
+| Parent storybook | UI -> `/api/ai/parent-storybook` -> FastAPI storybook service -> story image / audio provider | `next-json-fallback` + rule / asset / mock pipeline | wow factor 已形成，但图像 / 配音与 live provider 仍有边界 |
 
-建议口径：
-- 当前仓库已经有结构化输入、结构化输出、follow-up history、提醒与反馈沉淀的基础。
-- 如按子项细分，`T7A` 已具 backend-first / backend-ready 形态：已有 FastAPI endpoint、service、orchestrator 与测试；但前端最小接入仍未完成，因此不是 UI-ready。
-- 下一阶段可以在教师会诊、家长反馈、园长派单后加入 evaluator / optimizer 环节。
-- 当前不要对外宣称“已完成 Reflexion 闭环”。
+## 6. vivo 能力映射
 
-### ReAct + Tool Use
-当前已具备可演示基础设施：
-- `backend/app/tools/*` 已提供 query / read / write / notification intent 工具。
-- `backend/app/services/react_runner.py` 已能按固定场景执行 ReAct 链并回写 trace / snapshot。
-- `backend/tests/test_react_runner.py` 已覆盖主要 Teacher 侧 ReAct 场景。
-- 更准确的口径是“后端 agent 基础设施已具备可演示能力”，不是 fully production。
+所有 vivo 相关能力必须以官方文档为准：
 
-### Multi-Agent 协作
-当前最强落点是高风险儿童一键会诊：
-- `HealthObservationAgent`
-- `DietBehaviorAgent`
-- `ParentCommunicationAgent`
-- `InSchoolActionAgent`
-- `CoordinatorAgent`
-
-这条链路已经足够支撑比赛里“多智能体协作”的核心展示。
-
-### Generative UI
-当前 Generative UI 还不是完整动态页面生成，但已经有明确基础：
-- 结构化结果驱动 `TeacherAgentResultCard`、`InterventionCardPanel`、`ConsultationSummaryCard`、`FollowUp48hCard` 等卡片。
-- `app/api/ai/stream` + `lib/bridge/use-agent-stream.ts` 已提供统一 SSE 事件读取方式。
-
-因此当前更准确的说法是：
-- 已有结构化渲染与流式原型。
-- 不是“完整生产态 Generative UI 平台”。
-
-## 7. vivo 能力接入图谱
-所有 vivo 相关落地必须以官方文档为准：
 - [vivo 官方文档入口](https://aigc.vivo.com.cn/#/document/index?id=1746)
 
-当前仓库的 vivo 接入图谱如下：
+当前仓库可保守映射为：
 
-| 能力 | 当前仓库入口 | 当前状态 | 比赛版落地原则 |
-| --- | --- | --- | --- |
-| Chat / LLM | `backend/app/providers/vivo_llm.py` | 代码层真实 provider 路径 + 最小验证已完成；staging / live 仍需保守表述 | 真实接入前逐项对照官方文档，保持服务端鉴权 |
-| OCR | `backend/app/providers/vivo_ocr.py`、`lib/mobile/ocr-input.ts` | stub / mock + 前端占位输入 | 先保留输入入口，再按官方文档补真接入 |
-| ASR | `backend/app/providers/vivo_asr.py`、`app/api/ai/teacher-voice-understand/route.ts` | 真实 transport + fallback provider 实现已接入；live upstream 未在真实密钥 + 真实音频下 fully verified | 先保证主链稳定，再做真实音频样本与 strict smoke 验证 |
-| TTS | `backend/app/providers/vivo_tts.py` | stub / mock | 用于会诊播报或家长端语音化演进 |
-| Vision | `app/api/ai/vision-meal/route.ts`、`backend/app/api/v1/endpoints/multimodal.py` | route 已有，当前偏 mock | 适合对接餐食识别、图像分析类场景 |
-| Embedding / Retrieval | `backend/app/providers/vivo_embedding.py`、`backend/app/memory/vector_store.py` | 预留路径 | 作为记忆检索演进方向 |
-| 端云协同 | `lib/server/brain-client.ts` + FastAPI brain | 架构预留，并已有 `remote-brain-proxy` / fallback 头部约定 | 浏览器 / Next / FastAPI / vivo provider 分层清晰 |
+| 能力 | 当前落点 | 当前口径 |
+| --- | --- | --- |
+| LLM | `backend/app/providers/vivo_llm.py` | 代码层接入 + smoke / test 基础已具备 |
+| ASR | `backend/app/providers/vivo_asr.py` | transport 已接入；live upstream 未 fully verified |
+| TTS | `backend/app/providers/vivo_tts.py` | storybook 配音链路已有 provider 与 tests；不写成 fully live |
+| Story image | `backend/app/providers/story_image_provider.py` | 支持 vivo provider 与 mock / asset fallback |
+| OCR | `backend/app/providers/vivo_ocr.py` | 仍以 stub / mock / 预留入口为主 |
 
-强制规则：
-- 只允许通过环境变量使用 `VIVO_APP_ID` / `VIVO_APP_KEY`。
-- 不允许把真实值写入代码、README、日志、截图、样例或测试。
-- 文档口径必须区分“代码层已接入”“strict smoke 已定义”“staging 真验收已完成”三件事；当前三者不等价。
-- 如果 vivo 平台接口变动，必须以官方文档为准，不以历史实现为准。
+强制边界：
 
-## 8. 当前 demo 重点路径与展示优先级
-### 主路径一：Teacher 语音入口主线
-建议演示顺序：
-- 在教师端任一页面展示全局语音球入口
-- 长按录音，完成上传与结构化理解
-- 展示草稿种子、结构化 draft items、后续去向
-- 继续进入教师 Agent 或高风险会诊
+- 只通过 `VIVO_APP_ID` / `VIVO_APP_KEY` 使用密钥
+- 不把真实值写入代码、README、日志、截图、样例
+- 文档只允许写“代码层接入 + smoke / test 基础”，除非真实远端验收已完成
 
-演示重点：
-- `T2` 已完成，`T2.5` 已完成一轮真机 / 浏览器硬化。
-- `T4A` 已完成，`T4B` 已完成（代码层），`T4C` 已完成；Teacher 端已能从上传进入结构化 understanding。
-- `T5A` 已作为过渡阶段完成其作用，`T5` 已完成主接线；当前 Teacher 主线已基本闭环，进入录屏 / 验收阶段，但仍不写成 fully verified。
+## 7. 当前最适合比赛的叙事顺序
 
-### 主路径二：高风险儿童一键会诊
-建议演示顺序：
-- 从教师首页进入 `app/teacher/high-risk-consultation/page.tsx`
-- 自动带入晨检异常、待复查、近 7 天观察、家长反馈
-- 展示多 Agent 视角
-- 输出教师动作、家长今晚任务、园长决策卡
+1. Teacher 语音入口说明“老师如何低成本记录”
+2. 高风险会诊说明“系统如何自动组织多 Agent 决策”
+3. Admin 决策区说明“会诊结果如何进入机构级行动”
+4. Parent 微绘本 / 趋势线说明“家长如何理解、执行、反馈”
 
-演示重点：
-- 这是当前最强的 Agent 工作流展示位，也是比赛答辩中的核心“AI 园所决策”展示点。
-- 这条路径可以天然映射 vivo 的 LLM / OCR / ASR / TTS / 端云协同能力。
-- 当前已有 QA、trace、debug 面板与 memory / provider / transport 可视化，但仍不能把它等同于完整 `T8` 已完成。
+这样可以把三端闭环讲成：
 
-### 当前第二强展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
-当前代码基础：
-- `app/admin/page.tsx`
-- `app/admin/agent/page.tsx`
-- `components/consultation/ConsultationStoryCard.tsx`
+`教师发现问题 -> Agent 会诊 -> 园长排序决策 -> 家长看到故事和任务 -> 家长反馈 -> 再回流给教师`
 
-当前建议口径：
-- 这是高风险会诊之后的第二条强展示线，负责把会诊结果转成园长办公会式的决策卡。
-- 它不是新的后台工作流，而是现有 consultation 结果的园长侧可解释展示层。
-- 当前可写成“Admin 展示层已完成的第二展示位”，而不是新的独立后端聚合主线；其后端与 staging 边界仍沿用高风险会诊主线的保守口径。
+## 8. 当前最该避免的误表述
 
-### 家长侧补强展示线：Parent 趋势问答 / TrendLineChart 对话增强
-当前代码基础：
-- `app/parent/page.tsx`
-- `app/parent/agent/page.tsx`
-- `components/agent/InterventionCardPanel.tsx`
-- `components/parent/TrendLineChart.tsx`
-- `components/parent/ParentTrendResponseCard.tsx`
-- `lib/agent/parent-trend.ts`
-- `app/api/ai/parent-trend-query/route.ts`
-- `lib/store.tsx`
-
-当前建议口径：
-- 这条路径已具备 `T10` backend（代码层）+ `T11` Parent 展示层，能把 7 / 14 / 30 天时间窗聚合结果、解释文本、comparison、warnings 与 dataQuality 压缩进家长聊天流。
-- 它当前更适合作为比赛中的家长侧补强展示线，而不是新的最优先主攻线。
-- “时光穿梭机 / 微绘本”继续作为后续情感化增强方向，不应描述成已经完整交付。
-
-## 9. 当前阶段任务主线、并行关系与 staging 边界
-更完整状态账本见 `docs/current-status-ledger.md`。本文件只保留比赛叙事所需的当前阶段口径。
-
-### 当前最优先主线
-- Teacher 语音主线已基本闭环，当前以录屏 / 验收收口为先。
-- 高风险儿童一键会诊继续作为当前最强 Agent 工作流展示位。
-- Admin 决策区 / 风险优先级 / 会诊 trace 面板作为当前第二强展示位。
-- `S1.1` 为待 staging SSH 后手动执行的远端收口事项。
-- Parent 趋势问答 / TrendLineChart 作为已具展示能力的家长侧补强线；“时光穿梭机 / 微绘本”继续作为后续增强方向。
-
-### 当前阶段关注项
-- Teacher 主线：已从功能开发转入录屏 / 验收收口，不再把 `T4C` / `T5A` 写成当前主开发进行中。
-- 高风险会诊：继续作为当前最强展示位。
-- `T9`：Admin 展示层已完成接入，当前持续作为第二展示位。
-- Parent 趋势线：`T10` / `T11` 已具展示能力，当前作为家长侧补强线维护。
-- `T7A`：backend-ready，待前端最小接入，不写成 UI-ready。
-- `S1.1`：尚未完成，等待 staging SSH 后手动执行。
-
-### 当前不要误重排 / 误重开
-- 不要把 `T2` 当作未开始。
-- 不要把 `T4A` / `T4B` 当作未开始。
-- 不要把 `T6` 当作未开始。
-- 不要把 `T5` 扩写成完整录屏级 / 远端级验收已完成。
-- 不要把 staging 写成 fully healthy / fully switched。
-
-### staging 当前真实状态
-- DNS 已解析到 `api-staging.smartchildcareagent.cn`。
-- 已看到远端 JSON 返回，以及 vivo / memory 相关链路的局部证据。
-- 但以下仍未完成：
-  - 域名 / TLS 最终打通
-  - 新 health schema 对外可见
-  - 真 SSE 验证闭环
-  - release URL remote-brain-proxy 真验收
-- 当前对外口径必须是“staging 正在收口，不是 fully healthy / fully switched”。
-
-## 10. 风险点与 fallback 策略
-### 风险点
-- 新线程开始前应先看 `git status`，不要预设工作树一定干净，也不要顺手覆盖现有改动。
-- README 是否需要改写应以当前任务范围为准；非必要时优先把长期口径固化在 `AGENTS.md`、本文件与 `docs/current-status-ledger.md`。
-- 当前 backend 不是纯 mock，但也不能对外宣称 fully live。
-- vivo provider 现状与最终官方接入细节之间可能存在差异。
-- staging 当前域名 / TLS / release proxy 尚未最终打通。
-- Parent 端趋势问答已完成前端展示层，但仍不能写成统一 live 趋势平台；“时光穿梭机 / 微绘本”仍偏方向性需求。
-
-### Fallback 策略
-- FastAPI brain 不可用时，走 Next route 本地 fallback，维持 demo 可运行。
-- vivo 真 provider 不可用时，保留 mock provider，优先保证演示闭环不断。
-- 网络不稳定时，依赖本地 `mobileDrafts` 与 `reminders` 维持弱网演示。
-- MySQL snapshot 不可用时，优先使用示例账号与本地状态继续演示。
-- README 冲突风险高时，直接不改 README，把所有长期信息收敛进 `AGENTS.md`、本文件与 `docs/current-status-ledger.md`。
-
-## 附：当前建议的默认验证方式
-最小验证命令如下：
-- `npm run lint`
-- `npm run build`
-- `set PYTHONPATH=backend && py -m pytest backend/tests`
-
-手动验收建议如下：
-- Teacher 语音入口能讲清“采集 -> 理解 -> 草稿 -> 后续工作流”。
-- 高风险会诊页能讲清多 Agent 与三端闭环。
-- 家长首页与家长 Agent 的“今晚任务 -> 反馈 -> 下一轮跟进”逻辑一致。
-- 园长首页与园长 Agent 的“优先级 -> 派单 -> 周报”逻辑一致。
+- 不要把 staging 写成 fully healthy / fully switched
+- 不要把 `vivo_llm` / `vivo_asr` / `vivo_tts` 写成 fully live
+- 不要把 Parent trend 写成“本地也能完整跑”
+- 不要把 Parent storybook 写成“图像 / 配音已真实稳定走 vivo”
+- 不要把 Admin 第二展示位写成 `T9C` 主战场已完成

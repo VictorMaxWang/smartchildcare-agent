@@ -43,6 +43,61 @@ type NotificationEventRow = {
 
 let ensuredTablePromise: Promise<void> | null = null;
 
+function asText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    const normalized = asText(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function normalizeSource(
+  value: unknown
+): AdminDispatchEvent["source"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const institutionName = asText(record.institutionName) || undefined;
+  const workflow = asText(record.workflow) || undefined;
+  const relatedChildIds = asStringArray(record.relatedChildIds);
+  const relatedClassNames = asStringArray(record.relatedClassNames);
+  const consultationId = asText(record.consultationId) || undefined;
+  const relatedConsultationIds = asStringArray(record.relatedConsultationIds);
+
+  if (
+    !institutionName &&
+    !workflow &&
+    relatedChildIds.length === 0 &&
+    relatedClassNames.length === 0 &&
+    !consultationId &&
+    relatedConsultationIds.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    institutionName,
+    workflow,
+    relatedChildIds: relatedChildIds.length > 0 ? relatedChildIds : undefined,
+    relatedClassNames: relatedClassNames.length > 0 ? relatedClassNames : undefined,
+    consultationId,
+    relatedConsultationIds:
+      relatedConsultationIds.length > 0 ? relatedConsultationIds : undefined,
+  };
+}
+
 function createId(prefix: string) {
   if (typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function") {
     return `${prefix}-${globalThis.crypto.randomUUID()}`;
@@ -77,7 +132,7 @@ function mapRowToEvent(row: NotificationEventRow): AdminDispatchEvent {
     recommendedDeadline: row.recommended_deadline,
     reasonText: row.reason_text,
     evidence: decodeDatabaseJson(row.evidence_json) ?? [],
-    source: decodeDatabaseJson(row.source_json),
+    source: normalizeSource(decodeDatabaseJson(row.source_json)),
     createdBy: row.created_by,
     updatedBy: row.updated_by,
     createdAt: formatDateValue(row.created_at) ?? new Date().toISOString(),
@@ -336,4 +391,3 @@ export async function updateNotificationEvent(params: {
 
   return getNotificationEventById(params.institutionId, params.payload.id);
 }
-

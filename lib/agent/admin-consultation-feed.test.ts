@@ -6,7 +6,7 @@ import type { AdminDispatchEvent } from "@/lib/agent/admin-types";
 import {
   buildAdminConsultationPriorityItems,
   normalizeAdminConsultationFeedItem,
-} from "./admin-consultation.ts";
+} from "./admin-consultation";
 
 function buildLocalConsultation(
   overrides: Partial<ConsultationResult> = {}
@@ -140,6 +140,8 @@ function buildNotificationEvent(
       workflow: "daily-priority",
       relatedChildIds: ["child-1"],
       relatedClassNames: ["向日葵班"],
+      consultationId: "consult-1",
+      relatedConsultationIds: ["consult-1"],
     },
     createdBy: "system",
     updatedBy: "system",
@@ -169,11 +171,17 @@ test("normalizeAdminConsultationFeedItem keeps valid feed payloads and rejects m
     ownerName: "陈园长",
     ownerRole: "admin",
     dueAt: "2026-04-07T12:30:00.000Z",
+    whyHighPriority: "后端已给出独立优先级原因",
+    todayInSchoolActions: ["后端园内动作"],
+    tonightAtHomeActions: ["后端家庭动作"],
+    followUp48h: ["后端 48 小时复查"],
+    syncTargets: ["教师端结果卡", "园长端决策卡"],
     shouldEscalateToAdmin: true,
   });
 
   assert.ok(valid);
   assert.equal(valid?.consultationId, "consult-1");
+  assert.deepEqual(valid?.todayInSchoolActions, ["后端园内动作"]);
   assert.equal(
     normalizeAdminConsultationFeedItem({
       childId: "child-1",
@@ -183,7 +191,7 @@ test("normalizeAdminConsultationFeedItem keeps valid feed payloads and rejects m
   );
 });
 
-test("buildAdminConsultationPriorityItems prefers backend feed and overlays dispatch status owner and dueAt", () => {
+test("buildAdminConsultationPriorityItems prefers backend-native actions, sync targets and consultation-level overlay", () => {
   const items = buildAdminConsultationPriorityItems({
     feedItems: [
       {
@@ -205,6 +213,11 @@ test("buildAdminConsultationPriorityItems prefers backend feed and overlays disp
         ownerName: "陈园长",
         ownerRole: "admin",
         dueAt: "2026-04-07T12:30:00.000Z",
+        whyHighPriority: "后端优先级解释",
+        todayInSchoolActions: ["后端园内动作"],
+        tonightAtHomeActions: ["后端家庭动作"],
+        followUp48h: ["后端 48 小时复查"],
+        syncTargets: ["教师端结果卡", "家长端今晚任务", "园长端决策卡"],
         shouldEscalateToAdmin: true,
         explainabilitySummary: {
           agentParticipants: ["Health Agent", "Parent Agent"],
@@ -229,7 +242,36 @@ test("buildAdminConsultationPriorityItems prefers backend feed and overlays disp
     ],
     localConsultations: [buildLocalConsultation()],
     children: [{ id: "child-1", name: "安安", className: "向日葵班" }],
-    notificationEvents: [buildNotificationEvent()],
+    notificationEvents: [
+      buildNotificationEvent({
+        id: "child-fallback",
+        priorityItemId: "child-priority",
+        status: "completed",
+        recommendedOwnerName: "不应命中的 child fallback",
+        recommendedDeadline: "2026-04-07T14:00:00.000Z",
+        source: {
+          institutionName: "SmartChildcare",
+          workflow: "daily-priority",
+          relatedChildIds: ["child-1"],
+          relatedClassNames: ["向日葵班"],
+        },
+      }),
+      buildNotificationEvent({
+        id: "consult-match",
+        priorityItemId: "consult-other",
+        status: "in_progress",
+        recommendedOwnerName: "王园长",
+        recommendedDeadline: "2026-04-07T13:00:00.000Z",
+        source: {
+          institutionName: "SmartChildcare",
+          workflow: "daily-priority",
+          relatedChildIds: ["child-1"],
+          relatedClassNames: ["向日葵班"],
+          consultationId: "consult-1",
+          relatedConsultationIds: ["consult-1"],
+        },
+      }),
+    ],
     limit: 4,
   });
 
@@ -237,8 +279,15 @@ test("buildAdminConsultationPriorityItems prefers backend feed and overlays disp
   assert.equal(items[0]?.decision.status, "in_progress");
   assert.equal(items[0]?.decision.recommendedOwnerName, "王园长");
   assert.equal(items[0]?.trace.providerState, "real");
-  assert.deepEqual(items[0]?.decision.schoolActions, ["午休前先做安抚过渡"]);
-  assert.ok(items[0]?.trace.syncTargets.length);
+  assert.equal(items[0]?.decision.whyHighPriority, "后端优先级解释");
+  assert.deepEqual(items[0]?.decision.schoolActions, ["后端园内动作"]);
+  assert.deepEqual(items[0]?.decision.homeActions, ["后端家庭动作"]);
+  assert.deepEqual(items[0]?.decision.followUpActions, ["后端 48 小时复查"]);
+  assert.deepEqual(items[0]?.trace.syncTargets, [
+    "教师端结果卡",
+    "家长端今晚任务",
+    "园长端决策卡",
+  ]);
 });
 
 test("buildAdminConsultationPriorityItems filters malformed feed rows and keeps partial rows renderable", () => {
@@ -269,4 +318,60 @@ test("buildAdminConsultationPriorityItems filters malformed feed rows and keeps 
   assert.equal(items[0]?.trace.providerState, "unknown");
   assert.equal(items[0]?.trace.memoryState, "unknown");
   assert.deepEqual(items[0]?.trace.explainability, []);
+});
+
+test("buildAdminConsultationPriorityItems refuses ambiguous child-level overlay when a child has multiple consultations", () => {
+  const items = buildAdminConsultationPriorityItems({
+    feedItems: [
+      {
+        consultationId: "consult-1",
+        childId: "child-1",
+        generatedAt: "2026-04-07T10:00:00.000Z",
+        riskLevel: "high",
+        summary: "第一条会诊",
+        directorDecisionCard: {
+          status: "pending",
+          recommendedOwnerName: "陈园长",
+          recommendedOwnerRole: "admin",
+          recommendedAt: "2026-04-07T12:30:00.000Z",
+        },
+        shouldEscalateToAdmin: true,
+      },
+      {
+        consultationId: "consult-2",
+        childId: "child-1",
+        generatedAt: "2026-04-07T09:30:00.000Z",
+        riskLevel: "medium",
+        summary: "第二条会诊",
+        directorDecisionCard: {
+          status: "pending",
+          recommendedOwnerName: "陈园长",
+          recommendedOwnerRole: "admin",
+          recommendedAt: "2026-04-07T15:00:00.000Z",
+        },
+        shouldEscalateToAdmin: true,
+      },
+    ],
+    children: [{ id: "child-1", name: "安安", className: "向日葵班" }],
+    notificationEvents: [
+      buildNotificationEvent({
+        priorityItemId: "child-priority",
+        status: "completed",
+        recommendedOwnerName: "不应误绑定的事件",
+        source: {
+          institutionName: "SmartChildcare",
+          workflow: "daily-priority",
+          relatedChildIds: ["child-1"],
+          relatedClassNames: ["向日葵班"],
+        },
+      }),
+    ],
+    limit: 4,
+  });
+
+  assert.equal(items.length, 2);
+  assert.equal(items[0]?.decision.status, "pending");
+  assert.equal(items[0]?.decision.recommendedOwnerName, "陈园长");
+  assert.equal(items[1]?.decision.status, "pending");
+  assert.equal(items[1]?.decision.recommendedOwnerName, "陈园长");
 });

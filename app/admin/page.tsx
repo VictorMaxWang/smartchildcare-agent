@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { AlertCircle, ClipboardCheck, ShieldAlert, TrendingUp, Workflow } from "lucide-react";
 import RiskPriorityBoard from "@/components/admin/RiskPriorityBoard";
 import EmptyState from "@/components/EmptyState";
@@ -15,7 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { buildAdminConsultationPriorityItems } from "@/lib/agent/admin-consultation";
 import { buildAdminHomeViewModel } from "@/lib/agent/admin-agent";
-import { useAdminConsultationFeed } from "@/lib/agent/use-admin-consultation-feed";
+import { useAdminWorkspaceLoader } from "@/lib/agent/use-admin-workspace-loader";
 import type { AdminDispatchEvent, InstitutionPriorityItem } from "@/lib/agent/admin-types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
 
@@ -24,7 +24,6 @@ const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
   day: "numeric",
   weekday: "long",
 });
-const INITIAL_NOTIFICATION_EVENTS: AdminDispatchEvent[] = [];
 
 function PriorityLevelBadge({ level }: { level: InstitutionPriorityItem["priorityLevel"] }) {
   if (level === "P1") return <Badge variant="warning">P1</Badge>;
@@ -52,52 +51,18 @@ export default function AdminHomePage() {
     getSmartInsights,
     getLatestConsultations,
   } = useApp();
-  const [notificationEvents, setNotificationEvents] =
-    useState<AdminDispatchEvent[]>(INITIAL_NOTIFICATION_EVENTS);
-  const [notificationError, setNotificationError] = useState<string | null>(null);
   const latestConsultations = getLatestConsultations();
-  const notificationReady =
-    notificationError !== null || notificationEvents !== INITIAL_NOTIFICATION_EVENTS;
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadNotificationEvents() {
-      try {
-        const response = await fetch("/api/admin/notification-events", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-        const result = (await response.json()) as {
-          items?: AdminDispatchEvent[];
-          error?: string;
-        };
-
-        if (cancelled) return;
-
-        if (!response.ok) {
-          setNotificationEvents([]);
-          setNotificationError(result.error ?? "通知事件加载失败");
-          return;
-        }
-
-        setNotificationEvents(result.items ?? []);
-        setNotificationError(null);
-      } catch (error) {
-        if (cancelled) return;
-        console.error("[ADMIN_HOME] Failed to load notification events", error);
-        setNotificationEvents([]);
-        setNotificationError("通知事件加载失败");
-      }
-    }
-
-    void loadNotificationEvents();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const {
+    consultationFeed,
+    notificationEvents,
+    notificationError,
+  } = useAdminWorkspaceLoader({
+    visibleChildrenCount: visibleChildren.length,
+    consultationFeedOptions: {
+      limit: 4,
+      escalatedOnly: true,
+    },
+  });
 
   const consultationChildren = useMemo(
     () =>
@@ -108,12 +73,6 @@ export default function AdminHomePage() {
       })),
     [visibleChildren]
   );
-  const consultationFeed = useAdminConsultationFeed({
-    enabled: notificationReady && visibleChildren.length > 0,
-    limit: 4,
-    escalatedOnly: true,
-  });
-
   const home = useMemo(
     () =>
       buildAdminHomeViewModel({

@@ -109,6 +109,11 @@ export interface AdminConsultationFeedItem {
   ownerName?: string;
   ownerRole?: AdminOwnerRole;
   dueAt?: string;
+  whyHighPriority?: string;
+  todayInSchoolActions: string[];
+  tonightAtHomeActions: string[];
+  followUp48h: string[];
+  syncTargets: string[];
   shouldEscalateToAdmin: boolean;
   explainabilitySummary?: AdminConsultationFeedExplainabilitySummary;
   providerTraceSummary?: AdminConsultationFeedProviderTraceSummary;
@@ -175,6 +180,26 @@ function asStringArray(value: unknown, limit = 8) {
     value.map((item) => (typeof item === "string" ? item : undefined)),
     limit
   );
+}
+
+function pickFirstText(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function pickFirstStringList(
+  values: Array<string[] | null | undefined>,
+  limit = 4
+) {
+  for (const value of values) {
+    if (!Array.isArray(value) || value.length === 0) continue;
+    const normalized = takeUnique(value, limit);
+    if (normalized.length > 0) return normalized;
+  }
+  return [];
 }
 
 function asDecisionStatus(
@@ -318,24 +343,54 @@ function buildLocalTraceViewModel(consultation: ConsultationResult): AdminConsul
   };
 }
 
-function resolveDispatchEvent(
-  consultationId: string,
-  childId: string,
-  notificationEvents: AdminDispatchEvent[]
+function matchesConsultationSource(
+  event: AdminDispatchEvent,
+  consultationId: string
 ) {
+  return (
+    event.source?.consultationId === consultationId ||
+    event.source?.relatedConsultationIds?.includes(consultationId)
+  );
+}
+
+function matchesChildLevelSource(
+  event: AdminDispatchEvent,
+  childId: string
+) {
+  return (
+    (event.targetType === "child" && event.targetId === childId) ||
+    Boolean(event.source?.relatedChildIds?.includes(childId))
+  );
+}
+
+function resolveDispatchEvent(params: {
+  consultationId: string;
+  childId: string;
+  notificationEvents: AdminDispatchEvent[];
+  visibleConsultationCountForChild: number;
+}) {
+  const {
+    consultationId,
+    childId,
+    notificationEvents,
+    visibleConsultationCountForChild,
+  } = params;
+
   const priorityMatch = notificationEvents.find(
     (event) => event.priorityItemId === consultationId
   );
   if (priorityMatch) return priorityMatch;
 
-  const directChildMatch = notificationEvents.find(
-    (event) => event.targetType === "child" && event.targetId === childId
+  const consultationSourceMatch = notificationEvents.find((event) =>
+    matchesConsultationSource(event, consultationId)
   );
-  if (directChildMatch) return directChildMatch;
+  if (consultationSourceMatch) return consultationSourceMatch;
 
-  return notificationEvents.find((event) =>
-    event.source?.relatedChildIds?.includes(childId)
-  );
+  if (visibleConsultationCountForChild !== 1) {
+    return undefined;
+  }
+
+  return notificationEvents.find((event) => matchesChildLevelSource(event, childId));
 }
 
 function resolveDecisionStatus(params: {
@@ -451,6 +506,11 @@ export function normalizeAdminConsultationFeedItem(
     ownerName: asNonEmptyText(record.ownerName) ?? undefined,
     ownerRole: asOwnerRole(record.ownerRole),
     dueAt: asText(record.dueAt) || undefined,
+    whyHighPriority: asNonEmptyText(record.whyHighPriority) ?? undefined,
+    todayInSchoolActions: asStringArray(record.todayInSchoolActions, 4),
+    tonightAtHomeActions: asStringArray(record.tonightAtHomeActions, 4),
+    followUp48h: asStringArray(record.followUp48h, 4),
+    syncTargets: asStringArray(record.syncTargets, 4),
     shouldEscalateToAdmin: Boolean(record.shouldEscalateToAdmin),
     explainabilitySummary: normalizeExplainabilitySummary(record.explainabilitySummary),
     providerTraceSummary: normalizeProviderTraceSummary(record.providerTraceSummary),
@@ -653,7 +713,10 @@ function buildFeedTraceViewModel(params: {
     memoryState,
     memoryStateLabel: getMemoryStateLabel(memoryState),
     memoryDetail,
-    syncTargets: localTrace?.syncTargets ?? [],
+    syncTargets: pickFirstStringList(
+      [feedItem.syncTargets, localTrace?.syncTargets],
+      4
+    ),
     evidenceHighlights:
       feedItem.explainabilitySummary?.evidenceHighlights.length
         ? feedItem.explainabilitySummary.evidenceHighlights
@@ -705,6 +768,18 @@ function buildFeedDecisionViewModel(params: {
     ],
     3
   );
+  const schoolActions = pickFirstStringList(
+    [feedItem.todayInSchoolActions, localConsultation?.todayInSchoolActions],
+    2
+  );
+  const homeActions = pickFirstStringList(
+    [feedItem.tonightAtHomeActions, localConsultation?.tonightAtHomeActions],
+    2
+  );
+  const followUpActions = pickFirstStringList(
+    [feedItem.followUp48h, localConsultation?.followUp48h],
+    2
+  );
 
   return {
     consultationId: feedItem.consultationId,
@@ -718,14 +793,16 @@ function buildFeedDecisionViewModel(params: {
     statusLabel: getStatusLabel(resolvedStatus.status),
     statusSource: resolvedStatus.statusSource,
     summary: feedItem.summary || localConsultation?.summary || "暂无会诊摘要",
-    whyHighPriority:
-      feedItem.directorDecisionCard.reason ||
-      feedItem.triggerReason ||
-      triggerReasons[0] ||
-      keyFindings[0] ||
-      feedItem.summary ||
-      localConsultation?.summary ||
-      "待补充说明",
+    whyHighPriority: pickFirstText(
+      feedItem.whyHighPriority,
+      feedItem.triggerReason,
+      triggerReasons[0],
+      keyFindings[0],
+      feedItem.summary,
+      localConsultation?.summary,
+      feedItem.directorDecisionCard.reason,
+      "待补充说明"
+    ),
     recommendedOwnerName:
       dispatchEvent?.recommendedOwnerName ||
       feedItem.ownerName ||
@@ -737,9 +814,9 @@ function buildFeedDecisionViewModel(params: {
     generatedAtLabel: formatDateTimeLabel(feedItem.generatedAt),
     triggerReasons,
     keyFindings,
-    schoolActions: takeUnique(localConsultation?.todayInSchoolActions ?? [], 2),
-    homeActions: takeUnique(localConsultation?.tonightAtHomeActions ?? [], 2),
-    followUpActions: takeUnique(localConsultation?.followUp48h ?? [], 2),
+    schoolActions,
+    homeActions,
+    followUpActions,
   };
 }
 
@@ -759,6 +836,30 @@ function buildLocalConsultationMaps(localConsultations: ConsultationResult[]) {
   }
 
   return { byConsultationId, latestByChildId };
+}
+
+function buildVisibleConsultationCountByChildId(params: {
+  normalizedFeedItems: AdminConsultationFeedItem[];
+  localConsultations: ConsultationResult[];
+  hasFeedItems: boolean;
+}) {
+  const counts = new Map<string, number>();
+  const increment = (childId: string) => {
+    counts.set(childId, (counts.get(childId) ?? 0) + 1);
+  };
+
+  if (params.hasFeedItems) {
+    params.normalizedFeedItems
+      .filter((item) => item.shouldEscalateToAdmin)
+      .forEach((item) => increment(item.childId));
+    return counts;
+  }
+
+  params.localConsultations
+    .filter((consultation) => consultation.shouldEscalateToAdmin)
+    .forEach((consultation) => increment(consultation.childId));
+
+  return counts;
 }
 
 function buildPrioritySortValue(item: AdminConsultationPriorityItem) {
@@ -784,21 +885,32 @@ export function buildAdminConsultationPriorityItems(params: {
   const localMaps = buildLocalConsultationMaps(localConsultations);
   const hasFeedItems = Array.isArray(params.feedItems);
   const feedItems: unknown[] = Array.isArray(params.feedItems) ? params.feedItems : [];
-
-  const items = hasFeedItems
+  const normalizedFeedItems = hasFeedItems
     ? feedItems
         .map((item) => normalizeAdminConsultationFeedItem(item))
+        .flatMap((item) => (item ? [item] : []))
+    : [];
+  const visibleConsultationCountByChildId = buildVisibleConsultationCountByChildId({
+    normalizedFeedItems,
+    localConsultations,
+    hasFeedItems,
+  });
+
+  const items = hasFeedItems
+    ? normalizedFeedItems
         .flatMap((feedItem) => {
-          if (!feedItem || !feedItem.shouldEscalateToAdmin) {
+          if (!feedItem.shouldEscalateToAdmin) {
             return [];
           }
 
           const child = childMap.get(feedItem.childId);
-          const dispatchEvent = resolveDispatchEvent(
-            feedItem.consultationId,
-            feedItem.childId,
-            notificationEvents
-          );
+          const dispatchEvent = resolveDispatchEvent({
+            consultationId: feedItem.consultationId,
+            childId: feedItem.childId,
+            notificationEvents,
+            visibleConsultationCountForChild:
+              visibleConsultationCountByChildId.get(feedItem.childId) ?? 0,
+          });
           const localConsultation =
             localMaps.byConsultationId.get(feedItem.consultationId) ??
             localMaps.latestByChildId.get(feedItem.childId);
@@ -831,11 +943,13 @@ export function buildAdminConsultationPriorityItems(params: {
       ? localConsultations
           .filter((consultation) => consultation.shouldEscalateToAdmin)
           .map((consultation) => {
-            const dispatchEvent = resolveDispatchEvent(
-              consultation.consultationId,
-              consultation.childId,
-              notificationEvents
-            );
+            const dispatchEvent = resolveDispatchEvent({
+              consultationId: consultation.consultationId,
+              childId: consultation.childId,
+              notificationEvents,
+              visibleConsultationCountForChild:
+                visibleConsultationCountByChildId.get(consultation.childId) ?? 0,
+            });
 
             return {
               consultationId: consultation.consultationId,

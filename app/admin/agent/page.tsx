@@ -26,8 +26,9 @@ import { buildAdminConsultationPriorityItems } from "@/lib/agent/admin-consultat
 import {
   ADMIN_AGENT_QUICK_QUESTIONS,
   attachNotificationEventToResult,
+  attachNotificationEventsToResult,
 } from "@/lib/agent/admin-agent";
-import { useAdminConsultationFeed } from "@/lib/agent/use-admin-consultation-feed";
+import { useAdminWorkspaceLoader } from "@/lib/agent/use-admin-workspace-loader";
 import type {
   AdminAgentRequestPayload,
   AdminAgentResult,
@@ -73,21 +74,6 @@ function buildHistoryMessages(history: HistoryEntry[]) {
   return messages.slice(-8);
 }
 
-function upsertNotificationEvent(events: AdminDispatchEvent[], nextEvent: AdminDispatchEvent) {
-  const statusRank = {
-    pending: 0,
-    in_progress: 1,
-    completed: 2,
-  } as const;
-
-  return [nextEvent, ...events.filter((event) => event.id !== nextEvent.id)].sort((left, right) => {
-    const statusDiff = statusRank[left.status] - statusRank[right.status];
-    if (statusDiff !== 0) return statusDiff;
-    if (right.priorityScore !== left.priorityScore) return right.priorityScore - left.priorityScore;
-    return right.updatedAt.localeCompare(left.updatedAt);
-  });
-}
-
 export default function AdminAgentPage() {
   const searchParams = useSearchParams();
   const {
@@ -103,9 +89,19 @@ export default function AdminAgentPage() {
     getSmartInsights,
     getLatestConsultations,
   } = useApp();
-  const [notificationEvents, setNotificationEvents] = useState<AdminDispatchEvent[]>([]);
-  const [notificationError, setNotificationError] = useState<string | null>(null);
-  const [notificationReady, setNotificationReady] = useState(false);
+  const {
+    consultationFeed,
+    notificationEvents,
+    notificationError,
+    notificationReady,
+    upsertNotificationEvent,
+  } = useAdminWorkspaceLoader({
+    visibleChildrenCount: visibleChildren.length,
+    consultationFeedOptions: {
+      limit: 4,
+      escalatedOnly: true,
+    },
+  });
   const [result, setResult] = useState<AdminAgentResult | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -160,11 +156,6 @@ export default function AdminAgentPage() {
       })),
     [visibleChildren]
   );
-  const consultationFeed = useAdminConsultationFeed({
-    enabled: notificationReady && visibleChildren.length > 0,
-    limit: 4,
-    escalatedOnly: true,
-  });
   const consultationPriorityItems = useMemo(
     () =>
       buildAdminConsultationPriorityItems({
@@ -208,49 +199,6 @@ export default function AdminAgentPage() {
     };
   }, [consultationFeed.status, latestConsultations.length]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadNotificationEvents() {
-      try {
-        const response = await fetch("/api/admin/notification-events", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-        const data = (await response.json()) as {
-          items?: AdminDispatchEvent[];
-          error?: string;
-        };
-
-        if (cancelled) return;
-
-        if (!response.ok) {
-          setNotificationEvents([]);
-          setNotificationError(data.error ?? "通知事件加载失败");
-          setNotificationReady(true);
-          return;
-        }
-
-        setNotificationEvents(data.items ?? []);
-        setNotificationError(null);
-        setNotificationReady(true);
-      } catch (error) {
-        if (cancelled) return;
-        console.error("[ADMIN_AGENT] Failed to load notification events", error);
-        setNotificationEvents([]);
-        setNotificationError("通知事件加载失败");
-        setNotificationReady(true);
-      }
-    }
-
-    void loadNotificationEvents();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const runWorkflow = useCallback(async (
     workflow: AdminAgentRequestPayload["workflow"],
     options?: { question?: string; label?: string }
@@ -279,7 +227,8 @@ export default function AdminAgentPage() {
         return;
       }
 
-      setResult(data);
+      const nextResult = attachNotificationEventsToResult(data, notificationEvents);
+      setResult(nextResult);
       setHistory((prev) => [
         ...prev,
         {
@@ -293,7 +242,7 @@ export default function AdminAgentPage() {
                 ? "本周运营周报"
                 : options?.question ?? "继续追问"),
           prompt: workflow === "question-follow-up" ? options?.question : undefined,
-          result: data,
+          result: nextResult,
         },
       ]);
     } catch (error) {
@@ -302,10 +251,10 @@ export default function AdminAgentPage() {
     } finally {
       setLoading(false);
     }
-  }, [history, payload]);
+  }, [history, notificationEvents, payload]);
 
   useEffect(() => {
-    if (!notificationReady || visibleChildren.length === 0 || initializedRef.current) return;
+    if (visibleChildren.length === 0 || initializedRef.current) return;
 
     initializedRef.current = true;
     const preloadAction = searchParams.get("action");
@@ -313,7 +262,25 @@ export default function AdminAgentPage() {
     const label = preloadAction === "weekly-report" ? "本周运营周报" : "今日机构优先事项";
 
     void runWorkflow(workflow, { label });
-  }, [notificationReady, runWorkflow, searchParams, visibleChildren.length]);
+  }, [runWorkflow, searchParams, visibleChildren.length]);
+
+  useEffect(() => {
+    if (!notificationReady) return;
+
+    if (notificationEvents.length === 0) {
+      return;
+    }
+
+    setResult((previous) =>
+      previous ? attachNotificationEventsToResult(previous, notificationEvents) : previous
+    );
+    setHistory((previous) =>
+      previous.map((entry) => ({
+        ...entry,
+        result: attachNotificationEventsToResult(entry.result, notificationEvents),
+      }))
+    );
+  }, [notificationEvents, notificationReady]);
 
   async function handleCreateDispatch(actionItem: AdminAgentActionItem) {
     setDispatchingId(actionItem.id);
@@ -334,8 +301,7 @@ export default function AdminAgentPage() {
         return;
       }
 
-      setNotificationEvents((prev) => upsertNotificationEvent(prev, data.item!));
-      setNotificationError(null);
+      upsertNotificationEvent(data.item!);
       setResult((prev) => (prev ? attachNotificationEventToResult(prev, data.item!) : prev));
       setHistory((prev) =>
         prev.map((entry) => ({
@@ -375,7 +341,7 @@ export default function AdminAgentPage() {
         return;
       }
 
-      setNotificationEvents((prev) => upsertNotificationEvent(prev, data.item!));
+      upsertNotificationEvent(data.item!);
       setResult((prev) => (prev ? attachNotificationEventToResult(prev, data.item!) : prev));
       setHistory((prev) =>
         prev.map((entry) => ({

@@ -163,6 +163,16 @@ def _build_memory_meta_summary(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_sync_targets(result: dict[str, Any]) -> list[str]:
+    targets = [
+        "\u6559\u5e08\u7aef\u7ed3\u679c\u5361",
+        "\u5bb6\u957f\u7aef\u4eca\u665a\u4efb\u52a1",
+    ]
+    if bool(result.get("shouldEscalateToAdmin")):
+        targets.append("\u56ed\u957f\u7aef\u51b3\u7b56\u5361")
+    return targets
+
+
 def _matches_filters(
     *,
     item: dict[str, Any],
@@ -238,6 +248,25 @@ async def list_high_risk_consultation_feed(
         )
 
         director_decision = safe_dict(normalized_result.get("directorDecisionCard"))
+        trigger_reasons = _as_string_list(normalized_result.get("triggerReasons"), limit=6)
+        key_findings = _as_string_list(normalized_result.get("keyFindings"), limit=4)
+        today_in_school_actions = _as_string_list(
+            normalized_result.get("todayInSchoolActions"),
+            limit=4,
+        )
+        tonight_at_home_actions = _as_string_list(
+            normalized_result.get("tonightAtHomeActions"),
+            limit=4,
+        )
+        follow_up_48h = _as_string_list(normalized_result.get("followUp48h"), limit=4)
+        why_high_priority = _coalesce_text(
+            normalized_result.get("whyHighPriority"),
+            safe_dict(normalized_result.get("coordinatorSummary")).get("problemDefinition"),
+            normalized_result.get("triggerReason"),
+            key_findings[0] if key_findings else "",
+            normalized_result.get("summary"),
+            director_decision.get("reason"),
+        )
         item = {
             "consultationId": consultation_id,
             "childId": _as_text(normalized_result.get("childId")),
@@ -246,15 +275,33 @@ async def list_high_risk_consultation_feed(
             "riskLevel": _as_text(normalized_result.get("riskLevel")),
             "triggerReason": _coalesce_text(
                 normalized_result.get("triggerReason"),
-                _as_string_list(normalized_result.get("triggerReasons"), limit=1)[0] if _as_string_list(normalized_result.get("triggerReasons"), limit=1) else "",
+                trigger_reasons[0] if trigger_reasons else "",
             ),
-            "triggerReasons": _as_string_list(normalized_result.get("triggerReasons"), limit=6),
+            "triggerReasons": trigger_reasons,
             "summary": _coalesce_text(normalized_result.get("summary")),
             "directorDecisionCard": director_decision,
-            "status": _coalesce_text(director_decision.get("status"), fallback="pending"),
-            "ownerName": _coalesce_text(director_decision.get("recommendedOwnerName")),
-            "ownerRole": _coalesce_text(director_decision.get("recommendedOwnerRole")),
-            "dueAt": _coalesce_text(director_decision.get("recommendedAt")),
+            "status": _coalesce_text(
+                normalized_result.get("status"),
+                director_decision.get("status"),
+                fallback="pending",
+            ),
+            "ownerName": _coalesce_text(
+                normalized_result.get("ownerName"),
+                director_decision.get("recommendedOwnerName"),
+            ),
+            "ownerRole": _coalesce_text(
+                normalized_result.get("ownerRole"),
+                director_decision.get("recommendedOwnerRole"),
+            ),
+            "dueAt": _coalesce_text(
+                normalized_result.get("dueAt"),
+                director_decision.get("recommendedAt"),
+            ),
+            "whyHighPriority": why_high_priority,
+            "todayInSchoolActions": today_in_school_actions,
+            "tonightAtHomeActions": tonight_at_home_actions,
+            "followUp48h": follow_up_48h,
+            "syncTargets": _build_sync_targets(normalized_result),
             "shouldEscalateToAdmin": bool(normalized_result.get("shouldEscalateToAdmin")),
             "explainabilitySummary": _build_explainability_summary(normalized_result),
             "providerTraceSummary": _build_provider_trace_summary(

@@ -788,3 +788,13 @@ export function attachNotificationEventToResult(
     recommendedOwnerMap: buildRecommendedOwnerMap(nextActionItems),
   };
 }
+
+export function attachNotificationEventsToResult(
+  result: AdminAgentResult,
+  events: AdminDispatchEvent[]
+): AdminAgentResult {
+  return sortNotificationEvents(events).reduce(
+    (nextResult, event) => attachNotificationEventToResult(nextResult, event),
+    result
+  );
+}
