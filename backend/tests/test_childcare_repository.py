@@ -73,3 +73,29 @@ def test_childcare_repository_request_snapshot_supports_real_request_scoped_writ
     assert draft_result["record"]["content"] == "近 7 天饮食需持续跟进。"
     assert draft_result["persisted"] is False
     assert repository.snapshot["mobileDrafts"][0]["childId"] == "c-11"
+
+
+def test_childcare_repository_demo_snapshot_expands_to_36_children_and_recent_histories():
+    repository = asyncio.run(ChildcareRepository.create(app_snapshot=None, institution_id=None, database_url=None))
+
+    child_ids = {child["id"] for child in repository.snapshot["children"]}
+    assert repository.source == "demo_snapshot"
+    assert repository.fallback is True
+    assert len(repository.snapshot["children"]) == 36
+    assert len(child_ids) == 36
+    assert repository.get_child_by_id("c-16")["name"] == "高子墨"
+
+    for bucket in ("attendance", "meals", "growth", "feedback", "health"):
+        bucket_child_ids = {record["childId"] for record in repository.snapshot[bucket]}
+        assert bucket_child_ids <= child_ids
+
+    c8_history = repository.get_child_history("c-8", 14)
+    c11_history = repository.get_child_history("c-11", 7)
+    c15_history = repository.get_child_history("c-15", 7)
+
+    assert c8_history["aggregates"]["observationCount"] >= 2
+    assert c8_history["aggregates"]["feedbackCount"] >= 1
+    assert c11_history["aggregates"]["mealCount"] >= 3
+    assert c11_history["aggregates"]["pickyEatingSignals"] >= 1
+    assert c15_history["aggregates"]["mealCount"] >= 3
+    assert any(record["isAbnormal"] for record in c15_history["health"])

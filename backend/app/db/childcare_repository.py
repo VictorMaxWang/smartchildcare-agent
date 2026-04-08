@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import aiomysql
 
+from app.db.demo_snapshot import build_demo_snapshot
+
 
 DEFAULT_SNAPSHOT_KEYS = (
     "children",
@@ -313,6 +315,10 @@ def _build_mysql_kwargs(url: str) -> dict[str, Any]:
         "cursorclass": aiomysql.DictCursor,
         "ssl": ssl_value,
     }
+
+
+def _demo_snapshot() -> dict[str, Any]:
+    return _normalize_snapshot(build_demo_snapshot())
 
 
 def _meal_summary(record: dict[str, Any]) -> str:

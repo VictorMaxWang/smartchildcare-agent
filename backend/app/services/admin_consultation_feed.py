@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from app.db.demo_snapshot import build_demo_consultation_feed_items
 from app.db.repositories import RepositoryBundle
 from app.services.high_risk_consultation_contract import normalize_high_risk_consultation_result
 from app.tools.summary_tools import safe_dict, safe_list, unique_texts
@@ -321,6 +322,18 @@ async def list_high_risk_consultation_feed(
             escalated_only=escalated_only,
         ):
             items.append(item)
+
+    if not items:
+        for item in build_demo_consultation_feed_items():
+            if _matches_filters(
+                item=item,
+                child_id=child_id,
+                risk_level=risk_level,
+                status=status,
+                owner_name=owner_name,
+                escalated_only=escalated_only,
+            ):
+                items.append(dict(item))
 
     items.sort(key=_sort_key, reverse=True)
     count = len(items)

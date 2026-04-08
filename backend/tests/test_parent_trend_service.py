@@ -317,6 +317,22 @@ def test_parent_trend_service_growth_overall_marks_sparse_with_warning():
     assert result["series"][0]["id"] == "overall_growth_score"
 
 
+def test_parent_trend_service_demo_snapshot_supports_key_demo_children():
+    demo_cases = [
+        ("c-8", "最近两周午睡稳定吗？", "sleep"),
+        ("c-11", "这周饮食情况有改善吗？", "diet"),
+        ("c-15", "这周饮食和补水情况有改善吗？", "diet"),
+    ]
+
+    for child_id, question, intent in demo_cases:
+        result = asyncio.run(run_parent_trend_query({"question": question, "childId": child_id}))
+        assert result["intent"] == intent
+        assert result["source"] == "demo_snapshot"
+        assert result["fallback"] is True
+        assert result["dataQuality"]["fallbackUsed"] is True
+        assert result["series"]
+
+
 def test_parent_trend_service_defaults_to_seven_day_window():
     result = asyncio.run(
         run_parent_trend_query(

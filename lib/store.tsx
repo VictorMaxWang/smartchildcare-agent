@@ -49,6 +49,7 @@ export const BEHAVIOR_CATEGORIES: BehaviorCategory[] = [
 export const MEAL_TYPES: MealType[] = ["早餐", "午餐", "晚餐", "加餐"];
 export const FOOD_CATEGORY_OPTIONS: FoodCategory[] = ["蔬果", "蛋白", "主食", "奶制品", "饮品", "其他"];
 export const INSTITUTION_NAME = "春芽普惠托育中心";
+const DEMO_DATASET_VERSION = "v2-36-curated";
 
 const TODAY = getLocalToday();
 const UNAUTHENTICATED_USER: User = {
@@ -1987,9 +1988,9 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
       tags: [...record.tags],
       selectedIndicators: record.selectedIndicators ? [...record.selectedIndicators] : undefined,
     })),
-    feedback: INITIAL_FEEDBACKS.map((record) => ({ ...record })),
+    feedback: ALL_INITIAL_FEEDBACKS.map((record) => ({ ...record })),
     health: ALL_INITIAL_HEALTH_CHECKS.map((record) => ({ ...record })),
-    taskCheckIns: INITIAL_TASK_CHECKINS.map((record) => ({ ...record })),
+    taskCheckIns: ALL_INITIAL_TASK_CHECKINS.map((record) => ({ ...record })),
     interventionCards: [],
     consultations: [],
     mobileDrafts: [],
@@ -2102,6 +2103,8 @@ function validateDemoSnapshotCoverage(snapshot: AppStateSnapshot, targetToday: s
   const todayHealthCount = snapshot.health.filter((record) => record.date === targetToday).length;
   const todayAttendanceCount = snapshot.attendance.filter((record) => record.date === targetToday && record.isPresent).length;
   const todayMealCount = snapshot.meals.filter((record) => record.date === targetToday).length;
+  const childIds = new Set(snapshot.children.map((child) => child.id));
+  const allowedTaskIds = new Set(["task_001", "task_002", "task_003", "task_004", "task_005", "task_006"]);
   const attendanceLookup = buildAttendanceLookup(snapshot.attendance);
   const orphanMealCount = snapshot.meals.filter(
     (record) => !attendanceLookup.get(buildRecordKey(record.childId, record.date))?.isPresent
@@ -2109,6 +2112,14 @@ function validateDemoSnapshotCoverage(snapshot: AppStateSnapshot, targetToday: s
   const orphanHealthCount = snapshot.health.filter(
     (record) => !attendanceLookup.get(buildRecordKey(record.childId, record.date))?.isPresent
   ).length;
+  const missingChildRefCount =
+    snapshot.attendance.filter((record) => !childIds.has(record.childId)).length +
+    snapshot.meals.filter((record) => !childIds.has(record.childId)).length +
+    snapshot.health.filter((record) => !childIds.has(record.childId)).length +
+    snapshot.growth.filter((record) => !childIds.has(record.childId)).length +
+    snapshot.feedback.filter((record) => !childIds.has(record.childId)).length +
+    snapshot.taskCheckIns.filter((record) => !childIds.has(record.childId)).length;
+  const invalidTaskIdCount = snapshot.taskCheckIns.filter((record) => !allowedTaskIds.has(record.taskId)).length;
 
   const hasCoverage =
     todayAttendanceCount > 0 &&
@@ -2116,13 +2127,15 @@ function validateDemoSnapshotCoverage(snapshot: AppStateSnapshot, targetToday: s
     todayGrowthCount > 0 &&
     todayHealthCount > 0 &&
     orphanMealCount === 0 &&
-    orphanHealthCount === 0;
+    orphanHealthCount === 0 &&
+    missingChildRefCount === 0 &&
+    invalidTaskIdCount === 0;
 
   if (hasCoverage) {
     return snapshot;
   }
 
-  const message = `[DEMO] Snapshot coverage invalid for ${targetToday}: attendance=${todayAttendanceCount}, meals=${todayMealCount}, growth=${todayGrowthCount}, health=${todayHealthCount}, orphanMeals=${orphanMealCount}, orphanHealth=${orphanHealthCount}`;
+  const message = `[DEMO] Snapshot coverage invalid for ${targetToday}: attendance=${todayAttendanceCount}, meals=${todayMealCount}, growth=${todayGrowthCount}, health=${todayHealthCount}, orphanMeals=${orphanMealCount}, orphanHealth=${orphanHealthCount}, missingChildRefs=${missingChildRefCount}, invalidTaskIds=${invalidTaskIdCount}`;
   if (process.env.NODE_ENV !== "production") {
     throw new Error(message);
   }
@@ -2230,276 +2243,1724 @@ function groupRecordsByChildId<T extends { childId: string }>(records: T[]) {
   }, new Map<string, T[]>());
 }
 
-const EXTRA_NAMES = ["陈子昂", "李沐宸", "张依诺", "王梓瑜", "刘佳怡", "赵梓轩", "黄语桐", "周浩轩", "吴雨桐", "孙可馨", "徐皓轩", "马伊诺", "朱俊熙", "胡子萱", "郭梓睿", "何瑾瑜", "高梦琪", "林子涵", "郑宇辰", "梁奕辰"];
-const EXTRA_GENDERS = ["男", "男", "女", "女", "女", "男", "女", "男", "女", "女", "男", "女", "男", "女", "男", "女", "女", "女", "男", "男"];
+type ExtraMealStyle = "balanced" | "gentleRecovery" | "hydrationFocusNeeded" | "positiveHighHydration";
+type ExtraHealthStyle =
+  | "morningCheckAlert"
+  | "separationAnxiety"
+  | "napWatch"
+  | "hydrationWatch"
+  | "emotionWatch"
+  | "socialCoaching"
+  | "positiveSteady";
 
-const EXTRA_GEN_CHILDREN: Child[] = EXTRA_NAMES.map((name, i) => {
-  const isBoy = EXTRA_GENDERS[i] === "男";
+type ExtraGrowthSeed = {
+  idSuffix: string;
+  dayIndex: number;
+  time: string;
+  recorder: string;
+  recorderRole: Role;
+  category: BehaviorCategory;
+  tags: string[];
+  description: string;
+  needsAttention: boolean;
+  followUpAction?: string;
+  reviewOffset?: number;
+  reviewStatus?: GrowthRecord["reviewStatus"];
+};
+
+type ExtraFeedbackSeed = {
+  idSuffix: string;
+  dayIndex: number;
+  status: CollaborationStatus;
+  content: string;
+  createdBy: string;
+  createdByRole: Role;
+};
+
+type ExtraTaskSeed = {
+  idSuffix: string;
+  dayIndex: number;
+  taskId: string;
+};
+
+type ExtraChildSeed = {
+  child: Child;
+  attendancePlan: DemoAttendanceSeed[];
+  mealStyle: ExtraMealStyle;
+  healthStyle: ExtraHealthStyle;
+  growthSeeds: ExtraGrowthSeed[];
+  feedbackSeeds: ExtraFeedbackSeed[];
+  taskSeeds: ExtraTaskSeed[];
+};
+
+type ExtraMealPlan = {
+  breakfastFoods: DemoMealFoodSeed[];
+  lunchFoods: DemoMealFoodSeed[];
+  snackFoods: DemoMealFoodSeed[];
+  breakfastWater: number;
+  lunchWater: number;
+  snackWater: number;
+  breakfastPreference: PreferenceStatus;
+  lunchPreference: PreferenceStatus;
+  snackPreference: PreferenceStatus;
+  breakfastIntake: IntakeLevel;
+  lunchIntake: IntakeLevel;
+  snackIntake: IntakeLevel;
+};
+
+type ExtraHealthEntry = {
+  temperature: number;
+  mood: string;
+  remark: string;
+  handMouthEye: "正常" | "异常";
+};
+
+function rotateSeed<T>(items: T[], index: number) {
+  return items[index % items.length];
+}
+
+function buildExtraGrowthRecord(childId: string, seed: ExtraGrowthSeed): GrowthRecord {
   return {
-    id: `c-${i + 17}`,
-    name,
-    nickname: name.slice(1),
-    birthDate: `2022-0${Math.floor(Math.random() * 8) + 1}-1${Math.floor(Math.random() * 8)}`,
-    gender: EXTRA_GENDERS[i] as "男" | "女",
-    allergies: Math.random() < 0.2 ? ["芒果"] : [],
-    heightCm: Math.floor(Math.random() * 20) + 90,
-    weightKg: Number((Math.random() * 5 + 13).toFixed(1)),
-    guardians: [{ name: `${name[0]}${isBoy ? "爸爸" : "妈妈"}`, relation: isBoy ? "父亲" : "母亲", phone: `138****${1000 + i * 7}` }],
-    institutionId: "inst-1",
-    className: i % 2 === 0 ? "向阳班" : "晨曦班",
-    specialNotes: "已适应托育环境。",
-    avatar: isBoy ? "👦" : "👧",
+    id: `g-${childId}-${seed.idSuffix}`,
+    childId,
+    createdAt: `${DEMO_WEEK_DATES[seed.dayIndex]} ${seed.time}`,
+    recorder: seed.recorder,
+    recorderRole: seed.recorderRole,
+    category: seed.category,
+    tags: seed.tags,
+    description: seed.description,
+    needsAttention: seed.needsAttention,
+    followUpAction: seed.followUpAction,
+    reviewDate: seed.reviewOffset !== undefined ? shiftDate(DEMO_TEMPLATE_TODAY, seed.reviewOffset) : undefined,
+    reviewStatus: seed.reviewStatus ?? (seed.needsAttention ? "待复查" : "已完成"),
   };
-});
+}
 
-const LEGACY_EXTRA_GEN_MEALS: MealRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
-  DEMO_WEEK_DATES.flatMap((date, i) => [
-    createMealRecord(
-      `m-${child.id}-breakfast-${i + 1}`,
-      child.id,
-      date,
-      "早餐",
-      [["牛奶", "奶制品", "180ml"], ["鸡蛋", "蛋白", "1个"], ["全麦面包", "主食", "2片"]],
-      120 + (i % 3) * 5,
-      "正常",
-      "李老师",
-      "教师",
-      "适中"
-    ),
-    createMealRecord(
-      `m-${child.id}-lunch-${i + 1}`,
-      child.id,
-      date,
-      "午餐",
-      [["米饭", "主食", "1碗"], i % 2 === 0 ? ["鸡肉", "蛋白", "60g"] : ["牛肉", "蛋白", "50g"], ["青菜", "蔬果", "50g"]],
-      150 + (i % 5) * 5,
-      "正常",
-      "李老师",
-      "教师",
-      "充足"
-    ),
-    createMealRecord(
-      `m-${child.id}-snack-${i + 1}`,
-      child.id,
-      date,
-      "加餐",
-      [["香蕉", "蔬果", "半根"], ["酸奶", "奶制品", "100ml"]],
-      100 + (i % 2) * 10,
-      "正常",
-      "李老师",
-      "教师",
-      "适中"
-    )
-  ])
-);
+function buildExtraFeedbackRecord(childId: string, seed: ExtraFeedbackSeed): GuardianFeedback {
+  return {
+    id: `fb-${childId}-${seed.idSuffix}`,
+    childId,
+    date: DEMO_WEEK_DATES[seed.dayIndex],
+    status: seed.status,
+    content: seed.content,
+    createdBy: seed.createdBy,
+    createdByRole: seed.createdByRole,
+  };
+}
 
-const LEGACY_EXTRA_GEN_ATTENDANCE: AttendanceRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
-  DEMO_WEEK_DATES.map((date, i) => ({
-    id: `a-${child.id}-${i + 1}`,
-    childId: child.id,
-    date,
-    isPresent: true,
-    checkInAt: `08:${20 + (i % 10)}`,
-    checkOutAt: `17:${10 + (i % 10)}`,
+function buildExtraTaskCheckInRecord(childId: string, seed: ExtraTaskSeed): TaskCheckInRecord {
+  return {
+    id: `tc-${childId}-${seed.idSuffix}`,
+    childId,
+    taskId: seed.taskId,
+    date: DEMO_WEEK_DATES[seed.dayIndex],
+  };
+}
+
+function buildExtraMealPlan(style: ExtraMealStyle, dayIndex: number): ExtraMealPlan {
+  const balancedBreakfasts: DemoMealFoodSeed[][] = [
+    [["燕麦南瓜粥", "主食", "1碗"], ["蒸蛋", "蛋白", "1份"], ["蓝莓", "蔬果", "1小份"]],
+    [["豆浆", "饮品", "180ml"], ["全麦面包", "主食", "2片"], ["苹果块", "蔬果", "40g"]],
+    [["玉米小米粥", "主食", "1碗"], ["鸡肉松饭团", "蛋白", "1个"], ["圣女果", "蔬果", "3颗"]],
+  ];
+  const balancedLunches: DemoMealFoodSeed[][] = [
+    [["杂粮饭", "主食", "1碗"], ["清炖鸡腿肉", "蛋白", "70g"], ["西兰花胡萝卜", "蔬果", "60g"]],
+    [["番茄牛肉意面", "主食", "1份"], ["牛肉末", "蛋白", "65g"], ["生菜玉米粒", "蔬果", "55g"]],
+    [["南瓜饭", "主食", "1碗"], ["香菇豆腐", "蛋白", "70g"], ["油麦菜", "蔬果", "60g"]],
+  ];
+  const balancedSnacks: DemoMealFoodSeed[][] = [
+    [["酸奶", "奶制品", "100ml"], ["香蕉", "蔬果", "半根"]],
+    [["玉米棒", "主食", "半份"], ["梨块", "蔬果", "40g"]],
+    [["红豆小发糕", "主食", "1块"], ["橙子片", "蔬果", "2片"]],
+  ];
+  const gentleBreakfasts: DemoMealFoodSeed[][] = [
+    [["小米山药粥", "主食", "1碗"], ["鸡蛋羹", "蛋白", "半份"], ["温水", "饮品", "120ml"]],
+    [["南瓜粥", "主食", "1碗"], ["豆腐小卷", "蛋白", "2个"], ["苹果泥", "蔬果", "30g"]],
+    [["银耳百合粥", "主食", "1碗"], ["鸡丝面片", "蛋白", "半份"], ["温水", "饮品", "120ml"]],
+  ];
+  const gentleLunches: DemoMealFoodSeed[][] = [
+    [["米饭", "主食", "1碗"], ["虾仁豆腐羹", "蛋白", "60g"], ["青菜碎", "蔬果", "45g"]],
+    [["软面条", "主食", "1碗"], ["鸡蓉蒸蛋", "蛋白", "60g"], ["南瓜丁", "蔬果", "40g"]],
+    [["山药饭", "主食", "1碗"], ["清蒸鱼块", "蛋白", "55g"], ["西葫芦丁", "蔬果", "45g"]],
+  ];
+  const gentleSnacks: DemoMealFoodSeed[][] = [
+    [["蒸苹果", "蔬果", "40g"], ["温开水", "饮品", "120ml"]],
+    [["小米糕", "主食", "1块"], ["香蕉片", "蔬果", "30g"]],
+    [["原味酸奶", "奶制品", "90ml"], ["火龙果块", "蔬果", "30g"]],
+  ];
+  const positiveBreakfasts: DemoMealFoodSeed[][] = [
+    [["牛油果鸡蛋卷", "蛋白", "1份"], ["全麦吐司", "主食", "2片"], ["草莓", "蔬果", "3颗"]],
+    [["玉米燕麦粥", "主食", "1碗"], ["芝士土豆泥", "奶制品", "50g"], ["蓝莓", "蔬果", "1小份"]],
+    [["杂粮小饭团", "主食", "2个"], ["鸡肉条", "蛋白", "50g"], ["橙子片", "蔬果", "2片"]],
+  ];
+  const positiveLunches: DemoMealFoodSeed[][] = [
+    [["糙米饭", "主食", "1碗"], ["番茄牛肉丸", "蛋白", "70g"], ["西兰花彩椒", "蔬果", "70g"]],
+    [["紫薯饭", "主食", "1碗"], ["香煎三文鱼", "蛋白", "65g"], ["芦笋胡萝卜", "蔬果", "65g"]],
+    [["鸡茸蔬菜烩饭", "主食", "1碗"], ["鸡茸", "蛋白", "60g"], ["菠菜玉米粒", "蔬果", "65g"]],
+  ];
+  const positiveSnacks: DemoMealFoodSeed[][] = [
+    [["酸奶水果杯", "奶制品", "120ml"], ["哈密瓜块", "蔬果", "50g"]],
+    [["蒸南瓜", "蔬果", "50g"], ["温豆浆", "饮品", "160ml"]],
+    [["全麦饼干", "主食", "2片"], ["奇异果片", "蔬果", "2片"]],
+  ];
+  const lowHydrationVegDay = dayIndex === 1 || dayIndex === 5;
+  const lowHydrationBreakfast = lowHydrationVegDay
+    ? ([["南瓜小粥", "主食", "半碗"], ["鸡肉小卷", "蛋白", "1个"], ["香蕉片", "蔬果", "20g"]] as DemoMealFoodSeed[])
+    : ([["白粥", "主食", "半碗"], ["鸡肉丸", "蛋白", "2颗"], ["苏打饼干", "主食", "2片"]] as DemoMealFoodSeed[]);
+  const lowHydrationLunch = lowHydrationVegDay
+    ? ([["米饭", "主食", "1小碗"], ["肉末豆腐", "蛋白", "55g"], ["小白菜", "蔬果", "35g"]] as DemoMealFoodSeed[])
+    : ([["米饭", "主食", "1小碗"], ["鸡腿肉", "蛋白", "55g"], ["小馒头", "主食", "1个"]] as DemoMealFoodSeed[]);
+  const lowHydrationSnack = lowHydrationVegDay
+    ? ([["苹果片", "蔬果", "25g"], ["小米糕", "主食", "1块"]] as DemoMealFoodSeed[])
+    : ([["磨牙饼干", "主食", "2片"], ["温豆浆", "饮品", "70ml"]] as DemoMealFoodSeed[]);
+
+  switch (style) {
+    case "gentleRecovery":
+      return {
+        breakfastFoods: rotateSeed(gentleBreakfasts, dayIndex),
+        lunchFoods: rotateSeed(gentleLunches, dayIndex),
+        snackFoods: rotateSeed(gentleSnacks, dayIndex),
+        breakfastWater: [90, 85, 88, 92, 94, 96, 98][dayIndex],
+        lunchWater: [120, 118, 122, 125, 128, 130, 132][dayIndex],
+        snackWater: [70, 72, 68, 74, 76, 78, 80][dayIndex],
+        breakfastPreference: dayIndex === 0 ? "正常" : "偏好",
+        lunchPreference: "正常",
+        snackPreference: "正常",
+        breakfastIntake: dayIndex === 2 ? "少量" : "适中",
+        lunchIntake: dayIndex === 4 ? "少量" : "适中",
+        snackIntake: "适中",
+      };
+    case "hydrationFocusNeeded":
+      return {
+        breakfastFoods: lowHydrationBreakfast,
+        lunchFoods: lowHydrationLunch,
+        snackFoods: lowHydrationSnack,
+        breakfastWater: [30, 35, 28, 32, 34, 36, 30][dayIndex],
+        lunchWater: [42, 45, 38, 40, 44, 46, 42][dayIndex],
+        snackWater: [24, 28, 22, 25, 26, 28, 24][dayIndex],
+        breakfastPreference: dayIndex % 2 === 0 ? "正常" : "拒食",
+        lunchPreference: lowHydrationVegDay ? "正常" : "拒食",
+        snackPreference: lowHydrationVegDay ? "正常" : "偏好",
+        breakfastIntake: dayIndex % 2 === 0 ? "少量" : "适中",
+        lunchIntake: lowHydrationVegDay ? "适中" : "少量",
+        snackIntake: "少量",
+      };
+    case "positiveHighHydration":
+      return {
+        breakfastFoods: rotateSeed(positiveBreakfasts, dayIndex),
+        lunchFoods: rotateSeed(positiveLunches, dayIndex),
+        snackFoods: rotateSeed(positiveSnacks, dayIndex),
+        breakfastWater: [140, 145, 150, 148, 152, 155, 158][dayIndex],
+        lunchWater: [170, 175, 180, 178, 182, 185, 188][dayIndex],
+        snackWater: [110, 115, 120, 118, 122, 125, 128][dayIndex],
+        breakfastPreference: "偏好",
+        lunchPreference: "偏好",
+        snackPreference: "偏好",
+        breakfastIntake: "充足",
+        lunchIntake: "充足",
+        snackIntake: "适中",
+      };
+    case "balanced":
+    default:
+      return {
+        breakfastFoods: rotateSeed(balancedBreakfasts, dayIndex),
+        lunchFoods: rotateSeed(balancedLunches, dayIndex),
+        snackFoods: rotateSeed(balancedSnacks, dayIndex),
+        breakfastWater: [105, 110, 108, 112, 115, 118, 120][dayIndex],
+        lunchWater: [145, 150, 152, 155, 158, 160, 162][dayIndex],
+        snackWater: [80, 85, 88, 90, 92, 95, 98][dayIndex],
+        breakfastPreference: dayIndex === 1 ? "正常" : "偏好",
+        lunchPreference: "偏好",
+        snackPreference: dayIndex === 4 ? "正常" : "偏好",
+        breakfastIntake: "适中",
+        lunchIntake: dayIndex === 3 ? "充足" : "适中",
+        snackIntake: "适中",
+      };
+  }
+}
+
+function buildExtraHealthEntry(style: ExtraHealthStyle, childId: string, dayIndex: number): ExtraHealthEntry {
+  if (style === "morningCheckAlert") {
+    if (childId === "c-17") {
+      return {
+        temperature: [36.7, 36.8, 36.9, 37.1, 37.2, 36.9, 37.5][dayIndex],
+        mood: ["平稳", "平稳", "平稳", "困倦", "平稳", "平稳", "烦躁"][dayIndex],
+        remark: [
+          "晨检平稳，但老师已在群里提醒继续关注体温。",
+          "夜里睡眠偏浅，晨起状态一般。",
+          "上午活动量正常，午前精神略弱。",
+          "体温轻度上浮，保健老师已做复测。",
+          "午睡前出现倦怠，建议减少剧烈活动。",
+          "午后恢复稳定，继续追踪。",
+          "今晨复测 37.5℃，已通知家长并建议今日重点观察。",
+        ][dayIndex],
+        handMouthEye: dayIndex === 6 ? "异常" : "正常",
+      };
+    }
+
+    if (childId === "c-18") {
+      return {
+        temperature: [36.6, 36.5, 36.6, 36.7, 36.9, 36.7, 36.8][dayIndex],
+        mood: ["平稳", "愉快", "平稳", "平稳", "轻咳", "平稳", "平稳"][dayIndex],
+        remark: [
+          "晨检配合良好。",
+          "情绪稳定，能主动挥手告别。",
+          "晨间精神不错，活动参与积极。",
+          "咽喉略干，已提醒多喝温水。",
+          "晨起轻咳 2 次，已记录观察。",
+          "午后未再出现咳嗽。",
+          "今晨仍有轻咳，已提醒继续补水并减少冷饮。",
+        ][dayIndex],
+        handMouthEye: "正常",
+      };
+    }
+
+    return {
+      temperature: [36.7, 37.1, 36.8, 36.9, 37.0, 36.8, 37.4][dayIndex],
+      mood: ["平稳", "困倦", "平稳", "平稳", "平稳", "愉快", "困倦"][dayIndex],
+      remark: [
+        "晨检稳定，但本周已列入连续观察名单。",
+        "体温轻度上浮，已减少晨练强度。",
+        "今日恢复平稳，继续追踪。",
+        "上午精神一般，已提醒补水。",
+        "午后状态恢复，家长知情。",
+        "昨日作息提早，今日精神稍好。",
+        "今晨体温 37.4℃，建议完成离园前二次复测。",
+      ][dayIndex],
+      handMouthEye: dayIndex === 6 ? "异常" : "正常",
+    };
+  }
+
+  if (style === "separationAnxiety") {
+    return {
+      temperature: [36.5, 36.5, 36.6, 36.5, 36.6, 36.5, 36.6][dayIndex],
+      mood: ["哭闹", "黏人", "平稳", "黏人", "平稳", "愉快", "平稳"][dayIndex],
+      remark: [
+        "入园时有明显分离情绪，安抚后逐渐恢复。",
+        "需要牵手进入教室，5 分钟后可参与活动。",
+        "晨间情绪比周初稳定。",
+        "交接时仍会回头找家长，需要固定安抚句。",
+        "能跟随老师进入游戏区。",
+        "到园后 3 分钟内即可平复。",
+        "今晨仅短暂情绪波动，恢复速度较快。",
+      ][dayIndex],
+      handMouthEye: "正常",
+    };
+  }
+
+  if (style === "napWatch") {
+    return {
+      temperature: [36.5, 36.6, 36.5, 36.5, 36.6, 36.5, 36.6][dayIndex],
+      mood: ["平稳", "困倦", "平稳", "困倦", "平稳", "困倦", "平稳"][dayIndex],
+      remark: [
+        "晨起可配合，但老师已备注午睡观察。",
+        "昨晚入睡偏晚，晨起有些困倦。",
+        "上午活动状态正常。",
+        "午睡后恢复较慢，已减少高强度活动。",
+        "今天精神略好于前天。",
+        "午休前揉眼频率偏高，需要提前安静过渡。",
+        "今晨状态平稳，继续追踪午睡质量。",
+      ][dayIndex],
+      handMouthEye: "正常",
+    };
+  }
+
+  if (style === "hydrationWatch") {
+    return {
+      temperature: [36.5, 36.5, 36.6, 36.5, 36.6, 36.5, 36.6][dayIndex],
+      mood: ["平稳", "平稳", "口渴", "平稳", "口渴", "平稳", "平稳"][dayIndex],
+      remark: [
+        "晨检正常，但老师计划重点提醒饮水。",
+        "晨间食欲一般，需要观察早餐摄入。",
+        "嘴唇略干，已增加喝水提醒。",
+        "加餐时主动喝水意愿不足。",
+        "如厕前后饮水量偏少，已做记录。",
+        "午后喝水仍需老师提醒。",
+        "今晨状态平稳，继续跟踪补水习惯。",
+      ][dayIndex],
+      handMouthEye: "正常",
+    };
+  }
+
+  if (style === "emotionWatch") {
+    return {
+      temperature: [36.5, 36.5, 36.6, 36.5, 36.5, 36.6, 36.5][dayIndex],
+      mood: ["平稳", "敏感", "平稳", "烦躁", "平稳", "平稳", "平稳"][dayIndex],
+      remark: [
+        "晨检正常，情绪稳定。",
+        "转场前提醒后仍需要老师陪伴。",
+        "上午互动平稳。",
+        "环境噪声变大时出现烦躁，需要安静角落缓冲。",
+        "能在提示下表达需要帮助。",
+        "今天能主动说出不舒服的感受。",
+        "今晨状态平稳，继续关注表达方式。",
+      ][dayIndex],
+      handMouthEye: "正常",
+    };
+  }
+
+  if (style === "socialCoaching") {
+    return {
+      temperature: [36.5, 36.5, 36.6, 36.5, 36.6, 36.5, 36.5][dayIndex],
+      mood: ["愉快", "平稳", "平稳", "愉快", "平稳", "愉快", "平稳"][dayIndex],
+      remark: [
+        "晨检状态稳定，可参与合作游戏。",
+        "今天能较好地等待轮流。",
+        "上午与同伴互动较积极。",
+        "需要老师提醒用语言表达冲突。",
+        "冲突后能在提示下说出想法。",
+        "今天主动邀请同伴一起搭建。",
+        "今晨状态平稳，适合继续进行合作活动。",
+      ][dayIndex],
+      handMouthEye: "正常",
+    };
+  }
+
+  return {
+    temperature: [36.5, 36.5, 36.6, 36.5, 36.5, 36.6, 36.5][dayIndex],
+    mood: ["愉快", "平稳", "愉快", "平稳", "愉快", "平稳", "愉快"][dayIndex],
+    remark: [
+      "晨检平稳，精神饱满。",
+      "能主动问好并排队洗手。",
+      "上午活动参与积极。",
+      "可独立进入晨间任务。",
+      "与同伴互动友好。",
+      "饮水和进餐都较主动。",
+      "今晨状态良好，可继续承担示范角色。",
+    ][dayIndex],
+    handMouthEye: "正常",
+  };
+}
+
+function presentSeed(checkInAt: string, checkOutAt: string): DemoAttendanceSeed {
+  return { isPresent: true, checkInAt, checkOutAt };
+}
+
+function absentSeed(absenceReason: string): DemoAttendanceSeed {
+  return { isPresent: false, absenceReason };
+}
+
+const EXTRA_CHILD_SEEDS: ExtraChildSeed[] = [
+  {
+    child: {
+      id: "c-17",
+      name: "江沐晴",
+      nickname: "沐沐",
+      birthDate: "2025-09-14",
+      gender: "女",
+      allergies: ["虾"],
+      heightCm: 76,
+      weightKg: 9.6,
+      guardians: [
+        { name: "江妈妈", relation: "母亲", phone: "139****2618" },
+        { name: "江爸爸", relation: "父亲", phone: "187****5312" },
+      ],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "晨检体温波动，今天需二次复测。",
+      avatar: "👶",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:18", "17:02"),
+      presentSeed("08:22", "17:06"),
+      presentSeed("08:25", "16:58"),
+      absentSeed("居家观察体温"),
+      presentSeed("08:30", "16:56"),
+      presentSeed("08:21", "17:04"),
+      presentSeed("08:24", "16:52"),
+    ],
+    mealStyle: "gentleRecovery",
+    healthStyle: "morningCheckAlert",
+    growthSeeds: [
+      {
+        idSuffix: "mood-watch",
+        dayIndex: 2,
+        time: "09:35",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["体温波动", "晨检跟踪"],
+        description: "晨间活动参与正常，但精神略弱，已降低高强度活动安排。",
+        needsAttention: true,
+        followUpAction: "今天继续减少高强度活动并二次测温",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "today-recheck",
+        dayIndex: 6,
+        time: "08:52",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["待复查", "体温波动"],
+        description: "今晨测温偏高后情绪有些黏人，已安排保健老师复测并同步家长。",
+        needsAttention: true,
+        followUpAction: "离园前复测体温并反馈家长",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-rest",
+        dayIndex: 4,
+        status: "已知晓",
+        content: "昨晚已经提前休息，今天出门前也复测过体温，会继续配合观察。",
+        createdBy: "江妈妈",
+        createdByRole: "家长",
+      },
+      {
+        idSuffix: "today-plan",
+        dayIndex: 6,
+        status: "今晚反馈",
+        content: "今晚会减少活动量并记录睡前体温，明早把结果反馈给老师。",
+        createdBy: "江妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [
+      { idSuffix: "routine-1", dayIndex: 2, taskId: "task_001" },
+      { idSuffix: "routine-2", dayIndex: 6, taskId: "task_004" },
+    ],
+  },
+  {
+    child: {
+      id: "c-18",
+      name: "顾宇航",
+      nickname: "航航",
+      birthDate: "2025-07-20",
+      gender: "男",
+      allergies: [],
+      heightCm: 78,
+      weightKg: 10.1,
+      guardians: [{ name: "顾妈妈", relation: "母亲", phone: "136****8841" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "晨起轻咳，需关注咽喉与饮水。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:20", "17:01"),
+      presentSeed("08:26", "17:09"),
+      presentSeed("08:24", "17:04"),
+      presentSeed("08:28", "17:08"),
+      absentSeed("咽喉不适居家观察"),
+      presentSeed("08:23", "17:05"),
+      presentSeed("08:27", "17:03"),
+    ],
+    mealStyle: "gentleRecovery",
+    healthStyle: "morningCheckAlert",
+    growthSeeds: [
+      {
+        idSuffix: "cough-sleep",
+        dayIndex: 3,
+        time: "10:05",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "睡眠情况",
+        tags: ["轻咳", "饮水提醒"],
+        description: "午睡前有轻咳，已增加温水补充并减轻户外奔跑强度。",
+        needsAttention: true,
+        followUpAction: "继续跟踪咽喉状态并提醒主动饮水",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "expression-steady",
+        dayIndex: 6,
+        time: "09:20",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "语言表达",
+        tags: ["晨谈", "恢复稳定"],
+        description: "今日晨谈愿意主动回应老师，咳嗽频次较前两日减少。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "drink-more",
+        dayIndex: 5,
+        status: "已知晓",
+        content: "今天在家也会继续准备温水，观察咽喉和咳嗽频率。",
+        createdBy: "顾妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [
+      { idSuffix: "follow-1", dayIndex: 3, taskId: "task_002" },
+      { idSuffix: "follow-2", dayIndex: 6, taskId: "task_005" },
+    ],
+  },
+  {
+    child: {
+      id: "c-19",
+      name: "杜若溪",
+      nickname: "若若",
+      birthDate: "2022-01-15",
+      gender: "女",
+      allergies: ["花生"],
+      heightCm: 101,
+      weightKg: 15.5,
+      guardians: [{ name: "杜妈妈", relation: "母亲", phone: "158****4726" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "本周出现两次低热，需连续复查。",
+      avatar: "👧",
+    },
+    attendancePlan: [
+      presentSeed("08:11", "17:12"),
+      presentSeed("08:14", "17:10"),
+      absentSeed("晨起体温偏高居家观察"),
+      presentSeed("08:17", "17:08"),
+      presentSeed("08:12", "17:14"),
+      presentSeed("08:16", "17:11"),
+      presentSeed("08:10", "17:09"),
+    ],
+    mealStyle: "gentleRecovery",
+    healthStyle: "morningCheckAlert",
+    growthSeeds: [
+      {
+        idSuffix: "morning-watch",
+        dayIndex: 1,
+        time: "09:10",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["低热观察", "待复查"],
+        description: "晨间情绪略疲惫，参与活动意愿一般，需结合体温变化持续跟踪。",
+        needsAttention: true,
+        followUpAction: "保持轻量活动并连续记录晨检状态",
+        reviewOffset: 2,
+      },
+      {
+        idSuffix: "today-sleep",
+        dayIndex: 6,
+        time: "08:48",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "睡眠情况",
+        tags: ["待复查", "晨起困倦"],
+        description: "今日晨起精神恢复一般，老师已再次提醒家庭侧保证作息和补水。",
+        needsAttention: true,
+        followUpAction: "明早继续复测体温并关注睡眠时长",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [
+      { idSuffix: "temp-1", dayIndex: 1, taskId: "task_001" },
+      { idSuffix: "temp-2", dayIndex: 4, taskId: "task_006" },
+    ],
+  },
+  {
+    child: {
+      id: "c-20",
+      name: "许嘉佑",
+      nickname: "佑佑",
+      birthDate: "2024-02-11",
+      gender: "男",
+      allergies: [],
+      heightCm: 86,
+      weightKg: 11.4,
+      guardians: [{ name: "许妈妈", relation: "母亲", phone: "137****0914" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "入园分离焦虑明显，需要固定安抚流程。",
+      avatar: "👦",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:33", "16:58"),
+      absentSeed("入园适应休整"),
+      presentSeed("08:31", "17:03"),
+      presentSeed("08:26", "17:06"),
+      presentSeed("08:24", "17:10"),
+      presentSeed("08:22", "17:08"),
+      presentSeed("08:25", "17:05"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "separationAnxiety",
+    growthSeeds: [
+      {
+        idSuffix: "arrival-mood",
+        dayIndex: 0,
+        time: "08:58",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["分离焦虑", "晨间交接"],
+        description: "入园后持续哭闹约 10 分钟，在固定玩具和拥抱安抚后逐步平稳。",
+        needsAttention: true,
+        followUpAction: "继续固定交接流程并缩短家长停留时间",
+        reviewOffset: 2,
+      },
+      {
+        idSuffix: "today-mood",
+        dayIndex: 6,
+        time: "09:12",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["入园适应", "待复查"],
+        description: "今天仍有短暂哭闹，但能较快跟随老师进入点名环节。",
+        needsAttention: true,
+        followUpAction: "记录情绪恢复时长，周内复盘安抚流程效果",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-practice",
+        dayIndex: 3,
+        status: "已知晓",
+        content: "今晚会继续做短时分离练习，帮助孩子熟悉早晨交接流程。",
+        createdBy: "许妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [
+      { idSuffix: "adapt-1", dayIndex: 0, taskId: "task_003" },
+      { idSuffix: "adapt-2", dayIndex: 6, taskId: "task_006" },
+    ],
+  },
+  {
+    child: {
+      id: "c-21",
+      name: "温可心",
+      nickname: "可可",
+      birthDate: "2023-11-08",
+      gender: "女",
+      allergies: ["芒果"],
+      heightCm: 84,
+      weightKg: 11.0,
+      guardians: [{ name: "温爸爸", relation: "父亲", phone: "135****6132" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "依恋照护者，入园后需要先完成熟悉的小任务。",
+      avatar: "👧",
+    },
+    attendancePlan: [
+      presentSeed("08:29", "17:04"),
+      presentSeed("08:27", "17:02"),
+      presentSeed("08:30", "17:08"),
+      absentSeed("情绪调整休整"),
+      presentSeed("08:26", "17:05"),
+      presentSeed("08:22", "17:03"),
+      presentSeed("08:24", "17:00"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "separationAnxiety",
+    growthSeeds: [
+      {
+        idSuffix: "task-transition",
+        dayIndex: 2,
+        time: "09:05",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["依恋照护者", "过渡任务"],
+        description: "完成摆放姓名卡的小任务后情绪逐步稳定，但离开熟悉老师仍会回头寻找。",
+        needsAttention: true,
+        followUpAction: "继续用固定小任务帮助完成晨间过渡",
+        reviewOffset: 2,
+      },
+      {
+        idSuffix: "social-better",
+        dayIndex: 5,
+        time: "09:18",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["同伴模仿", "恢复中"],
+        description: "今天能模仿同伴一起搬运积木，晨间黏人情况较本周前半段减轻。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [{ idSuffix: "habit-1", dayIndex: 2, taskId: "task_001" }],
+  },
+  {
+    child: {
+      id: "c-22",
+      name: "韩泽远",
+      nickname: "远远",
+      birthDate: "2021-09-23",
+      gender: "男",
+      allergies: [],
+      heightCm: 104,
+      weightKg: 16.4,
+      guardians: [{ name: "韩妈妈", relation: "母亲", phone: "136****5008" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "周初交接情绪波动，安抚后恢复较快。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:09", "17:12"),
+      presentSeed("08:11", "17:09"),
+      absentSeed("家庭陪伴日"),
+      presentSeed("08:13", "17:10"),
+      presentSeed("08:15", "17:08"),
+      presentSeed("08:12", "17:13"),
+      presentSeed("08:10", "17:11"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "separationAnxiety",
+    growthSeeds: [
+      {
+        idSuffix: "arrival-support",
+        dayIndex: 1,
+        time: "09:15",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["分离焦虑", "交接支持"],
+        description: "入园后拉着家长不愿放手，老师陪同完成签到后约 6 分钟恢复平稳。",
+        needsAttention: true,
+        followUpAction: "坚持晨间固定签到动作，缩短交接时间",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "peer-join",
+        dayIndex: 6,
+        time: "09:25",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["晨间游戏", "恢复稳定"],
+        description: "今天能在点名后主动加入同伴拼图活动，晨间交接明显顺畅。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "ack-today",
+        dayIndex: 6,
+        status: "已知晓",
+        content: "已收到老师关于晨间交接改善的反馈，家里会继续配合同样的告别节奏。",
+        createdBy: "韩妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "transition-1", dayIndex: 1, taskId: "task_003" }],
+  },
+  {
+    child: {
+      id: "c-23",
+      name: "沈语彤",
+      nickname: "彤彤",
+      birthDate: "2023-07-18",
+      gender: "女",
+      allergies: ["猕猴桃"],
+      heightCm: 89,
+      weightKg: 12.4,
+      guardians: [{ name: "沈妈妈", relation: "母亲", phone: "188****3140" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "午睡入睡慢，醒后恢复也偏慢。",
+      avatar: "👧",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:24", "17:03"),
+      presentSeed("08:21", "17:06"),
+      presentSeed("08:22", "17:05"),
+      presentSeed("08:20", "17:04"),
+      absentSeed("午睡调整在家休息"),
+      presentSeed("08:25", "17:02"),
+      presentSeed("08:23", "17:00"),
+    ],
+    mealStyle: "gentleRecovery",
+    healthStyle: "napWatch",
+    growthSeeds: [
+      {
+        idSuffix: "nap-slow",
+        dayIndex: 1,
+        time: "13:20",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "睡眠情况",
+        tags: ["午睡入睡难", "午后困倦"],
+        description: "午睡入睡超过 25 分钟，期间翻身频繁，需要老师陪伴拍抚。",
+        needsAttention: true,
+        followUpAction: "午睡前提前进入安静过渡流程",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "nap-wake",
+        dayIndex: 5,
+        time: "14:05",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "睡眠情况",
+        tags: ["易醒", "待复查"],
+        description: "午睡中途醒来后难以再次入睡，下午活动出现明显困倦。",
+        needsAttention: true,
+        followUpAction: "连续跟踪午睡时长并同步家庭晚间作息",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-routine",
+        dayIndex: 2,
+        status: "在家已配合",
+        content: "在家已按建议提前洗漱和关灯，今晚继续保持固定午睡前安静流程。",
+        createdBy: "沈妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [
+      { idSuffix: "nap-1", dayIndex: 1, taskId: "task_002" },
+      { idSuffix: "nap-2", dayIndex: 5, taskId: "task_006" },
+    ],
+  },
+  {
+    child: {
+      id: "c-24",
+      name: "唐子睿",
+      nickname: "睿睿",
+      birthDate: "2023-03-29",
+      gender: "男",
+      allergies: [],
+      heightCm: 91,
+      weightKg: 13.2,
+      guardians: [{ name: "唐爸爸", relation: "父亲", phone: "134****7820" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "午睡时需要更长时间进入安静状态。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:26", "17:04"),
+      presentSeed("08:23", "17:02"),
+      presentSeed("08:21", "17:03"),
+      presentSeed("08:24", "17:06"),
+      presentSeed("08:20", "17:05"),
+      absentSeed("午睡观察居家休整"),
+      presentSeed("08:22", "17:01"),
+    ],
+    mealStyle: "gentleRecovery",
+    healthStyle: "napWatch",
+    growthSeeds: [
+      {
+        idSuffix: "nap-transition",
+        dayIndex: 3,
+        time: "13:45",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "睡眠情况",
+        tags: ["午睡观察", "安静过渡"],
+        description: "午睡前翻身和说话较多，需要额外陪伴才能逐步入睡。",
+        needsAttention: true,
+        followUpAction: "午睡前增加呼吸放松和轻音乐过渡",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-follow",
+        dayIndex: 4,
+        status: "在家已配合",
+        content: "这两天在家已提前半小时开始睡前准备，会继续配合老师观察。",
+        createdBy: "唐爸爸",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "nap-1", dayIndex: 3, taskId: "task_004" }],
+  },
+  {
+    child: {
+      id: "c-25",
+      name: "罗诗涵",
+      nickname: "诗诗",
+      birthDate: "2021-11-05",
+      gender: "女",
+      allergies: [],
+      heightCm: 103,
+      weightKg: 16.2,
+      guardians: [{ name: "罗妈妈", relation: "母亲", phone: "151****9063" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "午后容易犯困，需关注连续午睡质量。",
+      avatar: "👧",
+    },
+    attendancePlan: [
+      presentSeed("08:12", "17:14"),
+      presentSeed("08:13", "17:11"),
+      presentSeed("08:15", "17:10"),
+      presentSeed("08:10", "17:12"),
+      presentSeed("08:14", "17:13"),
+      presentSeed("08:11", "17:12"),
+      presentSeed("08:09", "17:09"),
+    ],
+    mealStyle: "gentleRecovery",
+    healthStyle: "napWatch",
+    growthSeeds: [
+      {
+        idSuffix: "nap-late",
+        dayIndex: 4,
+        time: "14:10",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "睡眠情况",
+        tags: ["午睡不足", "午后困倦"],
+        description: "今日午睡时长不足，午后集体活动出现揉眼和反应变慢。",
+        needsAttention: true,
+        followUpAction: "连续观察午睡时长并优化中午过渡节奏",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "expression-ok",
+        dayIndex: 6,
+        time: "15:05",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "语言表达",
+        tags: ["分享", "状态恢复"],
+        description: "今天下午愿意完整复述绘本内容，精神状态较前两日更稳定。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [{ idSuffix: "nap-1", dayIndex: 4, taskId: "task_002" }],
+  },
+  {
+    child: {
+      id: "c-26",
+      name: "邵景行",
+      nickname: "景景",
+      birthDate: "2022-08-14",
+      gender: "男",
+      allergies: [],
+      heightCm: 98,
+      weightKg: 15.1,
+      guardians: [{ name: "邵妈妈", relation: "母亲", phone: "139****4406" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "偏食明显，饮水主动性不足，需要双重提醒。",
+      avatar: "👦",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:19", "17:07"),
+      presentSeed("08:22", "17:05"),
+      presentSeed("08:20", "17:03"),
+      presentSeed("08:23", "17:06"),
+      presentSeed("08:24", "17:08"),
+      presentSeed("08:21", "17:04"),
+      presentSeed("08:18", "17:02"),
+    ],
+    mealStyle: "hydrationFocusNeeded",
+    healthStyle: "hydrationWatch",
+    growthSeeds: [
+      {
+        idSuffix: "food-watch",
+        dayIndex: 2,
+        time: "11:40",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "独立进食",
+        tags: ["偏食", "补水不足"],
+        description: "午餐挑出大部分蔬菜，老师多次提醒后饮水量仍偏低。",
+        needsAttention: true,
+        followUpAction: "继续采用小口喝水提醒并做蔬菜示范进食",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "today-food",
+        dayIndex: 6,
+        time: "11:55",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "独立进食",
+        tags: ["低蔬菜摄入", "待复查"],
+        description: "今天主食摄入稳定，但蔬菜剩余较多，饮水仍依赖老师提示。",
+        needsAttention: true,
+        followUpAction: "家园同步设置餐后喝水和尝菜小目标",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "meal-home",
+        dayIndex: 5,
+        status: "已知晓",
+        content: "已收到老师关于偏食和喝水的提醒，周末会继续练习尝试蔬菜。",
+        createdBy: "邵妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [
+      { idSuffix: "meal-1", dayIndex: 2, taskId: "task_005" },
+      { idSuffix: "meal-2", dayIndex: 6, taskId: "task_006" },
+    ],
+  },
+  {
+    child: {
+      id: "c-27",
+      name: "贺知夏",
+      nickname: "夏夏",
+      birthDate: "2021-12-30",
+      gender: "女",
+      allergies: ["虾"],
+      heightCm: 104,
+      weightKg: 16.0,
+      guardians: [{ name: "贺爸爸", relation: "父亲", phone: "150****1273" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "蔬菜接受度低，喝水量需要外部提醒。",
+      avatar: "👧",
+    },
+    attendancePlan: [
+      presentSeed("08:13", "17:11"),
+      presentSeed("08:12", "17:09"),
+      absentSeed("家庭活动请假"),
+      presentSeed("08:15", "17:08"),
+      presentSeed("08:11", "17:10"),
+      presentSeed("08:14", "17:12"),
+      presentSeed("08:09", "17:07"),
+    ],
+    mealStyle: "hydrationFocusNeeded",
+    healthStyle: "hydrationWatch",
+    growthSeeds: [
+      {
+        idSuffix: "veg-watch",
+        dayIndex: 4,
+        time: "11:35",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "独立进食",
+        tags: ["偏食", "蔬菜摄入低"],
+        description: "今日午餐对绿色蔬菜抗拒明显，饮水量也低于班级平均水平。",
+        needsAttention: true,
+        followUpAction: "提供少量分次尝试并加强餐前喝水提示",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "meal-ack",
+        dayIndex: 5,
+        status: "已知晓",
+        content: "已看到老师关于蔬菜摄入的提醒，会在家继续做少量多次尝试。",
+        createdBy: "贺爸爸",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "meal-1", dayIndex: 4, taskId: "task_003" }],
+  },
+  {
+    child: {
+      id: "c-28",
+      name: "苏奕辰",
+      nickname: "奕奕",
+      birthDate: "2021-06-17",
+      gender: "男",
+      allergies: [],
+      heightCm: 107,
+      weightKg: 16.8,
+      guardians: [{ name: "苏妈妈", relation: "母亲", phone: "156****2840" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "补水量连续偏低，餐后主动喝水习惯未建立。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:10", "17:12"),
+      presentSeed("08:14", "17:10"),
+      presentSeed("08:12", "17:08"),
+      absentSeed("接种疫苗休息"),
+      presentSeed("08:11", "17:09"),
+      presentSeed("08:13", "17:11"),
+      presentSeed("08:09", "17:08"),
+    ],
+    mealStyle: "hydrationFocusNeeded",
+    healthStyle: "hydrationWatch",
+    growthSeeds: [
+      {
+        idSuffix: "water-watch",
+        dayIndex: 1,
+        time: "15:10",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "独立进食",
+        tags: ["补水不足", "加餐提醒"],
+        description: "加餐后未主动补水，需老师连续两次提醒才愿意小口喝水。",
+        needsAttention: true,
+        followUpAction: "建立固定喝水口令并在活动转换时补水",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [
+      { idSuffix: "water-1", dayIndex: 1, taskId: "task_001" },
+      { idSuffix: "water-2", dayIndex: 5, taskId: "task_004" },
+    ],
+  },
+  {
+    child: {
+      id: "c-29",
+      name: "叶芷宁",
+      nickname: "宁宁",
+      birthDate: "2024-01-26",
+      gender: "女",
+      allergies: [],
+      heightCm: 85,
+      weightKg: 11.3,
+      guardians: [{ name: "叶妈妈", relation: "母亲", phone: "137****2459" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "情绪表达较直接，环境变化时容易先哭再说需求。",
+      avatar: "👧",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:27", "17:02"),
+      presentSeed("08:25", "17:04"),
+      presentSeed("08:22", "17:05"),
+      presentSeed("08:29", "17:01"),
+      absentSeed("情绪休整半日请假"),
+      presentSeed("08:24", "17:03"),
+      presentSeed("08:21", "17:00"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "emotionWatch",
+    growthSeeds: [
+      {
+        idSuffix: "emotion-language",
+        dayIndex: 3,
+        time: "10:40",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["情绪表达", "转场敏感"],
+        description: "从户外回教室时因等待顺序而哭泣，安抚后能说出自己想先洗手。",
+        needsAttention: true,
+        followUpAction: "帮助用简单句先表达需求，再进入转场流程",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "today-better",
+        dayIndex: 6,
+        time: "10:55",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["情绪恢复", "表达进步"],
+        description: "今天能先说出‘我还想玩一下’再寻求老师帮助，哭闹明显减少。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "tonight-update",
+        dayIndex: 6,
+        status: "今晚反馈",
+        content: "今晚会继续练习先说需求再哭闹，明天把家庭表现同步给老师。",
+        createdBy: "叶妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "emotion-1", dayIndex: 3, taskId: "task_002" }],
+  },
+  {
+    child: {
+      id: "c-30",
+      name: "邢宇哲",
+      nickname: "哲哲",
+      birthDate: "2022-04-09",
+      gender: "男",
+      allergies: ["菠萝"],
+      heightCm: 100,
+      weightKg: 15.7,
+      guardians: [{ name: "邢爸爸", relation: "父亲", phone: "133****6504" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "对突发噪音敏感，需提前做转场提醒。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:12", "17:10"),
+      presentSeed("08:10", "17:08"),
+      presentSeed("08:14", "17:09"),
+      presentSeed("08:11", "17:11"),
+      presentSeed("08:15", "17:12"),
+      absentSeed("感官调节复盘"),
+      presentSeed("08:09", "17:08"),
+    ],
+    mealStyle: "hydrationFocusNeeded",
+    healthStyle: "emotionWatch",
+    growthSeeds: [
+      {
+        idSuffix: "sensory-watch",
+        dayIndex: 2,
+        time: "10:20",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "情绪表现",
+        tags: ["感官敏感", "环境变化"],
+        description: "教室噪音增大时捂耳并离开队列，需老师带去安静角缓冲。",
+        needsAttention: true,
+        followUpAction: "转场前做语言预告，保留安静角调节时间",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "sensory-home",
+        dayIndex: 3,
+        status: "已知晓",
+        content: "已了解孩子对噪音敏感，家里也会提前提醒并练习深呼吸。",
+        createdBy: "邢爸爸",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "emotion-1", dayIndex: 2, taskId: "task_004" }],
+  },
+  {
+    child: {
+      id: "c-31",
+      name: "魏知语",
+      nickname: "语语",
+      birthDate: "2021-08-21",
+      gender: "女",
+      allergies: [],
+      heightCm: 105,
+      weightKg: 16.1,
+      guardians: [{ name: "魏妈妈", relation: "母亲", phone: "152****3175" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "情绪感受细腻，转场前需要更明确的语言提示。",
+      avatar: "👧",
+    },
+    attendancePlan: [
+      presentSeed("08:09", "17:11"),
+      presentSeed("08:12", "17:12"),
+      absentSeed("家庭活动请假"),
+      presentSeed("08:14", "17:09"),
+      presentSeed("08:10", "17:10"),
+      presentSeed("08:13", "17:08"),
+      presentSeed("08:11", "17:07"),
+    ],
+    mealStyle: "hydrationFocusNeeded",
+    healthStyle: "emotionWatch",
+    growthSeeds: [
+      {
+        idSuffix: "expression-watch",
+        dayIndex: 5,
+        time: "10:35",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "语言表达",
+        tags: ["情绪表达", "转场不稳"],
+        description: "在活动切换时会低声说不想结束，但还不够主动请求帮助。",
+        needsAttention: true,
+        followUpAction: "引导用完整句表达情绪和需求",
+        reviewOffset: 1,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [
+      { idSuffix: "emotion-1", dayIndex: 5, taskId: "task_003" },
+      { idSuffix: "emotion-2", dayIndex: 6, taskId: "task_005" },
+    ],
+  },
+  {
+    child: {
+      id: "c-32",
+      name: "傅靖然",
+      nickname: "然然",
+      birthDate: "2022-02-18",
+      gender: "男",
+      allergies: [],
+      heightCm: 101,
+      weightKg: 15.6,
+      guardians: [
+        { name: "傅妈妈", relation: "母亲", phone: "139****8260" },
+        { name: "傅姑姑", relation: "姑姑", phone: "136****7281" },
+      ],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "社交冲突后容易沉默，需要老师帮助复盘表达。",
+      avatar: "👦",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:10", "17:12"),
+      presentSeed("08:12", "17:10"),
+      presentSeed("08:11", "17:08"),
+      presentSeed("08:09", "17:11"),
+      presentSeed("08:13", "17:09"),
+      presentSeed("08:10", "17:12"),
+      presentSeed("08:08", "17:08"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "socialCoaching",
+    growthSeeds: [
+      {
+        idSuffix: "conflict-watch",
+        dayIndex: 4,
+        time: "10:50",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["冲突调解", "表达支持"],
+        description: "积木轮流时与同伴发生争抢，安静后能在老师引导下复述经过。",
+        needsAttention: true,
+        followUpAction: "继续练习‘我先说、再协商’的社交句式",
+        reviewOffset: 1,
+      },
+      {
+        idSuffix: "today-better",
+        dayIndex: 6,
+        time: "11:05",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["同伴合作", "恢复稳定"],
+        description: "今天能主动邀请同伴分工搭建，冲突后恢复速度明显更快。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-coach",
+        dayIndex: 4,
+        status: "在家已配合",
+        content: "在家已练习先说感受再协商，感谢老师今天的冲突复盘支持。",
+        createdBy: "傅妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "social-1", dayIndex: 4, taskId: "task_001" }],
+  },
+  {
+    child: {
+      id: "c-33",
+      name: "黎曼婷",
+      nickname: "曼曼",
+      birthDate: "2021-03-07",
+      gender: "女",
+      allergies: ["芒果"],
+      heightCm: 108,
+      weightKg: 17.0,
+      guardians: [{ name: "黎妈妈", relation: "母亲", phone: "138****1957" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "同伴互动积极，但冲突后容易委屈，需要老师陪伴复盘。",
+      avatar: "👧",
+    },
+    attendancePlan: [
+      presentSeed("08:09", "17:10"),
+      presentSeed("08:11", "17:09"),
+      presentSeed("08:13", "17:11"),
+      presentSeed("08:10", "17:08"),
+      absentSeed("家庭日请假"),
+      presentSeed("08:12", "17:12"),
+      presentSeed("08:08", "17:07"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "socialCoaching",
+    growthSeeds: [
+      {
+        idSuffix: "peer-share",
+        dayIndex: 6,
+        time: "10:15",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["同伴支持", "集体参与"],
+        description: "今天主动邀请低龄同伴一起玩角色游戏，能等待轮流并鼓励别人加入。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-share",
+        dayIndex: 4,
+        status: "在家已配合",
+        content: "在家也会继续练习轮流和表达感受，孩子这周很愿意分享在园故事。",
+        createdBy: "黎妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [{ idSuffix: "social-1", dayIndex: 6, taskId: "task_006" }],
+  },
+  {
+    child: {
+      id: "c-34",
+      name: "薛承宇",
+      nickname: "承承",
+      birthDate: "2020-10-30",
+      gender: "男",
+      allergies: [],
+      heightCm: 112,
+      weightKg: 18.4,
+      guardians: [{ name: "薛爸爸", relation: "父亲", phone: "189****4208" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "集体活动参与度波动，冲突后需要引导回到团队。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:08", "17:10"),
+      presentSeed("08:12", "17:12"),
+      presentSeed("08:11", "17:09"),
+      presentSeed("08:09", "17:08"),
+      presentSeed("08:13", "17:11"),
+      presentSeed("08:10", "17:07"),
+      presentSeed("08:08", "17:06"),
+    ],
+    mealStyle: "balanced",
+    healthStyle: "socialCoaching",
+    growthSeeds: [
+      {
+        idSuffix: "group-watch",
+        dayIndex: 2,
+        time: "10:40",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["集体参与差异", "待复查"],
+        description: "集体搭建时一度离开队伍并推开同伴，需老师带回并复盘规则。",
+        needsAttention: true,
+        followUpAction: "继续练习等待轮流和用语言表达不满",
+        reviewOffset: 2,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [{ idSuffix: "social-1", dayIndex: 2, taskId: "task_002" }],
+  },
+  {
+    child: {
+      id: "c-35",
+      name: "宋知微",
+      nickname: "微微",
+      birthDate: "2024-03-15",
+      gender: "女",
+      allergies: [],
+      heightCm: 87,
+      weightKg: 11.8,
+      guardians: [{ name: "宋妈妈", relation: "母亲", phone: "139****5538" }],
+      institutionId: "inst-1",
+      className: "向阳班",
+      specialNotes: "饮水和表达都很主动，适合做正向示范。",
+      avatar: "👧",
+      parentUserId: "u-parent",
+    },
+    attendancePlan: [
+      presentSeed("08:20", "17:08"),
+      presentSeed("08:21", "17:06"),
+      presentSeed("08:18", "17:05"),
+      presentSeed("08:22", "17:07"),
+      presentSeed("08:19", "17:09"),
+      presentSeed("08:20", "17:04"),
+      presentSeed("08:17", "17:03"),
+    ],
+    mealStyle: "positiveHighHydration",
+    healthStyle: "positiveSteady",
+    growthSeeds: [
+      {
+        idSuffix: "social-highlight",
+        dayIndex: 5,
+        time: "10:25",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["正向成长", "主动邀请"],
+        description: "今天主动邀请新朋友一起玩厨房游戏，还会分发餐具道具给同伴。",
+        needsAttention: false,
+      },
+      {
+        idSuffix: "language-highlight",
+        dayIndex: 6,
+        time: "11:00",
+        recorder: "李老师",
+        recorderRole: "教师",
+        category: "语言表达",
+        tags: ["正向成长", "表达清晰"],
+        description: "能完整说出活动步骤并提醒同伴喝水，表达自信且清晰。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [
+      {
+        idSuffix: "home-praise",
+        dayIndex: 6,
+        status: "在家已配合",
+        content: "谢谢老师分享正向表现，孩子回家也会主动提醒家人喝水和排队。",
+        createdBy: "宋妈妈",
+        createdByRole: "家长",
+      },
+    ],
+    taskSeeds: [
+      { idSuffix: "positive-1", dayIndex: 5, taskId: "task_001" },
+      { idSuffix: "positive-2", dayIndex: 6, taskId: "task_003" },
+    ],
+  },
+  {
+    child: {
+      id: "c-36",
+      name: "程昊辰",
+      nickname: "昊昊",
+      birthDate: "2020-09-12",
+      gender: "男",
+      allergies: [],
+      heightCm: 113,
+      weightKg: 18.8,
+      guardians: [{ name: "程爸爸", relation: "父亲", phone: "135****6147" }],
+      institutionId: "inst-1",
+      className: "晨曦班",
+      specialNotes: "规则意识较好，集体活动中常能给出正向示范。",
+      avatar: "👦",
+    },
+    attendancePlan: [
+      presentSeed("08:07", "17:11"),
+      presentSeed("08:09", "17:10"),
+      presentSeed("08:08", "17:09"),
+      presentSeed("08:10", "17:08"),
+      presentSeed("08:11", "17:12"),
+      presentSeed("08:09", "17:10"),
+      presentSeed("08:08", "17:07"),
+    ],
+    mealStyle: "positiveHighHydration",
+    healthStyle: "positiveSteady",
+    growthSeeds: [
+      {
+        idSuffix: "language-highlight",
+        dayIndex: 3,
+        time: "10:30",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "语言表达",
+        tags: ["正向成长", "分享表达"],
+        description: "集体分享时能清楚说明观察到的春天变化，并主动倾听同伴发言。",
+        needsAttention: false,
+      },
+      {
+        idSuffix: "social-highlight",
+        dayIndex: 6,
+        time: "11:10",
+        recorder: "周老师",
+        recorderRole: "教师",
+        category: "社交互动",
+        tags: ["榜样示范", "合作稳定"],
+        description: "今天在合作搭建中主动分工并帮助同伴完成收尾，团队配合稳定。",
+        needsAttention: false,
+      },
+    ],
+    feedbackSeeds: [],
+    taskSeeds: [
+      { idSuffix: "positive-1", dayIndex: 3, taskId: "task_005" },
+      { idSuffix: "positive-2", dayIndex: 6, taskId: "task_006" },
+    ],
+  },
+];
+
+const EXTRA_CHILDREN: Child[] = EXTRA_CHILD_SEEDS.map((seed) => seed.child);
+const EXTRA_CHILD_SEED_MAP = new Map(EXTRA_CHILD_SEEDS.map((seed) => [seed.child.id, seed] as const));
+
+const EXTRA_ATTENDANCE: AttendanceRecord[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
+  seed.attendancePlan.map((record, dayIndex) => ({
+    id: `a-${seed.child.id}-${dayIndex + 1}`,
+    childId: seed.child.id,
+    date: DEMO_WEEK_DATES[dayIndex],
+    ...record,
   }))
 );
 
-const LEGACY_EXTRA_GEN_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_GEN_CHILDREN.flatMap((child) =>
-  DEMO_WEEK_DATES.map((date, i) =>
-    createHealthRecord(
-      `hc-${child.id}-${i + 1}`,
-      child.id,
-      date,
-      36.5 + (i % 3) * 0.1,
-      "平稳",
-      "状态良好",
-      "李老师",
-      "教师"
-    )
-  )
-);
-
-void [LEGACY_EXTRA_GEN_MEALS, LEGACY_EXTRA_GEN_ATTENDANCE, LEGACY_EXTRA_GEN_HEALTH_CHECKS];
-
-const EXTRA_GEN_ATTENDANCE_PATTERNS: DemoAttendanceSeed[][] = [
-  [
-    { isPresent: true, checkInAt: "08:22", checkOutAt: "17:12" },
-    { isPresent: true, checkInAt: "08:18", checkOutAt: "17:06" },
-    { isPresent: false, absenceReason: "居家观察" },
-    { isPresent: true, checkInAt: "08:27", checkOutAt: "17:10" },
-    { isPresent: true, checkInAt: "08:24", checkOutAt: "17:08" },
-    { isPresent: true, checkInAt: "08:20", checkOutAt: "17:15" },
-    { isPresent: true, checkInAt: "08:26", checkOutAt: "17:09" },
-  ],
-  [
-    { isPresent: true, checkInAt: "08:35", checkOutAt: "17:18" },
-    { isPresent: true, checkInAt: "08:41", checkOutAt: "17:12" },
-    { isPresent: true, checkInAt: "08:46", checkOutAt: "17:05" },
-    { isPresent: true, checkInAt: "08:38", checkOutAt: "17:16" },
-    { isPresent: false, absenceReason: "疫苗接种" },
-    { isPresent: true, checkInAt: "08:33", checkOutAt: "17:08" },
-    { isPresent: true, checkInAt: "08:44", checkOutAt: "17:14" },
-  ],
-  [
-    { isPresent: true, checkInAt: "08:16", checkOutAt: "17:04" },
-    { isPresent: false, absenceReason: "家长请假" },
-    { isPresent: true, checkInAt: "08:28", checkOutAt: "17:06" },
-    { isPresent: true, checkInAt: "08:24", checkOutAt: "17:10" },
-    { isPresent: true, checkInAt: "08:19", checkOutAt: "17:08" },
-    { isPresent: true, checkInAt: "08:21", checkOutAt: "17:12" },
-    { isPresent: false, absenceReason: "咳嗽居家休息" },
-  ],
-  [
-    { isPresent: true, checkInAt: "08:31", checkOutAt: "17:06" },
-    { isPresent: true, checkInAt: "08:29", checkOutAt: "17:10" },
-    { isPresent: true, checkInAt: "08:34", checkOutAt: "17:14" },
-    { isPresent: false, absenceReason: "半日请假" },
-    { isPresent: true, checkInAt: "08:37", checkOutAt: "17:05" },
-    { isPresent: true, checkInAt: "08:23", checkOutAt: "17:12" },
-    { isPresent: true, checkInAt: "08:32", checkOutAt: "17:07" },
-  ],
-  [
-    { isPresent: true, checkInAt: "08:40", checkOutAt: "17:15" },
-    { isPresent: true, checkInAt: "08:36", checkOutAt: "17:08" },
-    { isPresent: true, checkInAt: "08:45", checkOutAt: "17:10" },
-    { isPresent: true, checkInAt: "08:39", checkOutAt: "17:16" },
-    { isPresent: true, checkInAt: "08:34", checkOutAt: "17:12" },
-    { isPresent: false, absenceReason: "家中照护" },
-    { isPresent: true, checkInAt: "08:42", checkOutAt: "17:18" },
-  ],
-];
-
-const EXTRA_GEN_ATTENDANCE: AttendanceRecord[] = EXTRA_GEN_CHILDREN.flatMap((child, childIndex) => {
-  const pattern = EXTRA_GEN_ATTENDANCE_PATTERNS[childIndex % EXTRA_GEN_ATTENDANCE_PATTERNS.length];
-  return DEMO_WEEK_DATES.map((date, dayIndex) => ({
-    id: `a-${child.id}-${dayIndex + 1}`,
-    childId: child.id,
-    date,
-    ...pattern[dayIndex],
-  }));
-});
-
-const EXTRA_GEN_CHILD_INDEX = new Map(EXTRA_GEN_CHILDREN.map((child, index) => [child.id, index] as const));
-
-const EXTRA_GEN_MEALS: MealRecord[] = EXTRA_GEN_ATTENDANCE.flatMap((attendance) => {
+const EXTRA_MEALS: MealRecord[] = EXTRA_ATTENDANCE.flatMap((attendance) => {
   if (!attendance.isPresent) return [];
-
-  const childIndex = EXTRA_GEN_CHILD_INDEX.get(attendance.childId) ?? 0;
+  const seed = EXTRA_CHILD_SEED_MAP.get(attendance.childId);
+  if (!seed) return [];
   const dayIndex = DEMO_WEEK_DATES.indexOf(attendance.date);
-  const breakfastOptions: DemoMealFoodSeed[][] = [
-    [["小米南瓜粥", "主食", "1碗"], ["水煮蛋", "蛋白", "1个"], ["蒸玉米", "蔬果", "半根"]],
-    [["豆浆", "奶制品", "180ml"], ["全麦吐司", "主食", "2片"], ["蓝莓", "蔬果", "1小份"]],
-    [["银耳红枣粥", "主食", "1碗"], ["鸡蛋羹", "蛋白", "半份"], ["香蕉", "蔬果", "半根"]],
-  ];
-  const lunchOptions: DemoMealFoodSeed[][] = [
-    [["杂粮饭", "主食", "1碗"], ["清蒸鸡腿肉", "蛋白", "70g"], ["西兰花胡萝卜", "蔬果", "60g"]],
-    [["米饭", "主食", "1碗"], ["番茄牛肉末", "蛋白", "65g"], ["清炒生菜", "蔬果", "55g"], ["苹果块", "蔬果", "30g"]],
-    [["南瓜饭", "主食", "1碗"], ["香菇豆腐", "蛋白", "70g"], ["菜花木耳", "蔬果", "60g"]],
-  ];
-  const snackOptions: DemoMealFoodSeed[][] = [
-    [["酸奶", "奶制品", "100ml"], ["圣女果", "蔬果", "3颗"]],
-    [["玉米杯", "主食", "半份"], ["温牛奶", "奶制品", "120ml"]],
-    [["苹果片", "蔬果", "1小份"], ["小米发糕", "主食", "1块"]],
-  ];
-  const breakfastSeed = breakfastOptions[(childIndex + dayIndex) % breakfastOptions.length];
-  const lunchSeed = lunchOptions[(childIndex * 2 + dayIndex) % lunchOptions.length];
-  const snackSeed = snackOptions[(childIndex + dayIndex * 3) % snackOptions.length];
-  const baseWater = 110 + ((childIndex + dayIndex) % 5) * 10;
-  const preference: PreferenceStatus =
-    childIndex % 6 === 0 && dayIndex % 3 === 1 ? "拒食" : childIndex % 4 === 0 ? "正常" : "偏好";
+  const mealPlan = buildExtraMealPlan(seed.mealStyle, dayIndex);
+  const recorder = seed.child.className === "晨曦班" ? "周老师" : "李老师";
 
   return [
     createMealRecord(
-      `m-${attendance.childId}-breakfast-${dayIndex + 1}`,
+      `m-${attendance.childId}-${dayIndex + 1}-breakfast`,
       attendance.childId,
       attendance.date,
       "早餐",
-      breakfastSeed,
-      baseWater,
-      preference,
-      "李老师",
+      mealPlan.breakfastFoods,
+      mealPlan.breakfastWater,
+      mealPlan.breakfastPreference,
+      recorder,
       "教师",
-      preference === "拒食" ? "少量" : "适中"
+      mealPlan.breakfastIntake
     ),
     createMealRecord(
-      `m-${attendance.childId}-lunch-${dayIndex + 1}`,
+      `m-${attendance.childId}-${dayIndex + 1}-lunch`,
       attendance.childId,
       attendance.date,
       "午餐",
-      lunchSeed,
-      baseWater + 30,
-      preference === "拒食" ? "正常" : "偏好",
-      "李老师",
+      mealPlan.lunchFoods,
+      mealPlan.lunchWater,
+      mealPlan.lunchPreference,
+      recorder,
       "教师",
-      preference === "拒食" ? "少量" : "充足"
+      mealPlan.lunchIntake
     ),
     createMealRecord(
-      `m-${attendance.childId}-snack-${dayIndex + 1}`,
+      `m-${attendance.childId}-${dayIndex + 1}-snack`,
       attendance.childId,
       attendance.date,
       "加餐",
-      snackSeed,
-      baseWater - 10,
-      "正常",
-      "李老师",
+      mealPlan.snackFoods,
+      mealPlan.snackWater,
+      mealPlan.snackPreference,
+      recorder,
       "教师",
-      "适中"
+      mealPlan.snackIntake
     ),
   ];
 });
 
-const EXTRA_GEN_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_GEN_ATTENDANCE.flatMap((attendance) => {
+const EXTRA_HEALTH_CHECKS: HealthCheckRecord[] = EXTRA_ATTENDANCE.flatMap((attendance) => {
   if (!attendance.isPresent) return [];
-
-  const childIndex = EXTRA_GEN_CHILD_INDEX.get(attendance.childId) ?? 0;
+  const seed = EXTRA_CHILD_SEED_MAP.get(attendance.childId);
+  if (!seed) return [];
   const dayIndex = DEMO_WEEK_DATES.indexOf(attendance.date);
-  const temperature = [36.4, 36.5, 36.6, 36.7, 36.5, 36.8, 36.6][(childIndex + dayIndex) % 7];
-  const mood = ["愉快", "平稳", "困倦", "平稳", "轻咳", "愉快", "烦躁"][(childIndex * 2 + dayIndex) % 7];
-  const remark = [
-    "晨检配合良好，精神状态稳定。",
-    "入园稍晚，但安抚后能进入活动状态。",
-    "有些困倦，已提醒午睡前多喝温水。",
-    "晨起轻咳，已关注后续体温变化。",
-    "情绪略敏感，教师已做个别安抚。",
-    "整体正常，能主动洗手排队。",
-    "今日食欲一般，建议餐后观察饮水。",
-  ][(childIndex + dayIndex * 2) % 7];
-  const handMouthEye = mood === "轻咳" && dayIndex % 3 === 0 ? "异常" : "正常";
-  const normalizedMood = mood === "轻咳" ? "平稳" : mood;
+  const healthEntry = buildExtraHealthEntry(seed.healthStyle, seed.child.id, dayIndex);
+  const checker = seed.child.className === "晨曦班" ? "周老师" : "李老师";
 
   return [
     createHealthRecord(
       `hc-${attendance.childId}-${dayIndex + 1}`,
       attendance.childId,
       attendance.date,
-      temperature,
-      normalizedMood,
-      remark,
-      "李老师",
+      healthEntry.temperature,
+      healthEntry.mood,
+      healthEntry.remark,
+      checker,
       "教师",
-      handMouthEye
+      healthEntry.handMouthEye
     ),
   ];
 });
 
-const EXTRA_GEN_GROWTH: GrowthRecord[] = EXTRA_GEN_CHILDREN.map((child, i) => ({
-  id: `g-extra-${child.id}`,
-  childId: child.id,
-  createdAt: `${DEMO_WEEK_DATES[i % 7]} 10:15`,
-  recorder: "李老师",
-  recorderRole: "教师",
-  category: ["情绪表现", "精细动作", "社交互动", "大动作", "语言表达", "独立进食", "睡眠情况"][i % 7] as BehaviorCategory,
-  tags: ["表现良好", "持续进步"],
-  description: "日常活动中表现积极，能够较好地融入集体。",
-  needsAttention: false,
-  reviewStatus: "已完成",
-}));
+const EXTRA_GROWTH: GrowthRecord[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
+  seed.growthSeeds.map((growthSeed) => buildExtraGrowthRecord(seed.child.id, growthSeed))
+);
 
-const ALL_INITIAL_CHILDREN = [...INITIAL_CHILDREN, ...EXTRA_GEN_CHILDREN];
-const ALL_INITIAL_ATTENDANCE = [...INITIAL_ATTENDANCE, ...EXTRA_GEN_ATTENDANCE];
-const ALL_INITIAL_MEALS = attachDemoMealPhotos([...INITIAL_MEALS, ...EXTRA_GEN_MEALS]);
-const ALL_INITIAL_HEALTH_CHECKS = [...INITIAL_HEALTH_CHECKS, ...EXTRA_GEN_HEALTH_CHECKS];
-const ALL_INITIAL_GROWTH = [...INITIAL_GROWTH, ...EXTRA_GEN_GROWTH];
+const EXTRA_FEEDBACKS: GuardianFeedback[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
+  seed.feedbackSeeds.map((feedbackSeed) => buildExtraFeedbackRecord(seed.child.id, feedbackSeed))
+);
+
+const EXTRA_TASK_CHECKINS: TaskCheckInRecord[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
+  seed.taskSeeds.map((taskSeed) => buildExtraTaskCheckInRecord(seed.child.id, taskSeed))
+);
+
+const ALL_INITIAL_CHILDREN = [...INITIAL_CHILDREN, ...EXTRA_CHILDREN];
+const ALL_INITIAL_ATTENDANCE = [...INITIAL_ATTENDANCE, ...EXTRA_ATTENDANCE];
+const ALL_INITIAL_MEALS = attachDemoMealPhotos([...INITIAL_MEALS, ...EXTRA_MEALS]);
+const ALL_INITIAL_HEALTH_CHECKS = [...INITIAL_HEALTH_CHECKS, ...EXTRA_HEALTH_CHECKS];
+const ALL_INITIAL_GROWTH = [...INITIAL_GROWTH, ...EXTRA_GROWTH];
+const ALL_INITIAL_FEEDBACKS = [...INITIAL_FEEDBACKS, ...EXTRA_FEEDBACKS];
+const ALL_INITIAL_TASK_CHECKINS = [...INITIAL_TASK_CHECKINS, ...EXTRA_TASK_CHECKINS];
+
 
 export function AppProvider({ children: childNodes }: { children: ReactNode }) {
   const demoAccounts = INITIAL_USERS;
@@ -2525,7 +3986,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     isNormalUser && currentUser.institutionId
       ? currentUser.institutionId
       : isDemoUser
-        ? `demo:${currentUser.id}`
+        ? `demo:${DEMO_DATASET_VERSION}:${currentUser.id}`
         : null;
 
   const applySnapshot = useCallback((snapshot: AppStateSnapshot) => {

@@ -262,3 +262,30 @@ def test_admin_consultation_feed_filters_by_status_owner_and_escalation(tmp_path
     )
     assert child_feed["count"] == 1
     assert child_feed["items"][0]["consultationId"] == "consultation-child-1"
+
+
+def test_admin_consultation_feed_falls_back_to_demo_items_when_memory_empty(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "admin-feed-demo-fallback.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    orchestrator = build_orchestrator()
+    feed = asyncio.run(orchestrator.high_risk_consultation_feed(limit=3))
+
+    assert feed["count"] == 4
+    assert [item["childId"] for item in feed["items"]] == ["c-16", "c-15", "c-14"]
+    assert all(item["providerTraceSummary"]["fallback"] for item in feed["items"])
+    assert all(item["memoryMetaSummary"]["backend"] == "demo_snapshot" for item in feed["items"])
+
+
+def test_admin_consultation_feed_demo_fallback_still_applies_filters(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "admin-feed-demo-filters.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    orchestrator = build_orchestrator()
+
+    escalated_feed = asyncio.run(orchestrator.high_risk_consultation_feed(limit=10, escalated_only=True))
+    assert [item["childId"] for item in escalated_feed["items"]] == ["c-16", "c-15"]
+
+    watch_feed = asyncio.run(orchestrator.high_risk_consultation_feed(limit=10, status="watch"))
+    assert watch_feed["count"] == 1
+    assert watch_feed["items"][0]["childId"] == "c-14"

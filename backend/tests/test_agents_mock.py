@@ -128,6 +128,17 @@ def test_admin_run():
     assert body["priorityTopItems"]
 
 
+def test_admin_run_sparse_payload_uses_demo_roster_context():
+    response = client.post("/api/v1/agents/admin/run", json={"workflow": "daily-priority"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "mock"
+    assert body["institutionScope"]["visibleChildren"] == 36
+    assert body["institutionScope"]["healthAbnormalCount"] == 6
+    assert body["institutionScope"]["pendingReviewCount"] == 5
+    assert body["priorityTopItems"][0]["targetId"] == "c-16"
+
+
 def test_weekly_report():
     response = client.post(
         "/api/v1/agents/reports/weekly",
@@ -135,6 +146,17 @@ def test_weekly_report():
     )
     assert response.status_code == 200
     assert response.json()["source"] == "mock"
+
+
+def test_weekly_report_sparse_payload_hydrates_demo_context():
+    response = client.post("/api/v1/agents/reports/weekly", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "mock"
+    assert body["summary"]
+    assert body["highlights"]
+    assert body["nextWeekActions"]
+    assert body["trendPrediction"] == "stable"
 
 
 def test_high_risk_consultation():
@@ -165,6 +187,18 @@ def test_high_risk_consultation():
         "关键发现",
         "协调结论",
     ]
+
+
+def test_high_risk_consultation_sparse_payload_uses_demo_child_context():
+    response = client.post("/api/v1/agents/consultations/high-risk", json={"targetChildId": "c-16"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["consultationId"] == "consultation-c-16"
+    assert body["source"] in {"mock", "vivo"}
+    assert body["autoContext"]["childId"] == "c-16"
+    assert body["autoContext"]["className"] == "晨曦班"
+    assert body["autoContext"]["morningCheckAlerts"]
+    assert body["autoContext"]["parentFeedbackNotes"]
 
 
 def test_multimodal_endpoints():

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.providers.base import ProviderResult, ProviderTextResult
+from app.db.demo_snapshot import build_demo_admin_payload, build_demo_child_service_payload
 from app.tools.risk_tools import compute_priority_level, compute_risk_level, pick_target_child, score_snapshot
 from app.tools.summary_tools import first_non_empty, iso_now, safe_dict, safe_list, unique_texts
 
@@ -39,6 +40,71 @@ def _child_name(payload: dict[str, Any], default: str = "目标儿童") -> str:
 def _summary(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = safe_dict(payload.get("snapshot"))
     return safe_dict(snapshot.get("summary"))
+
+
+def _preferred_demo_child_id(payload: dict[str, Any]) -> str | None:
+    target_child_id = str(payload.get("targetChildId") or "").strip()
+    if target_child_id:
+        return target_child_id
+
+    target = pick_target_child(payload)
+    picked_child_id = str(safe_dict(target).get("id") or "").strip()
+    if picked_child_id:
+        return picked_child_id
+
+    snapshot_child = safe_dict(safe_dict(payload.get("snapshot")).get("child"))
+    snapshot_child_id = str(snapshot_child.get("id") or "").strip()
+    if snapshot_child_id:
+        return snapshot_child_id
+
+    question = str(payload.get("question") or "").strip()
+    if any(token in question for token in ("饮水", "补水", "喝水", "water", "hydration")):
+        return "c-15"
+    if any(token in question for token in ("偏食", "挑食", "蔬菜", "diet", "meal", "eating")):
+        return "c-11"
+    return None
+
+
+def _hydrate_demo_payload(payload: dict[str, Any], *, mode: str) -> dict[str, Any]:
+    demo_payload = (
+        build_demo_admin_payload()
+        if mode in {"admin", "weekly"}
+        else build_demo_child_service_payload(target_child_id=_preferred_demo_child_id(payload))
+    )
+
+    next_payload = dict(payload)
+    for key in ("targetChildId", "visibleChildren", "presentChildren", "healthCheckRecords", "growthRecords", "guardianFeedbacks"):
+        if next_payload.get(key):
+            continue
+        if demo_payload.get(key):
+            next_payload[key] = demo_payload[key]
+
+    current_user = safe_dict(payload.get("currentUser"))
+    demo_user = safe_dict(demo_payload.get("currentUser"))
+    if demo_user:
+        merged_user = dict(demo_user)
+        merged_user.update(current_user)
+        next_payload["currentUser"] = merged_user
+
+    snapshot = safe_dict(payload.get("snapshot"))
+    demo_snapshot = safe_dict(demo_payload.get("snapshot"))
+    if demo_snapshot:
+        merged_snapshot = dict(snapshot)
+        for key, value in demo_snapshot.items():
+            if key in {"overview", "summary", "child"}:
+                section = safe_dict(snapshot.get(key))
+                if section:
+                    merged_section = dict(safe_dict(value))
+                    merged_section.update(section)
+                    merged_snapshot[key] = merged_section
+                elif value:
+                    merged_snapshot[key] = value
+                continue
+            if key not in merged_snapshot or not merged_snapshot.get(key):
+                merged_snapshot[key] = value
+        next_payload["snapshot"] = merged_snapshot
+
+    return next_payload
 
 
 def _auto_context(payload: dict[str, Any], child_name: str) -> dict[str, Any]:
@@ -392,6 +458,7 @@ def build_mock_follow_up(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _hydrate_demo_payload(payload, mode="weekly")
     snapshot = safe_dict(payload.get("snapshot"))
     institution_name = str(snapshot.get("institutionName") or "机构")
     period = str(snapshot.get("periodLabel") or "本周")
@@ -444,6 +511,7 @@ def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_mock_teacher_result(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _hydrate_demo_payload(payload, mode="teacher")
     workflow = str(payload.get("workflow") or "follow-up")
     scope = str(payload.get("scope") or "child")
     target_child = pick_target_child(payload)
@@ -547,6 +615,7 @@ def build_mock_teacher_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_mock_admin_result(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _hydrate_demo_payload(payload, mode="admin")
     workflow = str(payload.get("workflow") or "daily-priority")
     visible_children = [safe_dict(item) for item in safe_list(payload.get("visibleChildren"))]
     class_names = unique_texts([str(item.get("className") or "未分班") for item in visible_children], limit=20)
@@ -554,20 +623,21 @@ def build_mock_admin_result(payload: dict[str, Any]) -> dict[str, Any]:
     class_count = len(class_names) or 1
     priority_level = compute_priority_level(max(child_count * 8, 60))
     generated_at = iso_now()
+    overview = safe_dict(safe_dict(payload.get("snapshot")).get("overview"))
 
     institution_scope = {
         "institutionName": str(safe_dict(payload.get("currentUser")).get("institutionName") or "智慧托育示范园"),
         "date": generated_at[:10],
-        "visibleChildren": child_count,
-        "classCount": class_count,
-        "attendanceRate": 92,
-        "healthAbnormalCount": max(1, min(3, child_count // 4 or 1)),
-        "growthAttentionCount": max(1, min(4, child_count // 3 or 1)),
-        "pendingReviewCount": max(1, min(4, child_count // 5 or 1)),
-        "feedbackCount": len(safe_list(payload.get("guardianFeedbacks"))),
-        "feedbackCompletionRate": 78,
-        "riskChildrenCount": max(1, min(3, child_count // 4 or 1)),
-        "riskClassCount": max(1, min(2, class_count)),
+        "visibleChildren": int(overview.get("visibleChildren") or child_count),
+        "classCount": int(overview.get("classCount") or class_count),
+        "attendanceRate": int(overview.get("attendanceRate") or 92),
+        "healthAbnormalCount": int(overview.get("healthAbnormalCount") or max(1, min(3, child_count // 4 or 1))),
+        "growthAttentionCount": int(overview.get("growthAttentionCount") or max(1, min(4, child_count // 3 or 1))),
+        "pendingReviewCount": int(overview.get("pendingReviewCount") or max(1, min(4, child_count // 5 or 1))),
+        "feedbackCount": int(overview.get("feedbackCount") or len(safe_list(payload.get("guardianFeedbacks")))),
+        "feedbackCompletionRate": int(overview.get("feedbackCompletionRate") or 78),
+        "riskChildrenCount": int(overview.get("riskChildrenCount") or max(1, min(3, child_count // 4 or 1))),
+        "riskClassCount": int(overview.get("riskClassCount") or max(1, min(2, class_count))),
         "pendingDispatchCount": 2,
     }
     priority_item = {
@@ -732,6 +802,7 @@ def build_mock_admin_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_mock_high_risk_bundle(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _hydrate_demo_payload(payload, mode="high-risk")
     child_name = _child_name(payload)
     child_id = str(payload.get("targetChildId") or pick_target_child(payload).get("id") or "child-unknown")
     generated_at = iso_now()
