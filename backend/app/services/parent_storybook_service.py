@@ -7,8 +7,16 @@ from time import time
 from typing import Any, Literal
 
 from app.core.config import get_settings
-from app.providers.story_audio_provider import MockStoryAudioProvider, resolve_story_audio_provider
-from app.providers.story_image_provider import MockStoryImageProvider, resolve_story_image_provider
+from app.providers.story_audio_provider import (
+    MockStoryAudioProvider,
+    can_use_vivo_story_audio_provider,
+    resolve_story_audio_provider,
+)
+from app.providers.story_image_provider import (
+    MockStoryImageProvider,
+    can_use_vivo_story_image_provider,
+    resolve_story_image_provider,
+)
 from app.services.storybook_media_cache import get_storybook_media_cache
 
 DEFAULT_STYLE_PRESET = "sunrise-watercolor"
@@ -191,6 +199,19 @@ def _resolve_style_recipe(payload: dict[str, Any]) -> dict[str, Any]:
         "custom_negative_prompt": "",
         "palette": _resolve_style_palette(style_mode, style_preset, ""),
     }
+
+
+def _resolve_demo_art_style_family(style_recipe: dict[str, Any]) -> str:
+    preset = _normalize_text(style_recipe.get("preset")) or DEFAULT_STYLE_PRESET
+    if _normalize_text(style_recipe.get("mode")) != "custom":
+        return preset
+
+    custom_prompt = _normalize_text(style_recipe.get("custom_prompt")).lower()
+    if any(token in custom_prompt for token in ("night", "moon", "星", "夜", "晚")):
+        return "moonlit-cutout"
+    if any(token in custom_prompt for token in ("forest", "green", "森", "树", "自然")):
+        return "forest-crayon"
+    return "sunrise-watercolor"
 
 
 def _resolve_generation_mode(payload: dict[str, Any]) -> GenerationMode:
@@ -1027,6 +1048,142 @@ def _provider_label(*, primary_name: str, fallback_name: str, scenes: list[dict[
     return fallback_name
 
 
+def _resolve_missing_image_config(settings: Any) -> list[str]:
+    missing: list[str] = []
+    if _normalize_text(getattr(settings, "storybook_image_provider", "")) != "vivo":
+        missing.append("storybook_image_provider")
+    if not _normalize_text(getattr(settings, "vivo_app_id", "")):
+        missing.append("VIVO_APP_ID")
+    vivo_app_key = getattr(settings, "vivo_app_key", None)
+    key_text = vivo_app_key.get_secret_value().strip() if vivo_app_key else ""
+    if not key_text:
+        missing.append("VIVO_APP_KEY")
+    return missing
+
+
+def _resolve_missing_audio_config(settings: Any) -> list[str]:
+    missing: list[str] = []
+    if _normalize_text(getattr(settings, "storybook_audio_provider", "")) != "vivo":
+        missing.append("storybook_audio_provider")
+    if not _normalize_text(getattr(settings, "vivo_app_id", "")):
+        missing.append("VIVO_APP_ID")
+    vivo_app_key = getattr(settings, "vivo_app_key", None)
+    key_text = vivo_app_key.get_secret_value().strip() if vivo_app_key else ""
+    if not key_text:
+        missing.append("VIVO_APP_KEY")
+    return missing
+
+
+def _resolve_demo_art_image_url(*, scene_blueprint: dict[str, Any], ingredients: dict[str, Any]) -> str:
+    style_family = _resolve_demo_art_style_family(ingredients["style_recipe"])
+    protagonist_archetype = _normalize_text(ingredients["protagonist"].get("archetype")) or "bunny"
+    stage = _normalize_text(scene_blueprint.get("stage")) or "opening"
+    return f"/storybook/demo-v3/{style_family}/{protagonist_archetype}/{stage}.svg"
+
+
+def _resolve_scene_image_asset(
+    *,
+    story_id: str,
+    scene_blueprint: dict[str, Any],
+    image_status: str,
+    image_result: Any,
+    settings: Any,
+    ingredients: dict[str, Any],
+) -> tuple[str | None, str | None, str]:
+    image_url = image_result.output.get("imageUrl")
+    asset_ref = image_result.output.get("assetRef")
+    source = _normalize_text(getattr(image_result, "source", ""))
+
+    if image_status == "ready" and image_url:
+        return image_url, asset_ref or image_url, "real"
+
+    if source == "mock" or not can_use_vivo_story_image_provider(settings):
+        demo_url = _resolve_demo_art_image_url(scene_blueprint=scene_blueprint, ingredients=ingredients)
+        return demo_url, demo_url, "demo-art"
+
+    fallback_svg = scene_blueprint.get("fallbackSvg")
+    if not isinstance(fallback_svg, str) or not fallback_svg.strip():
+        return image_url, asset_ref, "svg-fallback"
+
+    media_key = _build_image_media_key(
+        story_id=story_id,
+        scene_index=scene_blueprint["sceneIndex"] - 1,
+        scene_title=scene_blueprint["sceneTitle"],
+    )
+    get_storybook_media_cache().put_image(
+        media_key,
+        payload={
+            "storyId": story_id,
+            "sceneIndex": scene_blueprint["sceneIndex"],
+            "sceneTitle": scene_blueprint["sceneTitle"],
+            "contentType": "image/svg+xml",
+            "svg": fallback_svg,
+            "expiresAt": time() + float(get_storybook_media_cache().cache_window_seconds),
+        },
+    )
+    asset_url = f"/api/ai/parent-storybook/media/{media_key}"
+    return asset_url, asset_url, "svg-fallback"
+
+
+def _resolve_image_delivery(image_source_kinds: list[str]) -> Literal["real", "mixed", "demo-art", "svg-fallback"]:
+    unique_kinds = [kind for kind in dict.fromkeys(image_source_kinds) if kind]
+    if not unique_kinds:
+        return "svg-fallback"
+    if len(unique_kinds) == 1:
+        return unique_kinds[0]  # type: ignore[return-value]
+    return "mixed"
+
+
+def _resolve_media_diagnostics(
+    *,
+    settings: Any,
+    image_provider: Any,
+    audio_provider: Any,
+    scenes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    image_live_enabled = can_use_vivo_story_image_provider(settings)
+    audio_live_enabled = can_use_vivo_story_audio_provider(settings)
+    image_source_kinds = [str(scene.get("imageSourceKind") or "svg-fallback") for scene in scenes]
+    image_delivery = _resolve_image_delivery(image_source_kinds)
+    audio_delivery = _resolve_audio_delivery(scenes)
+    image_provider_name = getattr(image_provider, "provider_name", "storybook-asset")
+    audio_provider_name = getattr(audio_provider, "provider_name", "storybook-mock-preview")
+    if image_delivery == "real":
+        image_resolved_provider = image_provider_name
+    elif image_delivery == "demo-art":
+        image_resolved_provider = "storybook-demo-art"
+    elif image_delivery == "svg-fallback":
+        image_resolved_provider = "storybook-svg-fallback"
+    else:
+        image_resolved_provider = f"{image_provider_name}+storybook-demo-art"
+
+    return {
+        "brain": {
+            "reachable": True,
+            "fallbackReason": None,
+            "upstreamHost": None,
+        },
+        "image": {
+            "requestedProvider": _normalize_text(getattr(settings, "storybook_image_provider", "")) or "mock",
+            "resolvedProvider": image_resolved_provider,
+            "liveEnabled": image_live_enabled,
+            "missingConfig": [] if image_live_enabled else _resolve_missing_image_config(settings),
+        },
+        "audio": {
+            "requestedProvider": _normalize_text(getattr(settings, "storybook_audio_provider", "")) or "mock",
+            "resolvedProvider": (
+                audio_provider_name
+                if audio_delivery == "real"
+                else f"{audio_provider_name}+storybook-mock-preview"
+                if audio_delivery == "mixed"
+                else "storybook-mock-preview"
+            ),
+            "liveEnabled": audio_live_enabled,
+            "missingConfig": [] if audio_live_enabled else _resolve_missing_audio_config(settings),
+        },
+    }
+
+
 def _build_media_key(*, story_id: str, scene_index: int, audio_script: str) -> str:
     seed = "::".join([story_id, str(scene_index), audio_script[:96]])
     return f"storybook-media-{_stable_hash(seed, length=16)}"
@@ -1188,11 +1345,13 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         cache_hit_count += int(image_cache_hit) + int(audio_cache_hit)
         image_status = image_result.output.get("imageStatus", "fallback")
         audio_status = audio_result.output.get("audioStatus", "fallback")
-        image_url, asset_ref = _maybe_store_fallback_image_asset(
+        image_url, asset_ref, image_source_kind = _resolve_scene_image_asset(
             story_id=story_id,
             scene_blueprint=scene_blueprint,
             image_status=image_status,
             image_result=image_result,
+            settings=settings,
+            ingredients=ingredients,
         )
         audio_url, cached_audio_ref = _maybe_store_audio_asset(
             story_id=story_id,
@@ -1211,6 +1370,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 "imageUrl": image_url,
                 "assetRef": asset_ref,
                 "imageStatus": image_status,
+                "imageSourceKind": image_source_kind,
                 "audioUrl": audio_url,
                 "audioRef": cached_audio_ref or audio_result.output.get("audioRef"),
                 "audioScript": audio_result.output.get("audioScript") or scene_blueprint["audioScript"],
@@ -1231,6 +1391,14 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         fallback_reason = "sparse-parent-context"
     else:
         fallback_reason = "mock-storybook-pipeline"
+
+    image_delivery = _resolve_image_delivery([scene.get("imageSourceKind", "svg-fallback") for scene in scenes])
+    diagnostics = _resolve_media_diagnostics(
+        settings=settings,
+        image_provider=image_provider,
+        audio_provider=audio_provider,
+        scenes=scenes,
+    )
 
     return {
         "storyId": story_id,
@@ -1275,6 +1443,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 scenes=scenes,
                 status_key="audioStatus",
             ),
+            "imageDelivery": image_delivery,
             "audioDelivery": _resolve_audio_delivery(scenes),
             "stylePreset": style_preset,
             "requestSource": _normalize_text(_payload_get(payload, "requestSource", "request_source"))
@@ -1288,6 +1457,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 PROVIDER_CACHE_WINDOW_SECONDS,
                 int(settings.storybook_media_cache_ttl_seconds or 0),
             ),
+            "diagnostics": diagnostics,
         },
         "scenes": scenes,
     }

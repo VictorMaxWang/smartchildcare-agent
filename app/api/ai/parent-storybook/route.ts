@@ -12,12 +12,18 @@ import {
   createBrainTransportHeaders,
   forwardBrainRequest,
   type BrainForwardResult,
+  type BrainTransport,
 } from "@/lib/server/brain-client";
 
 export const runtime = "nodejs";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function shouldBypassStoryCache(request: Request) {
+  const headerValue = request.headers.get("x-smartchildcare-cache-bypass");
+  return headerValue === "1" || headerValue === "true";
 }
 
 function isParentStoryBookRequest(payload: unknown): payload is ParentStoryBookRequest {
@@ -84,6 +90,48 @@ async function parseRemoteStoryResponse(response: Response) {
   }
 }
 
+function attachTransportMetadata(
+  story: ParentStoryBookResponse,
+  meta: {
+    transport: BrainTransport;
+    fallbackReason: string | null;
+    upstreamHost: string | null;
+  }
+) {
+  return {
+    ...story,
+    fallbackReason: story.fallbackReason ?? meta.fallbackReason,
+    providerMeta: {
+      ...story.providerMeta,
+      transport: meta.transport,
+      fallbackReason: story.providerMeta.fallbackReason ?? meta.fallbackReason,
+      diagnostics: {
+        brain: {
+          reachable: meta.transport === "remote-brain-proxy",
+          fallbackReason: meta.fallbackReason,
+          upstreamHost: meta.upstreamHost,
+        },
+        image: story.providerMeta.diagnostics?.image ?? {
+          requestedProvider: story.providerMeta.imageProvider,
+          resolvedProvider: story.providerMeta.imageProvider,
+          liveEnabled:
+            story.providerMeta.imageDelivery === "real" ||
+            story.providerMeta.imageDelivery === "mixed",
+          missingConfig: [],
+        },
+        audio: story.providerMeta.diagnostics?.audio ?? {
+          requestedProvider: story.providerMeta.audioProvider,
+          resolvedProvider: story.providerMeta.audioProvider,
+          liveEnabled:
+            story.providerMeta.audioDelivery === "real" ||
+            story.providerMeta.audioDelivery === "mixed",
+          missingConfig: [],
+        },
+      },
+    },
+  } satisfies ParentStoryBookResponse;
+}
+
 export async function POST(request: Request) {
   let payload: ParentStoryBookRequest;
 
@@ -104,14 +152,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const bypassCache = shouldBypassStoryCache(request);
   const cacheKey = buildParentStoryBookRequestCacheKey(payload);
-  const cachedResponse = getCachedParentStoryBookResponse(cacheKey);
+  const cachedResponse = bypassCache ? null : getCachedParentStoryBookResponse(cacheKey);
 
   if (cachedResponse) {
-    const cachedStory = prepareParentStoryBookResponseForDelivery(cachedResponse.story, {
-      cacheState: "hit",
-      ttlSeconds: cachedResponse.story.cacheMeta?.ttlSeconds,
-    });
+    const cachedStory = attachTransportMetadata(
+      prepareParentStoryBookResponseForDelivery(cachedResponse.story, {
+        cacheState: "hit",
+        ttlSeconds: cachedResponse.story.cacheMeta?.ttlSeconds,
+      }),
+      {
+        transport: cachedResponse.transport,
+        fallbackReason: cachedResponse.fallbackReason,
+        upstreamHost: cachedResponse.upstreamHost,
+      }
+    );
 
     return NextResponse.json(cachedStory, {
       status: 200,
@@ -135,11 +191,18 @@ export async function POST(request: Request) {
       return brainForward.response;
     }
 
-    const preparedStory = prepareParentStoryBookResponseForDelivery(remoteStory, {
-      cacheState: shouldCacheParentStoryBookResponse(remoteStory) ? "miss" : "bypass",
-    });
+    const preparedStory = attachTransportMetadata(
+      prepareParentStoryBookResponseForDelivery(remoteStory, {
+        cacheState: shouldCacheParentStoryBookResponse(remoteStory) ? "miss" : "bypass",
+      }),
+      {
+        transport: "remote-brain-proxy",
+        fallbackReason: null,
+        upstreamHost: brainForward.upstreamHost,
+      }
+    );
 
-    if (shouldCacheParentStoryBookResponse(preparedStory)) {
+    if (shouldCacheParentStoryBookResponse(preparedStory) && !bypassCache) {
       setCachedParentStoryBookResponse(cacheKey, {
         story: preparedStory,
         transport: "remote-brain-proxy",
@@ -159,15 +222,25 @@ export async function POST(request: Request) {
   }
 
   const localFallbackHeaders = buildLocalFallbackHeaders(brainForward);
-  const localStory = buildParentStoryBookResponse(payload, {
-    transport: "next-json-fallback",
-    fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
-    source: "fallback",
-    fallback: true,
-  });
-  const preparedLocalStory = prepareParentStoryBookResponseForDelivery(localStory, {
-    cacheState: "bypass",
-  });
+  const preparedLocalStory = attachTransportMetadata(
+    prepareParentStoryBookResponseForDelivery(
+      buildParentStoryBookResponse(payload, {
+        transport: "next-json-fallback",
+        fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
+        source: "fallback",
+        fallback: true,
+        upstreamHost: brainForward.upstreamHost,
+      }),
+      {
+        cacheState: "bypass",
+      }
+    ),
+    {
+      transport: "next-json-fallback",
+      fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
+      upstreamHost: brainForward.upstreamHost,
+    }
+  );
 
   return NextResponse.json(preparedLocalStory, {
     status: 200,

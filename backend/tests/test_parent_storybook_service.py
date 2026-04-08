@@ -108,13 +108,18 @@ def test_parent_storybook_service_returns_six_page_storybook_by_default():
     assert result["providerMeta"]["imageProvider"] == "storybook-asset"
     assert result["providerMeta"]["audioProvider"] == "storybook-mock-preview"
     assert result["providerMeta"]["mode"] == "fallback"
+    assert result["providerMeta"]["transport"] == "fastapi-brain"
+    assert result["providerMeta"]["imageDelivery"] == "demo-art"
     assert result["providerMeta"]["audioDelivery"] == "preview-only"
     assert result["providerMeta"]["realProvider"] is False
     assert result["fallback"] is True
     assert result["scenes"][0]["imagePrompt"]
-    assert result["scenes"][0]["assetRef"].startswith("/api/ai/parent-storybook/media/")
-    assert "/storybook/scene-" not in result["scenes"][0]["assetRef"]
+    assert result["scenes"][0]["imageSourceKind"] == "demo-art"
+    assert result["scenes"][0]["assetRef"].startswith("/storybook/demo-v3/")
     assert result["scenes"][0]["audioScript"]
+    assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
+    assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
+    assert "storybook_image_provider" in result["providerMeta"]["diagnostics"]["image"]["missingConfig"]
 
 
 def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch):
@@ -135,6 +140,7 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
     assert result["providerMeta"]["mode"] == "live"
     assert result["providerMeta"]["realProvider"] is True
     assert result["fallback"] is False
+    assert result["providerMeta"]["imageDelivery"] == "real"
     assert result["providerMeta"]["imageProvider"] == "vivo-story-image"
     assert result["providerMeta"]["audioProvider"] == "vivo-story-tts"
     assert result["providerMeta"]["audioDelivery"] == "real"
@@ -142,6 +148,9 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
     assert result["scenes"][0]["audioStatus"] == "ready"
     assert result["scenes"][0]["imageUrl"].startswith("https://cdn.example.com/")
     assert result["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert result["scenes"][0]["imageSourceKind"] == "real"
+    assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "vivo-story-image"
+    assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "vivo-story-tts"
 
 
 def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatch):
@@ -162,11 +171,13 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
     assert result["providerMeta"]["mode"] == "mixed"
     assert result["providerMeta"]["realProvider"] is True
     assert result["fallback"] is True
+    assert result["providerMeta"]["imageDelivery"] == "real"
     assert result["providerMeta"]["imageProvider"] == "vivo-story-image"
     assert result["providerMeta"]["audioProvider"] == "storybook-mock-preview"
     assert result["providerMeta"]["audioDelivery"] == "preview-only"
     assert result["scenes"][0]["imageStatus"] == "ready"
     assert result["scenes"][0]["audioStatus"] == "fallback"
+    assert result["scenes"][0]["imageSourceKind"] == "real"
 
 
 def test_parent_storybook_service_degrades_to_card_when_context_is_sparse():
@@ -288,10 +299,11 @@ def test_parent_storybook_service_supports_page_count_variants_and_manual_theme_
         assert result["childId"] == "storybook-guest"
         assert len(result["scenes"]) == page_count
         assert result["providerMeta"]["sceneCount"] == page_count
+        assert result["providerMeta"]["imageDelivery"] == "demo-art"
         assert result["providerMeta"]["audioDelivery"] == "preview-only"
         assert all(scene["audioScript"] for scene in result["scenes"])
-        assert all(scene["assetRef"].startswith("/api/ai/parent-storybook/media/") for scene in result["scenes"])
-        assert all("/storybook/scene-" not in scene["assetRef"] for scene in result["scenes"])
+        assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])
+        assert all(scene["assetRef"].startswith("/storybook/demo-v3/") for scene in result["scenes"])
         assert "独立入睡" in result["summary"]
         assert "今晚" in result["scenes"][-1]["sceneText"]
 
@@ -328,3 +340,4 @@ def test_parent_storybook_service_hybrid_threads_theme_into_story_content():
     assert any("表达情绪" in scene["imagePrompt"] for scene in result["scenes"])
     assert any(child_detail in scene["imagePrompt"] for scene in result["scenes"])
     assert any("表达情绪" in scene["audioScript"] for scene in result["scenes"])
+    assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])

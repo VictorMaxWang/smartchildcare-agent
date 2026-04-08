@@ -539,6 +539,19 @@ export type ParentStoryBookStylePreset =
   | "moonlit-cutout"
   | "forest-crayon";
 export type ParentStoryBookStyleMode = "preset" | "custom";
+export type ParentStoryBookTransport =
+  | "remote-brain-proxy"
+  | "next-json-fallback"
+  | "next-stream-fallback";
+export type ParentStoryBookImageDelivery =
+  | "real"
+  | "mixed"
+  | "demo-art"
+  | "svg-fallback";
+export type ParentStoryBookSceneImageSourceKind =
+  | "real"
+  | "demo-art"
+  | "svg-fallback";
 export type ParentStoryBookHighlightKind =
   | "todayGrowth"
   | "warningSuggestion"
@@ -558,13 +571,32 @@ export interface ParentStoryBookHighlightCandidate {
   source?: string;
 }
 
+export interface ParentStoryBookDiagnosticsChannel {
+  requestedProvider: string;
+  resolvedProvider: string;
+  liveEnabled: boolean;
+  missingConfig: string[];
+}
+
+export interface ParentStoryBookDiagnostics {
+  brain: {
+    reachable: boolean;
+    fallbackReason: string | null;
+    upstreamHost: string | null;
+  };
+  image: ParentStoryBookDiagnosticsChannel;
+  audio: ParentStoryBookDiagnosticsChannel;
+}
+
 export interface ParentStoryBookProviderMeta {
   provider: string;
   mode: string;
-  transport?: string;
+  transport?: ParentStoryBookTransport;
   imageProvider: string;
   audioProvider: string;
+  imageDelivery?: ParentStoryBookImageDelivery;
   audioDelivery?: "real" | "mixed" | "preview-only";
+  diagnostics?: ParentStoryBookDiagnostics;
   stylePreset?: ParentStoryBookStylePreset;
   requestSource?: string;
   fallbackReason?: string | null;
@@ -589,6 +621,7 @@ export interface ParentStoryBookScene {
   imagePrompt: string;
   imageUrl?: string | null;
   assetRef?: string | null;
+  imageSourceKind?: ParentStoryBookSceneImageSourceKind;
   imageStatus: ParentStoryBookMediaStatus;
   audioUrl?: string | null;
   audioRef?: string | null;

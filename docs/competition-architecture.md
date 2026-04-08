@@ -1,167 +1,159 @@
 # SmartChildcare Agent 比赛架构总说明
 
+更新基准：`2026-04-08`
+
+本文件是**比赛叙事、lane 映射与 shared contracts 主文档**。如果与其他文档冲突，统一按下面优先级处理：
+
+`代码事实 > docs/current-status-ledger.md > docs/competition-architecture.md > README / 旧任务地图 / 旧描述`
+
 ## 1. 项目定位
 
-SmartChildcare Agent 是一个面向托育机构场景的移动端优先 AI 助手 / Agent 系统。它的目标不是把托育工作重新做成一个更复杂的后台，而是把教师、家长、园长最关键的判断、沟通、干预和复盘流程压缩成适合录屏、答辩和 freeze 前交接的产品主路径。
+SmartChildcare Agent 是面向托育场景的移动端优先 AI 智能体系统。它的目标不是做一个更复杂的托育后台，而是把教师、家长、园长最关键的判断、沟通、干预和复盘流程压缩成**适合录屏、答辩、继续延展**的产品主路径。
 
-当前默认代码事实以 `2026-04-07` 仓库为准。
+当前真实阶段是：
 
-核心闭环是：
+**5 条比赛展示路径已形成稳定演示基线，仓库正从旧 `T0-T13 / freeze 收口账本` 切换到 `T1-T31` 并行推进控制面。**
 
-`机构记录 -> 系统分析 -> AI 建议 / Agent 工作流 -> 家长反馈 -> 托育行动闭环`
+核心闭环固定写成：
 
-## 2. 为什么它不是普通托育后台
+`教师记录 -> 系统理解 -> 会诊与决策 -> 家长执行 -> 反馈回流 -> 下一轮连续判断`
 
-普通后台强调“记录、统计、管理”。
+## 2. 当前最稳定比赛主路径
 
-SmartChildcare Agent 当前更强调：
+当前最稳定 walkthrough 固定为：
 
-- 先捕捉，再确认
-- 先看优先级，再执行
-- 先给今夜动作，再收反馈
-- 用结构化卡片和可解释 trace 替代长篇静态报表
+1. `/teacher`
+2. `/teacher/high-risk-consultation`
+3. `/admin`
+4. `/parent`
+5. `/parent/storybook?child=c-1`
+6. `/parent/agent?child=c-1`
 
-从代码落点看，这个判断已经被写进页面结构：
+一句话叙事：
 
-- Teacher 首页 `app/teacher/page.tsx` 围绕异常儿童、未晨检、待复查和待沟通家长组织
-- Parent 首页 `app/parent/page.tsx` 围绕今夜任务、趋势入口和微绘本 wow factor 组织
-- Admin 首页 `app/admin/page.tsx` 围绕机构优先级、重点会诊和派单组织
-- 三个 `/agent` 页面都在把结构化上下文变成结构化行动
+**教师先发现问题，系统组织会诊，园长承接决策，家长先愿意看，再看懂趋势并反馈。**
 
-## 3. 当前比赛叙事收敛为 5 条展示路径
+## 3. 当前 5 条展示路径
 
 ### 3.1 Teacher 语音主线
 
 - 起点：`/teacher`
-- 目标：把老师的碎片观察快速变成结构化草稿
-- 页面：Teacher 全局语音入口、Teacher Agent 草稿确认
-- 关键链路：
-  - `app/api/ai/teacher-voice-understand`
-  - `backend/app/api/v1/endpoints/teacher_voice.py`
+- 角色目标：帮助教师低成本记录现场观察，并快速进入结构化草稿确认
+- 现有页面 / route / service：
+  - `app/teacher/page.tsx`
+  - `app/teacher/agent/page.tsx`
+  - `app/api/ai/teacher-voice-upload/route.ts`
+  - `app/api/ai/teacher-voice-understand/route.ts`
   - `backend/app/services/teacher_voice_understand.py`
-- 亮点：先捕捉，再确认；移动端产品感强
-- 保守口径：ASR live upstream 未 fully verified
+  - `backend/app/services/teacher_voice_router.py`
+- 当前口径：
+  - 主线可演示
+  - ASR live upstream 仍未 fully verified
 
 ### 3.2 高风险会诊主线
 
 - 起点：`/teacher/high-risk-consultation`
-- 目标：展示当前最强的 Multi-Agent workflow
-- 页面：stage 推进、summary card、48 小时复查、intervention card、trace / debug
-- 关键链路：
-  - `app/api/ai/high-risk-consultation/stream`
-  - `backend/app/api/v1/endpoints/agents.py`
+- 角色目标：把长期画像、近期上下文与当前信号收束成当前最强 Multi-Agent workflow
+- 现有页面 / route / service：
+  - `app/teacher/high-risk-consultation/page.tsx`
+  - `app/api/ai/high-risk-consultation/route.ts`
+  - `app/api/ai/high-risk-consultation/stream/route.ts`
   - `lib/agent/high-risk-consultation.ts`
+  - `lib/agent/consultation/*`
   - `backend/app/services/orchestrator.py`
-- 亮点：memory context + SSE + explainability + 多角色动作卡
-- 保守口径：debug case / next fallback 不等于远端真链路验收
+  - `backend/app/services/high_risk_consultation_contract.py`
+- 当前口径：
+  - 当前最强展示位
+  - 不等于完整 `T8` 已交付
+  - `providerTrace` / `memoryMeta` 是 explainability 事实，不是 fully live 声明
 
 ### 3.3 Admin 决策区主线
 
 - 起点：`/admin`
-- 目标：把高风险会诊结果转成园长办公会式决策卡
-- 页面：`RiskPriorityBoard`、source badge、优先级条目、派单 / 周报入口
-- 关键链路：
-  - `app/api/ai/high-risk-consultation/feed`
-  - `backend/app/api/v1/endpoints/agents.py`
+- 角色目标：把高风险会诊结果压成园长可执行的优先级与决策卡
+- 现有页面 / route / service：
+  - `app/admin/page.tsx`
+  - `app/admin/agent/page.tsx`
+  - `app/api/ai/high-risk-consultation/feed/route.ts`
   - `components/admin/RiskPriorityBoard.tsx`
   - `lib/agent/use-admin-workspace-loader.ts`
-- 亮点：会诊结果的二次决策化呈现，是第二展示位
-- 保守口径：不扩写成 `T9D` / `T9C` 主战场已完成
+  - `backend/app/services/admin_consultation_feed.py`
+  - `lib/agent/priority-engine.ts`
+- 当前口径：
+  - 当前第二展示位
+  - 不扩写为 `T9D` / `T9C` fully 打通
 
-### 3.4 Parent 趋势线主线
+### 3.4 Parent 微绘本主线
 
-- 起点：`/parent/agent?child=c-1`
-- 目标：把趋势解释与今晚行动闭环压到同一页
-- 页面：`/parent/agent`、`TrendLineChart`、趋势回复卡、反馈入口
-- 关键链路：
-  - `app/api/ai/parent-trend-query`
-  - `backend/app/services/parent_trend_service.py`
-  - `components/parent/ParentTrendResponseCard.tsx`
-  - `components/parent/TrendLineChart.tsx`
-- 亮点：趋势解释 + `source` / `dataQuality` / `warnings` 显性暴露
-- 保守口径：Parent trend 必须走 FastAPI brain；`demo_snapshot` 是 backend 降级，不是本地伪造
-
-### 3.5 Parent 微绘本主线
-
-- 起点：`/parent/storybook?child=c-1`
-- 目标：用 wow factor 把成长亮点、会诊与今晚任务转成家长愿意看的入口
-- 页面：`/parent`、`/parent/storybook`、`StoryBookViewer`
-- 关键链路：
-  - `app/api/ai/parent-storybook`
+- 入口顺序：`/parent` 作为桥接首页，`/parent/storybook?child=c-1` 作为 wow factor 主入口
+- 角色目标：先让家长愿意看、愿意进入行动建议
+- 现有页面 / route / service：
+  - `app/parent/page.tsx`
+  - `app/parent/storybook/page.tsx`
+  - `app/api/ai/parent-storybook/route.ts`
+  - `app/api/ai/parent-storybook/media/[mediaKey]/route.ts`
+  - `components/parent/StoryBookViewer.tsx`
   - `backend/app/services/parent_storybook_service.py`
   - `backend/app/providers/story_image_provider.py`
   - `backend/app/providers/story_audio_provider.py`
-- 亮点：3 幕故事化呈现 + image/audio/provider 状态可见
-- 保守口径：允许 `next-json-fallback` 与 media fallback；图像 / 配音与上游 live 仍未 fully verified
+- 当前口径：
+  - 已具展示能力
+  - 图像 / 配音与上游 live provider 仍有边界
 
-## 4. 架构分层
+### 3.5 Parent 趋势与反馈主线
+
+- 起点：`/parent/agent?child=c-1`
+- 角色目标：把趋势解释、今晚动作与反馈回流放在同一链路
+- 现有页面 / route / service：
+  - `app/parent/agent/page.tsx`
+  - `app/api/ai/parent-trend-query/route.ts`
+  - `app/api/ai/follow-up/route.ts`
+  - `components/parent/TrendLineChart.tsx`
+  - `components/parent/ParentTrendResponseCard.tsx`
+  - `backend/app/services/parent_trend_service.py`
+  - `backend/app/services/memory_service.py`
+- 当前口径：
+  - 已具展示能力
+  - 必须保留 `source` / `dataQuality` / `warnings`
+  - 依赖 FastAPI brain，不能写成本地完整能力
+
+## 4. 当前架构分层
 
 ### 4.1 交互感知层
 
-职责：
-
-- 移动端页面与角色视角
-- 卡片流组织
-- 结构化结果渲染
-- 弱网草稿和提醒
-
-主要落点：
-
-- `app/*`
-- `components/role-shell/*`
-- `components/teacher/*`
-- `components/consultation/*`
-- `components/admin/*`
-- `components/parent/*`
-- `lib/store.tsx`
-- `lib/mobile/*`
+- 角色页与桥接入口：`app/teacher/*`、`app/admin/*`、`app/parent/*`
+- 结构化卡片与 UI：`components/teacher/*`、`components/consultation/*`、`components/admin/*`、`components/parent/*`
+- 全局状态与本地草稿：`lib/store.tsx`、`lib/mobile/*`
 
 ### 4.2 Next 桥接层
 
-职责：
-
-- 统一对前端暴露 `/api/ai/*`
+- 统一向前端暴露 `/api/ai/*`
 - 优先转发到 FastAPI brain
-- 在允许的场景提供本地 fallback
-
-当前关键 route：
-
-- `/api/ai/teacher-voice-understand`
-- `/api/ai/high-risk-consultation`
-- `/api/ai/high-risk-consultation/stream`
-- `/api/ai/high-risk-consultation/feed`
-- `/api/ai/parent-trend-query`
-- `/api/ai/parent-storybook`
-- `/api/ai/teacher-agent`
-- `/api/ai/admin-agent`
+- 仅在允许场景提供 fallback
+- 当前关键 route：
+  - `/api/ai/teacher-voice-understand`
+  - `/api/ai/high-risk-consultation`
+  - `/api/ai/high-risk-consultation/stream`
+  - `/api/ai/high-risk-consultation/feed`
+  - `/api/ai/parent-trend-query`
+  - `/api/ai/parent-storybook`
+  - `/api/ai/follow-up`
+  - `/api/ai/weekly-report`
+  - `/api/ai/teacher-agent`
+  - `/api/ai/admin-agent`
+  - `/api/ai/parent-message-reflexion`
+  - `/api/ai/react-agent`
 
 ### 4.3 FastAPI brain
 
-职责：
-
-- workflow 编排
-- provider 调用
-- memory context 合并
-- SSE 输出
-- trace / repository / tool use
-
-主要落点：
-
-- `backend/app/api/v1/endpoints/*`
-- `backend/app/services/orchestrator.py`
-- `backend/app/services/teacher_voice_understand.py`
-- `backend/app/services/parent_trend_service.py`
-- `backend/app/services/parent_storybook_service.py`
-- `backend/app/services/react_runner.py`
+- workflow 编排：`backend/app/services/orchestrator.py`
+- Teacher 理解：`backend/app/services/teacher_voice_understand.py`
+- Parent 趋势：`backend/app/services/parent_trend_service.py`
+- Parent storybook：`backend/app/services/parent_storybook_service.py`
+- 家长消息反思：`backend/app/services/parent_message_reflexion.py`
+- 管理侧聚合：`backend/app/services/admin_consultation_feed.py`
 
 ### 4.4 记忆中枢
-
-职责：
-
-- 保存 snapshot / trace / child profile memory
-- 为 consultation / follow-up / weekly report 提供上下文
-
-主要落点：
 
 - `backend/app/db/memory_store.py`
 - `backend/app/services/memory_service.py`
@@ -169,60 +161,272 @@ SmartChildcare Agent 当前更强调：
 - `backend/app/memory/vector_store.py`
 - `app/api/state/route.ts`
 
-保守口径：
+当前允许表述为：
 
 - `child_profile_memory` / snapshots / trace 已落地
 - SessionMemory / vector store 仍是轻量骨架
-- 当前应写成“记忆中枢基础已具备，并开始接入主工作流”
+- 主工作流已开始消费 memory context
 
-## 5. 正常路径 / fallback / 当前允许表述
+## 5. 未来 Product Lanes / 架构延长线
 
-| 路径 | 正常路径 | fallback / degraded | 当前允许表述 | 仍需人工验证 |
-| --- | --- | --- | --- | --- |
-| Teacher voice | UI -> `/api/ai/teacher-voice-understand` -> FastAPI -> `teacher_voice_understand` -> ASR provider | Next 本地 best-effort fallback，可继续生成结构化草稿 | 主线可演示；ASR live upstream 未 fully verified | 真录音授权、结果弹层、草稿保存 |
-| 高风险会诊 | UI -> `/api/ai/high-risk-consultation/stream` -> FastAPI stream -> orchestrator -> consultation agents | `next-stream-fallback`、demo trace、fixture | 当前最强 Agent workflow；不把 fallback 当成远端验收 | stage 顺序、`providerTrace`、`memoryMeta` |
-| Admin feed | UI -> `/api/ai/high-risk-consultation/feed` -> FastAPI feed | route unavailable 时，UI 复用本地 consultation 做展示级 fallback | 第二展示位稳定；不宣称 `T9D` / `T9C` fully 打通 | source badge、优先级条目、Agent 承接 |
-| Parent trend | UI -> `/api/ai/parent-trend-query` -> FastAPI trend service | Next 本地 fallback 禁用；`demo_snapshot` 属于 backend 数据降级 | 有展示能力，但必须保留 `source` / `dataQuality` / `warnings` | 趋势快问、图表状态、反馈入口 |
-| Parent storybook | UI -> `/api/ai/parent-storybook` -> FastAPI storybook service -> story image / audio provider | `next-json-fallback` + rule / asset / mock / media fallback | wow factor 已形成，但图像 / 配音与 live provider 仍有边界 | scene、image/audio 状态、provider 标识 |
+下面这些 lane 都**依附现有 5 条比赛主路径延长**，不是独立新系统。
 
-## 6. vivo 能力映射
+### 5.1 收口与体验修复线
 
-所有 vivo 相关能力必须以官方文档为准：
+- 任务：`T1`、`T5`、`T6`
+- 依附主路径：
+  - `/teacher/high-risk-consultation`
+  - `/admin`
+  - `/parent/agent`
+- 现有锚点：
+  - `components/admin/ConsultationTraceCard.tsx`
+  - `components/consultation/*`
+  - `components/parent/ParentTrendResponseCard.tsx`
+  - `backend/app/services/high_risk_consultation_contract.py`
+  - `backend/app/services/parent_trend_service.py`
 
-- [vivo 官方文档入口](https://aigc.vivo.com.cn/#/document/index?id=1746)
+### 5.2 Demo 数据与演示准备线
 
-当前仓库可保守映射为：
+- 任务：`T2`、`T3`、`T4`
+- 依附主路径：
+  - Teacher / Admin / Parent 三端现有页面
+- 现有锚点：
+  - `lib/store.tsx`
+  - `app/api/state/route.ts`
+  - `backend/app/db/childcare_repository.py`
 
-| 能力 | 当前落点 | 当前口径 |
+### 5.3 外部健康文件桥接线
+
+- 任务：`T7`、`T8`、`T9`、`T10`
+- 依附主路径：
+  - `/parent`
+  - `/teacher`
+  - `/parent/agent`
+  - 高风险会诊与 follow-up 写回链路
+- 现有锚点：
+  - `backend/app/providers/vivo_ocr.py`
+  - `backend/app/schemas/multimodal.py`
+  - `backend/app/services/orchestrator.py`
+  - `backend/app/services/memory_service.py`
+
+### 5.4 关怀模式 / 祖辈模式线
+
+- 任务：`T11`、`T12`
+- 依附主路径：
+  - `/parent`
+  - `/parent/storybook`
+  - `/parent/agent`
+- 现有锚点：
+  - `app/parent/page.tsx`
+  - `components/parent/StoryBookViewer.tsx`
+  - `components/parent/ParentTrendResponseCard.tsx`
+  - `backend/app/providers/vivo_tts.py`
+
+### 5.5 统一意图入口线
+
+- 任务：`T13`、`T14`
+- 依附主路径：
+  - Teacher / Parent / Admin 入口页与各自 agent 页
+- 现有锚点：
+  - `app/api/ai/teacher-agent/route.ts`
+  - `app/api/ai/admin-agent/route.ts`
+  - `app/api/ai/react-agent/route.ts`
+  - `backend/app/services/orchestrator.py`
+  - `backend/app/services/react_runner.py`
+
+### 5.6 家长反馈闭环线
+
+- 任务：`T15`、`T16`、`T17`
+- 依附主路径：
+  - `/parent/agent`
+  - `follow-up`
+  - `weekly-report`
+  - consultation writeback
+- 现有锚点：
+  - `lib/store.tsx` 中的 `GuardianFeedback`
+  - `app/api/ai/follow-up/route.ts`
+  - `app/api/ai/weekly-report/route.ts`
+  - `backend/app/services/memory_service.py`
+
+### 5.7 会诊可解释性增强线
+
+- 任务：`T18`、`T19`
+- 依附主路径：
+  - `/teacher/high-risk-consultation`
+  - `/admin`
+- 现有锚点：
+  - `backend/app/services/high_risk_consultation_contract.py`
+  - `lib/consultation/trace-types.ts`
+  - `lib/consultation/trace-view-model.ts`
+  - `components/consultation/ConsultationTracePanel.tsx`
+
+### 5.8 干预执行与升级线
+
+- 任务：`T20`、`T21`
+- 依附主路径：
+  - intervention card
+  - follow-up
+  - Admin 派发与优先级
+- 现有锚点：
+  - `lib/agent/intervention-card.ts`
+  - `lib/mobile/reminders.ts`
+  - `app/api/admin/notification-events/route.ts`
+  - `app/api/ai/follow-up/route.ts`
+
+### 5.9 年龄分层照护线
+
+- 任务：`T22`、`T23`
+- 依附主路径：
+  - Teacher 首页
+  - Parent 首页
+  - Parent storybook
+  - Weekly Report
+- 现有锚点：
+  - `lib/store.tsx` 中的 `AgeBand`
+  - `app/teacher/page.tsx`
+  - `app/parent/page.tsx`
+  - `app/parent/storybook/page.tsx`
+  - `app/api/ai/weekly-report/route.ts`
+
+### 5.10 Teacher Copilot 线
+
+- 任务：`T24`、`T25`
+- 依附主路径：
+  - `/teacher`
+  - `/teacher/agent`
+- 现有锚点：
+  - `app/api/ai/teacher-agent/route.ts`
+  - `app/api/ai/teacher-voice-understand/route.ts`
+  - `lib/agent/teacher-agent.ts`
+  - `backend/app/agents/teacher_agent.py`
+  - `backend/app/services/teacher_voice_understand.py`
+
+### 5.11 Actionized Weekly Report 线
+
+- 任务：`T26`、`T27`
+- 依附主路径：
+  - Teacher / Admin / Parent 的周报入口
+- 现有锚点：
+  - `app/api/ai/weekly-report/route.ts`
+  - `app/admin/agent/page.tsx`
+  - `app/teacher/agent/page.tsx`
+  - `backend/app/services/orchestrator.py`
+
+### 5.12 Admin 质量治理线
+
+- 任务：`T28`、`T29`
+- 依附主路径：
+  - `/admin`
+  - `/admin/agent`
+- 现有锚点：
+  - `lib/agent/priority-engine.ts`
+  - `backend/app/services/admin_consultation_feed.py`
+  - `backend/app/agents/admin_agent.py`
+
+### 5.13 需求洞察与信任透明线
+
+- 任务：`T30`、`T31`
+- 依附主路径：
+  - `/admin`
+  - `/parent`
+  - `/parent/agent`
+- 现有锚点：
+  - feedback、consultation、task、trend、weekly report 现有数据源
+  - `components/parent/*`
+  - `lib/consultation/trace-view-model.ts`
+
+## 6. Shared Contracts
+
+未来线程默认先扩 shared contract，再扩 UI / route / service，不要各自造结构。
+
+### 6.1 feedback contract
+
+- 用途：统一记录是否执行、执行次数、谁执行、孩子反应、是否改善、阻碍、附件
+- 当前锚点：
+  - `lib/store.tsx` 中的 `GuardianFeedback`
+  - `AppStateSnapshot.feedback`
+
+### 6.2 evidence contract
+
+- 用途：统一会诊证据来源、置信度、是否需人工复核、建议类别
+- 当前锚点：
+  - `backend/app/services/high_risk_consultation_contract.py`
+  - `lib/consultation/trace-types.ts`
+  - `providerTrace` / `memoryMeta`
+
+### 6.3 task / follow-up contract
+
+- 用途：统一 intervention、reminder、follow-up、dispatch、check-in 生命周期
+- 当前锚点：
+  - `lib/agent/intervention-card.ts`
+  - `ReminderItem`
+  - `TaskCheckInRecord`
+  - `AdminDispatchEvent`
+
+### 6.4 age-band policy
+
+- 用途：让不同年龄段在建议重点、语气、任务策略、storybook tone 上体现差异
+- 当前锚点：
+  - `lib/store.tsx` 中的 `AgeBand`
+
+### 6.5 actionized weekly report contract
+
+- 用途：统一 Teacher / Admin / Parent 三版本周报 schema 与 action slot
+- 当前锚点：
+  - `app/api/ai/weekly-report/route.ts`
+  - `WeeklyReport` 现有请求 / 输出链路
+
+### 6.6 quality metrics contract
+
+- 用途：统一会诊转闭环率、48h 复查完成率、家长反馈率、任务执行率等机构指标
+- 当前锚点：
+  - `lib/agent/priority-engine.ts`
+  - `backend/app/services/admin_consultation_feed.py`
+
+### 6.7 demand insight contract
+
+- 用途：统一家长关注点热区、执行难点、弱反馈班级 / 年龄段聚合
+- 当前锚点：
+  - consultation、feedback、weekly report、trend 的现有聚合输出
+
+### 6.8 trust transparency copy layer
+
+- 用途：统一 `source`、`fallback`、`dataQuality`、`warnings`、`memoryMeta`、`providerTrace` 的可见说明层
+- 当前锚点：
+  - `components/parent/ParentTrendResponseCard.tsx`
+  - `components/parent/StoryBookViewer.tsx`
+  - `components/consultation/*`
+
+### 6.9 external health bridge contract
+
+- 用途：统一上传解析结果、结构化风险、托育动作映射、写回目标
+- 当前锚点：
+  - `backend/app/schemas/multimodal.py`
+  - `backend/app/services/orchestrator.py`
+  - `backend/app/services/memory_service.py`
+
+### 6.10 intent routing contract
+
+- 用途：统一 `targetWorkflow`、`targetPage`、`deeplink`、`previewCard`
+- 当前锚点：
+  - `app/api/ai/react-agent/route.ts`
+  - `backend/app/services/react_runner.py`
+
+## 7. Wave 视图
+
+| Wave | 主目标 | 依赖关系 |
 | --- | --- | --- |
-| LLM | `backend/app/providers/vivo_llm.py` | 代码层接入 + smoke / test 基础已具备 |
-| ASR | `backend/app/providers/vivo_asr.py` | transport 已接入；live upstream 未 fully verified |
-| TTS | `backend/app/providers/vivo_tts.py` | storybook 配音链路已有 provider 与 tests；不写成 fully live |
-| Story image | `backend/app/providers/story_image_provider.py` | 支持 vivo provider 与 mock / asset fallback |
-| OCR | `backend/app/providers/vivo_ocr.py` | 仍以 stub / mock / 预留入口为主 |
-
-强制边界：
-
-- 只通过 `VIVO_APP_ID` / `VIVO_APP_KEY` 使用密钥
-- 不把真实值写入代码、README、日志、截图、样例
-- 文档只允许写“代码层接入 + smoke / test 基础”，除非真实远端验收已完成
-
-## 7. 当前最适合比赛的叙事顺序
-
-1. Teacher 语音入口说明“老师如何低成本记录”
-2. 高风险会诊说明“系统如何自动组织多 Agent 决策”
-3. Admin 决策区说明“会诊结果如何进入机构级行动”
-4. Parent 微绘本说明“家长为什么愿意看、看得懂”
-5. Parent 趋势线说明“家长如何执行、反馈并回流给老师”
-
-这样可以把三端闭环讲成：
-
-`教师发现问题 -> Agent 会诊 -> 园长排序决策 -> 家长看到故事 -> 家长追问趋势并执行 -> 家长反馈 -> 再回流给教师`
+| `A` | 快收口 / 低风险高收益 | `T4` 依赖 `T2/T3`，`T6` 依赖 `T5` |
+| `B` | 新增亮点第一批 | `T7 -> T8 -> T9 -> T10`，`T11 -> T12`，`T13 -> T14` |
+| `C` | 闭环与治理增强 | `T15 -> T16 -> T17`，`T18 -> T19`，`T20 -> T21` |
+| `D` | 纵深化与比赛加分层 | `T22 -> T23`，`T24 -> T25`，`T26 -> T27`，`T28 -> T29`，`T31` 接在 `T18/T19` 与 `T30` 后 |
 
 ## 8. 当前最该避免的误表述
 
-- 不要把 staging 写成 fully healthy / fully switched
-- 不要把 `vivo_llm` / `vivo_asr` / `vivo_tts` / story image 写成 fully live
-- 不要把 Parent trend 写成“本地也能完整跑”
-- 不要把 Parent storybook 写成“图像 / 配音已真实稳定走 vivo”
+- 不要把 staging 写成 `fully healthy` / `fully switched`
+- 不要把 vivo provider 写成 fully live
+- 不要把 Parent trend 写成无 FastAPI brain 的本地能力
+- 不要把 Parent storybook 写成图像 / 配音上游 fully live
 - 不要把 Admin 第二展示位写成 `T9D` / `T9C` 主战场已完成
+- 不要把任一 T1-T31 写成独立新系统；它们都必须挂回当前 5 条展示路径和 shared contracts
+

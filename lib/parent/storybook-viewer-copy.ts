@@ -94,6 +94,28 @@ export function formatStoryBookSceneStatus(
   return "待补配音";
 }
 
+export type StoryBookRuntimeTransport =
+  | "remote-brain-proxy"
+  | "next-json-fallback"
+  | "next-stream-fallback";
+
+export type StoryBookRuntimeImageDelivery = "real" | "demo-art" | "svg-fallback";
+
+export function formatStoryBookSceneImageDelivery(
+  value?: StoryBookRuntimeImageDelivery | ParentStoryBookMediaStatus
+) {
+  if (value === "real" || value === "ready") return "真实插画";
+  if (value === "demo-art" || value === "mock") return "演示插画";
+  return "兜底插画";
+}
+
+export function formatStoryBookTransport(value?: StoryBookRuntimeTransport | string | null) {
+  if (value === "remote-brain-proxy") return "FastAPI 实时链路";
+  if (value === "next-json-fallback") return "本地 JSON 回退";
+  if (value === "next-stream-fallback") return "本地流式回退";
+  return value ?? "未知链路";
+}
+
 export function formatStoryBookHighlightSource(source: string) {
   if (source === "todayGrowth") return "今日成长";
   if (source === "suggestions" || source === "warningSuggestion") return "今日提醒";

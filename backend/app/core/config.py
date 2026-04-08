@@ -1,14 +1,22 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    from dotenv import dotenv_values
+except ImportError:  # pragma: no cover - dotenv is available in the test env, but keep a safe fallback.
+    dotenv_values = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_DIR = REPO_ROOT / "backend"
 DEFAULT_ENV_FILE_CANDIDATES = (
+    BACKEND_DIR / ".env.local",
+    REPO_ROOT / ".env.local",
     BACKEND_DIR / ".env.release",
     REPO_ROOT / ".env.release",
     BACKEND_DIR / ".env",
@@ -29,6 +37,76 @@ def resolve_settings_env_files() -> tuple[str, ...]:
         return tuple(str(resolve_repo_path(item.strip())) for item in override.split(",") if item.strip())
 
     return tuple(str(candidate) for candidate in DEFAULT_ENV_FILE_CANDIDATES if candidate.exists())
+
+
+def _load_env_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    if dotenv_values is not None:
+        raw = dotenv_values(str(path), encoding="utf-8")
+        return {key: value for key, value in raw.items() if value is not None}
+
+    values: dict[str, Any] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].lstrip()
+        if "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = raw_value.strip()
+        if value and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _load_settings_values() -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for env_file in reversed(resolve_settings_env_files()):
+        values.update(_load_env_file(Path(env_file)))
+    values.update(os.environ)
+
+    normalized: dict[str, Any] = {}
+    field_name_by_env_name: dict[str, str] = {}
+    for field_name, field in Settings.model_fields.items():
+        field_name_by_env_name[field_name] = field_name
+        field_name_by_env_name[field_name.upper()] = field_name
+        validation_alias = field.validation_alias
+        if validation_alias is None:
+            continue
+
+        alias_values = getattr(validation_alias, "choices", None)
+        if alias_values:
+            for alias in alias_values:
+                alias_text = str(alias).strip()
+                if not alias_text:
+                    continue
+                field_name_by_env_name[alias_text] = field_name
+                field_name_by_env_name[alias_text.upper()] = field_name
+                field_name_by_env_name[alias_text.lower()] = field_name
+            continue
+
+        alias_text = str(validation_alias).strip()
+        if alias_text:
+            field_name_by_env_name[alias_text] = field_name
+            field_name_by_env_name[alias_text.upper()] = field_name
+            field_name_by_env_name[alias_text.lower()] = field_name
+
+    for key, value in values.items():
+        if not isinstance(key, str):
+            continue
+        mapped_key = field_name_by_env_name.get(key) or field_name_by_env_name.get(key.upper()) or field_name_by_env_name.get(key.lower())
+        if mapped_key:
+            normalized[mapped_key] = value
+
+    return normalized
 
 
 class Settings(BaseSettings):
@@ -122,7 +200,4 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    env_files = resolve_settings_env_files()
-    if env_files:
-        return Settings(_env_file=env_files)
-    return Settings(_env_file=None)
+    return Settings(**_load_settings_values())

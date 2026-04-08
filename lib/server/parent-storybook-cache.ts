@@ -4,10 +4,13 @@ import type {
 } from "@/lib/server/brain-client";
 import type {
   ParentStoryBookCacheMeta,
+  ParentStoryBookImageDelivery,
   ParentStoryBookProviderMeta,
   ParentStoryBookResponse,
+  ParentStoryBookScene,
 } from "@/lib/ai/types";
 
+const STORYBOOK_CACHE_NAMESPACE = "storybook-v2-dual-track-1";
 const STORYBOOK_RESPONSE_TTL_SECONDS = 12 * 60;
 const STORYBOOK_MEDIA_TTL_SECONDS = 20 * 60;
 
@@ -100,8 +103,42 @@ function resolveProviderAudioDelivery(
   return "mixed";
 }
 
+function resolveSceneImageSourceKind(scene: ParentStoryBookScene) {
+  if (scene.imageStatus === "ready" && scene.imageUrl) {
+    return "real" as const;
+  }
+  if (
+    typeof scene.imageUrl === "string" &&
+    scene.imageUrl.includes("/storybook/demo-v3/")
+  ) {
+    return "demo-art" as const;
+  }
+  if (
+    typeof scene.assetRef === "string" &&
+    scene.assetRef.includes("/storybook/demo-v3/")
+  ) {
+    return "demo-art" as const;
+  }
+  return "svg-fallback" as const;
+}
+
+function resolveProviderImageDelivery(
+  story: ParentStoryBookResponse
+): ParentStoryBookImageDelivery {
+  const kinds = new Set(story.scenes.map((scene) => resolveSceneImageSourceKind(scene)));
+  if (kinds.size === 1) {
+    return kinds.values().next().value ?? "svg-fallback";
+  }
+  if (kinds.has("real")) return "mixed";
+  if (kinds.has("demo-art")) return "demo-art";
+  return "svg-fallback";
+}
+
 export function buildParentStoryBookRequestCacheKey(payload: unknown) {
-  return crypto.createHash("sha1").update(JSON.stringify(payload)).digest("hex");
+  return crypto
+    .createHash("sha1")
+    .update(`${STORYBOOK_CACHE_NAMESPACE}:${JSON.stringify(payload)}`)
+    .digest("hex");
 }
 
 export function shouldCacheParentStoryBookResponse(story: ParentStoryBookResponse) {
@@ -192,46 +229,55 @@ export function prepareParentStoryBookResponseForDelivery(
     resolveAudioDelivery(nextStory);
 
   nextStory.scenes = nextStory.scenes.map((scene) => {
+    let nextScene = {
+      ...scene,
+      imageSourceKind: scene.imageSourceKind ?? resolveSceneImageSourceKind(scene),
+    };
+
     if (
-      scene.audioStatus === "ready" &&
-      typeof scene.audioUrl === "string" &&
-      scene.audioUrl.startsWith("data:audio/")
+      nextScene.audioStatus === "ready" &&
+      typeof nextScene.audioUrl === "string" &&
+      nextScene.audioUrl.startsWith("data:audio/")
     ) {
       const cachedUrl = cacheParentStoryBookMediaDataUrl(
-        scene.audioUrl,
-        `${nextStory.storyId}:${scene.sceneIndex}`
+        nextScene.audioUrl,
+        `${nextStory.storyId}:${nextScene.sceneIndex}`
       );
       if (cachedUrl) {
         audioDelivery = "stream-url";
-        return {
-          ...scene,
+        nextScene = {
+          ...nextScene,
           audioUrl: cachedUrl,
         };
       }
     }
 
     if (
-      typeof scene.imageUrl === "string" &&
-      scene.imageUrl.startsWith("data:image/svg+xml")
+      typeof nextScene.imageUrl === "string" &&
+      nextScene.imageUrl.startsWith("data:image/svg+xml")
     ) {
       const cachedImageUrl = cacheParentStoryBookMediaDataUrl(
-        scene.imageUrl,
-        `${nextStory.storyId}:image:${scene.sceneIndex}`
+        nextScene.imageUrl,
+        `${nextStory.storyId}:image:${nextScene.sceneIndex}`
       );
       if (cachedImageUrl) {
-        return {
-          ...scene,
+        nextScene = {
+          ...nextScene,
           imageUrl: cachedImageUrl,
           assetRef: cachedImageUrl,
+          imageSourceKind: "svg-fallback",
         };
       }
     }
 
-    return scene;
+    return nextScene;
   });
 
   nextStory.providerMeta = {
     ...nextStory.providerMeta,
+    imageDelivery:
+      nextStory.providerMeta.imageDelivery ??
+      resolveProviderImageDelivery(nextStory),
     audioDelivery:
       nextStory.providerMeta.audioDelivery ??
       resolveProviderAudioDelivery(nextStory),

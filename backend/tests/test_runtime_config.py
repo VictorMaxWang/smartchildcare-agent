@@ -6,21 +6,42 @@ from app.core import config as config_module
 from app.core.config import REPO_ROOT, Settings, get_settings, resolve_repo_path, resolve_settings_env_files
 
 
-def test_resolve_settings_env_files_prefers_release_then_env(tmp_path, monkeypatch):
-    release_file = tmp_path / "backend.env.release"
-    env_file = tmp_path / "backend.env"
-    ignored_file = tmp_path / "missing.env"
-    release_file.write_text("APP_NAME=Release Brain\n", encoding="utf-8")
-    env_file.write_text("APP_NAME=Local Brain\n", encoding="utf-8")
+def test_resolve_settings_env_files_prefers_backend_local_then_repo_local_then_release(tmp_path, monkeypatch):
+    backend_local = tmp_path / "backend.env.local"
+    repo_local = tmp_path / "repo.env.local"
+    backend_release = tmp_path / "backend.env.release"
+    repo_release = tmp_path / "repo.env.release"
+    backend_env = tmp_path / "backend.env"
+    repo_env = tmp_path / "repo.env"
+    backend_local.write_text("APP_NAME=Backend Local\n", encoding="utf-8")
+    repo_local.write_text("APP_NAME=Repo Local\n", encoding="utf-8")
+    backend_release.write_text("APP_NAME=Backend Release\n", encoding="utf-8")
+    repo_release.write_text("APP_NAME=Repo Release\n", encoding="utf-8")
+    backend_env.write_text("APP_NAME=Backend Env\n", encoding="utf-8")
+    repo_env.write_text("APP_NAME=Repo Env\n", encoding="utf-8")
 
     monkeypatch.delenv("BRAIN_ENV_FILE", raising=False)
     monkeypatch.setattr(
         config_module,
         "DEFAULT_ENV_FILE_CANDIDATES",
-        (release_file, ignored_file, env_file),
+        (
+            backend_local,
+            repo_local,
+            backend_release,
+            repo_release,
+            backend_env,
+            repo_env,
+        ),
     )
 
-    assert resolve_settings_env_files() == (str(release_file), str(env_file))
+    assert resolve_settings_env_files() == (
+        str(backend_local),
+        str(repo_local),
+        str(backend_release),
+        str(repo_release),
+        str(backend_env),
+        str(repo_env),
+    )
 
 
 def test_brain_env_file_override_is_honored(tmp_path, monkeypatch):

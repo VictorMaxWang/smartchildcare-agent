@@ -29,6 +29,7 @@ import type {
 import {
   buildParentStoryBookCacheKey,
   readParentStoryBookCache,
+  shouldBypassParentStoryBookCacheOnFirstLoad,
   type ParentStoryBookClientCacheState,
   writeParentStoryBookCache,
 } from "@/lib/parent/storybook-cache";
@@ -272,7 +273,7 @@ export default function ParentStoryBookPage() {
 
     if (!bypassCache) {
       const cached = readParentStoryBookCache(resolvedCacheKey);
-      if (cached) {
+      if (cached && !shouldBypassParentStoryBookCacheOnFirstLoad(cached.story)) {
         startTransition(() => {
           setStory(cached.story);
           setStatus(cached.story.mode);
@@ -289,6 +290,9 @@ export default function ParentStoryBookPage() {
           controller.abort();
         };
       }
+      if (cached) {
+        networkOnlyRef.current = true;
+      }
     }
 
     setErrorMessage(null);
@@ -301,9 +305,16 @@ export default function ParentStoryBookPage() {
 
     async function loadStory() {
       try {
+        const requestHeaders = new Headers({
+          "Content-Type": "application/json",
+        });
+        if (networkOnlyRef.current || bypassCache) {
+          requestHeaders.set("x-smartchildcare-cache-bypass", "1");
+        }
+
         const response = await fetch("/api/ai/parent-storybook", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: requestHeaders,
           body: JSON.stringify(request),
           signal: controller.signal,
         });

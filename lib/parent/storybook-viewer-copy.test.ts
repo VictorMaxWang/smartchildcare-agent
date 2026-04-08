@@ -7,7 +7,9 @@ import {
   formatStoryBookHighlightSource,
   formatStoryBookProviderLabel,
   formatStoryBookResponseCache,
+  formatStoryBookSceneImageDelivery,
   formatStoryBookSceneStatus,
+  formatStoryBookTransport,
   formatStoryBookVoiceStyle,
   getStoryBookPresetCopy,
 } from "./storybook-viewer-copy.ts";
@@ -50,6 +52,9 @@ test("storybook viewer copy maps provider, cache and source badges to Chinese", 
   );
   assert.equal(formatStoryBookResponseCache("hit"), "响应缓存命中");
   assert.equal(formatStoryBookAudioDelivery("preview-only"), "字幕预演");
+  assert.equal(formatStoryBookSceneImageDelivery("demo-art"), "演示插画");
+  assert.equal(formatStoryBookSceneImageDelivery("svg-fallback"), "兜底插画");
+  assert.equal(formatStoryBookTransport("remote-brain-proxy"), "FastAPI 实时链路");
   assert.equal(formatStoryBookHighlightSource("interventionCard"), "今晚动作");
 });
 

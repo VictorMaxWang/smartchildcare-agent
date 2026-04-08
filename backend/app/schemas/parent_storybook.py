@@ -19,6 +19,7 @@ ParentStoryBookGenerationMode = Literal["child-personalized", "manual-theme", "h
 ParentStoryBookPageCount = Literal[4, 6, 8]
 ParentStoryBookStylePreset = Literal["sunrise-watercolor", "moonlit-cutout", "forest-crayon"]
 ParentStoryBookStyleMode = Literal["preset", "custom"]
+ParentStoryBookImageSourceKind = Literal["real", "demo-art", "svg-fallback"]
 ParentStoryBookHighlightKind = Literal[
     "todayGrowth",
     "warningSuggestion",
@@ -50,7 +51,9 @@ class ParentStoryBookProviderMeta(ParentStoryBookModel):
     transport: str | None = None
     image_provider: str
     audio_provider: str
+    image_delivery: Literal["real", "mixed", "demo-art", "svg-fallback"] | None = None
     audio_delivery: Literal["real", "mixed", "preview-only"] | None = None
+    diagnostics: "ParentStoryBookDiagnostics | None" = None
     style_preset: ParentStoryBookStylePreset | None = None
     request_source: str | None = None
     fallback_reason: str | None = None
@@ -61,6 +64,25 @@ class ParentStoryBookProviderMeta(ParentStoryBookModel):
     cache_window_seconds: int | None = None
 
 
+class ParentStoryBookDiagnosticsMedia(ParentStoryBookModel):
+    requested_provider: str | None = None
+    resolved_provider: str | None = None
+    live_enabled: bool = False
+    missing_config: list[str] = Field(default_factory=list)
+
+
+class ParentStoryBookDiagnosticsBrain(ParentStoryBookModel):
+    reachable: bool = False
+    fallback_reason: str | None = None
+    upstream_host: str | None = None
+
+
+class ParentStoryBookDiagnostics(ParentStoryBookModel):
+    brain: ParentStoryBookDiagnosticsBrain = Field(default_factory=ParentStoryBookDiagnosticsBrain)
+    image: ParentStoryBookDiagnosticsMedia = Field(default_factory=ParentStoryBookDiagnosticsMedia)
+    audio: ParentStoryBookDiagnosticsMedia = Field(default_factory=ParentStoryBookDiagnosticsMedia)
+
+
 class ParentStoryBookScene(ParentStoryBookModel):
     scene_index: int
     scene_title: str
@@ -69,6 +91,7 @@ class ParentStoryBookScene(ParentStoryBookModel):
     image_url: str | None = None
     asset_ref: str | None = None
     image_status: ParentStoryBookMediaStatus
+    image_source_kind: ParentStoryBookImageSourceKind | None = None
     audio_url: str | None = None
     audio_ref: str | None = None
     audio_script: str

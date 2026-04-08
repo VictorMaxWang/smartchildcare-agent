@@ -1,9 +1,11 @@
 import type {
   ChildSuggestionSnapshot,
   ConsultationResult,
+  ParentStoryBookDiagnostics,
   ParentStoryBookGenerationMode,
   ParentStoryBookHighlightCandidate,
   ParentStoryBookHighlightKind,
+  ParentStoryBookImageDelivery,
   ParentStoryBookMediaStatus,
   ParentStoryBookMode,
   ParentStoryBookPageCount,
@@ -12,6 +14,7 @@ import type {
   ParentStoryBookScene,
   ParentStoryBookStylePreset,
   ParentStoryBookStyleMode,
+  ParentStoryBookTransport,
 } from "@/lib/ai/types";
 import {
   buildParentAgentChildContext,
@@ -149,6 +152,8 @@ type SceneBlueprint = {
   highlightSource: string;
   voiceStyle: string;
 };
+
+type DemoStyleFamily = ParentStoryBookStylePreset;
 
 type SyntheticSnapshotInput = {
   childId?: string | null;
@@ -390,6 +395,21 @@ function buildCanonicalStylePrompt(input: {
     customNegativePrompt: undefined,
     palette: resolveStylePalette(styleMode, stylePreset),
   } satisfies StyleRecipe;
+}
+
+function resolveDemoStyleFamily(styleRecipe: StyleRecipe): DemoStyleFamily {
+  if (styleRecipe.mode !== "custom") {
+    return styleRecipe.preset;
+  }
+
+  const prompt = normalizeText(styleRecipe.customPrompt || styleRecipe.prompt).toLowerCase();
+  if (/(night|moon|cutout|剪纸|月夜)/.test(prompt)) {
+    return "moonlit-cutout";
+  }
+  if (/(forest|green|crayon|森林|蜡笔|自然)/.test(prompt)) {
+    return "forest-crayon";
+  }
+  return "sunrise-watercolor";
 }
 
 function resolveGenerationMode(input: {
@@ -1291,6 +1311,21 @@ function buildSceneImagePromptV2(
   ].join("；");
 }
 
+function resolveDemoArtArchetype(archetype: string) {
+  return PROTAGONIST_DEFINITIONS.some((item) => item.archetype === archetype)
+    ? archetype
+    : "bunny";
+}
+
+function buildDemoArtAssetPath(
+  blueprint: SceneBlueprint,
+  ingredients: StoryIngredients
+) {
+  const styleFamily = resolveDemoStyleFamily(ingredients.styleRecipe);
+  const protagonistArchetype = resolveDemoArtArchetype(blueprint.protagonist.archetype);
+  return `/storybook/demo-v3/${styleFamily}/${protagonistArchetype}/${blueprint.stage}.svg`;
+}
+
 function escapeSvgTextV2(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -1351,7 +1386,8 @@ function buildStoryScenesV2(ingredients: StoryIngredients) {
       ingredients.storyMode === "card"
         ? `${ingredients.protagonist.label}把今天那一点点亮光抱进怀里。今晚先做一件小事：${ingredients.tonightAction}。`
         : buildSceneTextV2(blueprint, ingredients);
-    const fallbackImage = buildSceneFallbackDataUrlV2(
+    const demoArtImage = buildDemoArtAssetPath(blueprint, ingredients);
+    const fallbackSvgImage = buildSceneFallbackDataUrlV2(
       buildFallbackSceneSvgV2(blueprint, sceneText, ingredients)
     );
 
@@ -1360,9 +1396,10 @@ function buildStoryScenesV2(ingredients: StoryIngredients) {
       sceneTitle: blueprint.sceneTitle,
       sceneText,
       imagePrompt: buildSceneImagePromptV2(blueprint, ingredients),
-      imageUrl: fallbackImage,
-      assetRef: fallbackImage,
-      imageStatus: "fallback",
+      imageUrl: demoArtImage,
+      assetRef: fallbackSvgImage,
+      imageSourceKind: "demo-art",
+      imageStatus: "mock",
       audioUrl: null,
       audioRef:
         ingredients.storyMode === "card"
@@ -1430,13 +1467,67 @@ function resolveProviderAudioDeliveryFromScenes(
   return "mixed";
 }
 
+function resolveProviderImageDeliveryFromScenes(
+  scenes: ParentStoryBookScene[]
+): ParentStoryBookImageDelivery {
+  const kinds = new Set(
+    scenes.map((scene) => {
+      if (scene.imageStatus === "ready" && scene.imageUrl) {
+        return "real";
+      }
+      return scene.imageSourceKind ?? "svg-fallback";
+    })
+  );
+
+  if (kinds.size === 1) {
+    return kinds.values().next().value ?? "svg-fallback";
+  }
+  if (kinds.has("real")) {
+    return "mixed";
+  }
+  if (kinds.has("demo-art")) {
+    return "demo-art";
+  }
+  return "svg-fallback";
+}
+
+function buildLocalDiagnostics(
+  transport: ParentStoryBookTransport,
+  fallbackReason: string | null,
+  upstreamHost?: string | null
+): ParentStoryBookDiagnostics {
+  const reachable = transport === "remote-brain-proxy";
+  const missingConfig = reachable ? [] : ["brain-unreachable"];
+
+  return {
+    brain: {
+      reachable,
+      fallbackReason,
+      upstreamHost: upstreamHost ?? null,
+    },
+    image: {
+      requestedProvider: "vivo-story-image",
+      resolvedProvider: reachable ? "storybook-demo-art" : "storybook-local-demo-art",
+      liveEnabled: false,
+      missingConfig,
+    },
+    audio: {
+      requestedProvider: "vivo-story-tts",
+      resolvedProvider: reachable ? "storybook-mock-preview" : "storybook-local-preview",
+      liveEnabled: false,
+      missingConfig,
+    },
+  };
+}
+
 export function buildParentStoryBookResponse(
   request: ParentStoryBookRequest,
   options?: {
-    transport?: string;
+    transport?: ParentStoryBookTransport;
     fallbackReason?: string | null;
     source?: ParentStoryBookResponse["source"];
     fallback?: boolean;
+    upstreamHost?: string | null;
   }
 ): ParentStoryBookResponse {
   const stylePreset = resolveParentStoryBookStylePreset(request.stylePreset);
@@ -1475,9 +1566,15 @@ export function buildParentStoryBookResponse(
       provider: "parent-storybook-rule",
       mode: "fallback",
       transport: options?.transport ?? "next-json-fallback",
-      imageProvider: "storybook-asset",
+      imageProvider: "storybook-demo-art",
       audioProvider: "storybook-mock-preview",
+      imageDelivery: resolveProviderImageDeliveryFromScenes(scenes),
       audioDelivery: resolveProviderAudioDeliveryFromScenes(scenes),
+      diagnostics: buildLocalDiagnostics(
+        options?.transport ?? "next-json-fallback",
+        fallbackReason,
+        options?.upstreamHost
+      ),
       stylePreset,
       requestSource: request.requestSource ?? "parent-storybook-page",
       fallbackReason,

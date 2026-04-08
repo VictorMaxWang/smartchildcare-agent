@@ -47,8 +47,12 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["providerMeta"]["provider"] == "parent-storybook-rule"
     assert body["providerMeta"]["mode"] == "fallback"
     assert body["providerMeta"]["realProvider"] is False
+    assert body["providerMeta"]["imageDelivery"] == "demo-art"
     assert body["providerMeta"]["audioDelivery"] == "preview-only"
-    assert body["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert body["scenes"][0]["imageSourceKind"] == "demo-art"
+    assert body["scenes"][0]["imageUrl"].startswith("/storybook/demo-v3/")
+    assert body["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
+    assert body["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
 
 
 def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
@@ -102,11 +106,14 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
     body = response.json()
     assert body["providerMeta"]["mode"] == "live"
     assert body["providerMeta"]["realProvider"] is True
+    assert body["providerMeta"]["imageDelivery"] == "real"
     assert body["providerMeta"]["audioDelivery"] == "real"
     assert body["fallback"] is False
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "ready"
     assert body["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert body["scenes"][0]["imageSourceKind"] == "real"
+    assert body["providerMeta"]["diagnostics"]["brain"]["reachable"] is True
 
 
 def test_parent_storybook_media_endpoint_serves_cached_audio(monkeypatch):
@@ -165,7 +172,45 @@ def test_parent_storybook_media_endpoint_serves_cached_audio(monkeypatch):
     assert media_response.content == b"RIFF"
 
 
-def test_parent_storybook_media_endpoint_serves_cached_fallback_svg():
+def test_parent_storybook_media_endpoint_serves_cached_fallback_svg(monkeypatch):
+    class _LiveEnabledSettings:
+        storybook_image_provider = "vivo"
+        storybook_audio_provider = "mock"
+        vivo_app_id = "demo-app"
+
+        class _Secret:
+            def get_secret_value(self):
+                return "demo-key"
+
+        vivo_app_key = _Secret()
+        storybook_media_cache_ttl_seconds = 900
+
+    class _SvgFallbackImageProvider:
+        provider_name = "vivo-story-image"
+
+        def render_scene(self, **kwargs):
+            return ProviderResult(
+                output={
+                    "imagePrompt": kwargs["image_prompt"],
+                    "imageUrl": None,
+                    "assetRef": None,
+                    "imageStatus": "fallback",
+                },
+                provider=self.provider_name,
+                mode="fallback",
+                source="vivo",
+                model="fallback-image",
+            )
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.get_settings",
+        lambda: _LiveEnabledSettings(),
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: _SvgFallbackImageProvider(),
+    )
+
     response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
 
     assert response.status_code == 200
@@ -177,6 +222,7 @@ def test_parent_storybook_media_endpoint_serves_cached_fallback_svg():
     assert media_response.status_code == 200
     assert media_response.headers["content-type"] == "image/svg+xml"
     assert "今天的小亮点" in media_response.text
+    assert body["scenes"][0]["imageSourceKind"] == "svg-fallback"
 
 
 def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
@@ -228,10 +274,12 @@ def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
     body = response.json()
     assert body["providerMeta"]["mode"] == "mixed"
     assert body["providerMeta"]["realProvider"] is True
+    assert body["providerMeta"]["imageDelivery"] == "real"
     assert body["providerMeta"]["audioDelivery"] == "preview-only"
     assert body["fallback"] is True
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "fallback"
+    assert body["scenes"][0]["imageSourceKind"] == "real"
 
 
 def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():
@@ -273,6 +321,7 @@ def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():
     assert request.style_mode == "custom"
     assert request.custom_style_prompt == "梦幻3D儿童绘本，柔焦，浅景深"
     assert request.custom_style_negative_prompt == "不要照片感，不要复杂背景"
+    assert request.style_mode == "custom"
     assert snake_case_request.generation_mode == "manual-theme"
     assert snake_case_request.page_count == 4
     assert snake_case_request.protagonist_archetype == "bear"

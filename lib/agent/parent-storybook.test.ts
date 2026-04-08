@@ -197,15 +197,19 @@ test("custom style overrides preset prompt and reaches image prompt", () => {
   assert.ok(!response.scenes[0]?.imagePrompt.includes("月夜剪纸"));
 });
 
-test("storybook fallback scenes build page-specific image assets instead of static scene svgs", () => {
+test("storybook fallback scenes build page-specific demo art assets instead of static scene svgs", () => {
   const response = buildParentStoryBookResponse(buildRequest({ pageCount: 8 }));
   const imageUrls = response.scenes.map((scene) => scene.imageUrl ?? "");
 
+  assert.equal(response.providerMeta.transport, "next-json-fallback");
+  assert.equal(response.providerMeta.imageDelivery, "demo-art");
   assert.equal(response.providerMeta.audioDelivery, "preview-only");
   assert.equal(response.scenes.length, 8);
-  assert.ok(imageUrls.every((url) => url.startsWith("data:image/svg+xml;base64,")));
+  assert.ok(imageUrls.every((url) => url.startsWith("/storybook/demo-v3/")));
   assert.ok(imageUrls.every((url) => !url.includes("/storybook/scene-")));
   assert.equal(new Set(imageUrls).size, 8);
+  assert.ok(response.scenes.every((scene) => scene.imageSourceKind === "demo-art"));
+  assert.equal(response.providerMeta.diagnostics?.brain.reachable, false);
 });
 
 test("storybook cache key changes when mode theme and page count change", () => {

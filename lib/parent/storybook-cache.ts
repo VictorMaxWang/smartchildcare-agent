@@ -5,7 +5,7 @@ import type {
 } from "@/lib/ai/types";
 import { stableStorybookHash } from "./storybook-presets";
 
-const STORYBOOK_CACHE_PREFIX = "smartchildcare:parent-storybook";
+const STORYBOOK_CACHE_PREFIX = "smartchildcare:parent-storybook:v4-dual-track-1";
 export const STORYBOOK_CACHE_TTL_MS = 15 * 60 * 1000;
 
 export interface ParentStoryBookClientCacheState {
@@ -18,6 +18,29 @@ interface ParentStoryBookClientCacheEntry {
   presetId: ParentStoryBookStylePreset;
   story: ParentStoryBookResponse;
 }
+
+type ParentStoryBookRuntimeProviderMeta = ParentStoryBookResponse["providerMeta"] & {
+  transport?: string;
+  imageDelivery?: "real" | "mixed" | "demo-art" | "svg-fallback";
+  diagnostics?: {
+    brain?: {
+      reachable?: boolean;
+      fallbackReason?: string | null;
+      upstreamHost?: string | null;
+    } | null;
+    image?: Record<string, unknown> | null;
+    audio?: Record<string, unknown> | null;
+  } | null;
+};
+
+type ParentStoryBookRuntimeScene = ParentStoryBookResponse["scenes"][number] & {
+  imageSourceKind?: "real" | "demo-art" | "svg-fallback";
+};
+
+type ParentStoryBookRuntimeStory = ParentStoryBookResponse & {
+  providerMeta: ParentStoryBookRuntimeProviderMeta;
+  scenes: ParentStoryBookRuntimeScene[];
+};
 
 export function buildParentStoryBookCacheKey(
   request: ParentStoryBookRequest,
@@ -48,11 +71,36 @@ export function shouldPersistParentStoryBook(
   story: ParentStoryBookResponse | null | undefined
 ) {
   if (!story) return false;
-  if (story.providerMeta.realProvider) return true;
-  return story.scenes.some(
+
+  const runtime = story as ParentStoryBookRuntimeStory;
+  if (runtime.providerMeta.realProvider) return true;
+  if (runtime.providerMeta.imageDelivery === "demo-art") return true;
+  if (runtime.scenes.some((scene) => scene.imageSourceKind === "demo-art")) return true;
+
+  return runtime.scenes.some(
     (scene) =>
       scene.imageStatus === "ready" || scene.audioStatus === "ready"
   );
+}
+
+export function shouldBypassParentStoryBookCacheOnFirstLoad(
+  story: ParentStoryBookResponse | null | undefined
+) {
+  if (!story) return false;
+
+  const runtime = story as ParentStoryBookRuntimeStory;
+  const transport = runtime.providerMeta.transport;
+  const imageDelivery = runtime.providerMeta.imageDelivery;
+  const audioDelivery = runtime.providerMeta.audioDelivery;
+  const brainReachable = runtime.providerMeta.diagnostics?.brain?.reachable;
+
+  if (brainReachable === false) return true;
+  if (transport && transport !== "remote-brain-proxy") return true;
+  if (imageDelivery && imageDelivery !== "real") return true;
+  if (audioDelivery === "preview-only") return true;
+
+  if (!transport && !runtime.providerMeta.realProvider) return true;
+  return false;
 }
 
 export function readParentStoryBookCache(cacheKey: string) {

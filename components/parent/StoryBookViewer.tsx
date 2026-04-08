@@ -34,20 +34,55 @@ import type {
 } from "@/lib/ai/types";
 import {
   describeStoryBookMode,
-  formatStoryBookAudioDelivery,
   formatStoryBookClientCache,
   formatStoryBookHighlightSource,
   formatStoryBookProviderLabel,
   formatStoryBookResponseCache,
-  formatStoryBookSceneStatus,
+  formatStoryBookSceneImageDelivery,
   formatStoryBookVoiceStyle,
   getStoryBookPresetCopy,
 } from "@/lib/parent/storybook-viewer-copy";
 import { cn } from "@/lib/utils";
 
 type StoryBookViewerStatus = "loading" | "storybook" | "card" | "empty" | "error";
-type PlaybackState = "idle" | "loading" | "playing" | "paused" | "preview";
+type PlaybackState = "idle" | "loading" | "playing" | "paused" | "preview" | "local";
 type StoryBookTheme = ReturnType<typeof getTheme>;
+type StoryBookRuntimeTransport = "remote-brain-proxy" | "next-json-fallback" | "next-stream-fallback";
+type StoryBookRuntimeImageDelivery = "real" | "demo-art" | "svg-fallback";
+type StoryBookRuntimeDiagnostics = {
+  brain?: {
+    reachable?: boolean;
+    fallbackReason?: string | null;
+    upstreamHost?: string | null;
+  } | null;
+  image?: {
+    requestedProvider?: string;
+    resolvedProvider?: string;
+    liveEnabled?: boolean;
+    missingConfig?: string[];
+  } | null;
+  audio?: {
+    requestedProvider?: string;
+    resolvedProvider?: string;
+    liveEnabled?: boolean;
+    missingConfig?: string[];
+  } | null;
+} | null;
+type StoryBookRuntimeProviderMeta = ParentStoryBookResponse["providerMeta"] & {
+  transport?: StoryBookRuntimeTransport;
+  imageDelivery?: StoryBookRuntimeImageDelivery | "mixed" | "real";
+  diagnostics?: StoryBookRuntimeDiagnostics;
+};
+type StoryBookRuntimeScene = ParentStoryBookScene & {
+  imageSourceKind?: StoryBookRuntimeImageDelivery;
+};
+type StoryBookRuntimeResponse = ParentStoryBookResponse & {
+  providerMeta: StoryBookRuntimeProviderMeta;
+  scenes: StoryBookRuntimeScene[];
+};
+type StoryBookAudioDelivery =
+  | ParentStoryBookResponse["providerMeta"]["audioDelivery"]
+  | NonNullable<ParentStoryBookResponse["cacheMeta"]>["audioDelivery"];
 
 const PREVIEW_STEP_SECONDS = 1.6;
 
@@ -120,12 +155,21 @@ function getGenerationModeCopy(mode: ParentStoryBookGenerationMode) {
 function getPlaybackActionTextV2(
   scene: ParentStoryBookScene,
   isPlaying: boolean,
-  playbackState: PlaybackState
+  playbackState: PlaybackState,
+  canUseLocalSpeech: boolean
 ) {
   if (scene.audioStatus === "ready" && scene.audioUrl) {
     if (playbackState === "paused" && isPlaying) return "继续朗读";
     if (isPlaying) return "暂停朗读";
     return "播放朗读";
+  }
+  if (playbackState === "preview") {
+    return isPlaying ? "停止预演" : "字幕预演";
+  }
+  if (canUseLocalSpeech) {
+    if (playbackState === "paused" && isPlaying) return "继续本地朗读";
+    if (playbackState === "local" && isPlaying) return "暂停本地朗读";
+    return "本地朗读";
   }
   return isPlaying ? "停止预演" : "字幕预演";
 }
@@ -133,13 +177,23 @@ function getPlaybackActionTextV2(
 function getCaptionStatusTextV2(
   scene: ParentStoryBookScene,
   isPlaying: boolean,
-  playbackState: PlaybackState
+  playbackState: PlaybackState,
+  canUseLocalSpeech: boolean
 ) {
   if (scene.audioStatus === "ready" && scene.audioUrl) {
     if (playbackState === "loading" && isPlaying) return "正在加载真实朗读";
     if (playbackState === "paused" && isPlaying) return "真实朗读已暂停";
     if (isPlaying) return "真实朗读播放中";
     return "真实朗读已就绪";
+  }
+  if (playbackState === "preview") {
+    return isPlaying ? "当前仅在进行字幕预演" : "当前仅字幕预演，未生成真实音频";
+  }
+  if (canUseLocalSpeech) {
+    if (playbackState === "loading" && isPlaying) return "正在准备本地朗读";
+    if (playbackState === "paused" && isPlaying) return "本地朗读已暂停";
+    if (isPlaying) return "本地朗读播放中";
+    return "当前使用本地朗读";
   }
   return isPlaying ? "当前仅在进行字幕预演" : "当前仅字幕预演，未生成真实音频";
 }
@@ -148,22 +202,171 @@ function getPlaybackTimeLabelV2(
   scene: ParentStoryBookScene,
   isSceneActive: boolean,
   currentTime: number,
-  duration: number
+  duration: number,
+  canUseLocalSpeech: boolean,
+  playbackState: PlaybackState
 ) {
   if (isSceneActive && duration > 0) {
     return `${formatSeconds(currentTime)} / ${formatSeconds(duration)}`;
   }
-  return scene.audioStatus === "ready" && scene.audioUrl ? "可播放" : "仅字幕预演";
+  if (scene.audioStatus === "ready" && scene.audioUrl) {
+    return "可播放";
+  }
+  if (playbackState === "preview") {
+    return "仅字幕预演";
+  }
+  if (canUseLocalSpeech) {
+    return playbackState === "local" ? "本地朗读" : "可本地朗读";
+  }
+  return "仅字幕预演";
 }
 
 function getBookPlaybackLabel(
-  audioDelivery?: ParentStoryBookResponse["providerMeta"]["audioDelivery"],
+  audioDelivery?: StoryBookAudioDelivery,
+  canUseLocalSpeech = false,
   isBookPlaying?: boolean
 ) {
   if (isBookPlaying) return "停止全书";
-  if (audioDelivery === "real") return "播放全书";
-  if (audioDelivery === "mixed") return "播放全书（含字幕预演页）";
+  if (audioDelivery === "real") {
+    return "播放全书";
+  }
+  if (audioDelivery === "mixed") {
+    return canUseLocalSpeech ? "播放全书（含本地朗读）" : "播放全书（含字幕预演页）";
+  }
+  if (canUseLocalSpeech) return "播放全书（含本地朗读）";
   return "全书字幕预演";
+}
+
+function getSceneAudioBadgeLabel(
+  scene: ParentStoryBookScene,
+  canUseLocalSpeech: boolean
+) {
+  if (scene.audioStatus === "ready" && scene.audioUrl) return "真实朗读";
+  if (canUseLocalSpeech) return "本地朗读";
+  return "字幕预演";
+}
+
+function getSceneAudioPlayingLabel(
+  scene: ParentStoryBookScene,
+  playbackState: PlaybackState,
+  canUseLocalSpeech: boolean
+) {
+  if (scene.audioStatus === "ready" && scene.audioUrl) {
+    if (playbackState === "paused") return "真实朗读已暂停";
+    return "真实朗读中";
+  }
+  if (canUseLocalSpeech) {
+    if (playbackState === "paused") return "本地朗读已暂停";
+    return "本地朗读中";
+  }
+  return "字幕预演中";
+}
+
+function getStoryAudioRuntimeLabel(
+  audioDelivery?: StoryBookAudioDelivery,
+  canUseLocalSpeech = false
+) {
+  if (audioDelivery === "real") {
+    return "真实朗读";
+  }
+  if (audioDelivery === "mixed") {
+    return canUseLocalSpeech ? "部分真实朗读 + 本地朗读" : "部分真实朗读";
+  }
+  return canUseLocalSpeech ? "本地朗读" : "字幕预演";
+}
+
+function getRuntimeStory(story: ParentStoryBookResponse | null | undefined) {
+  return story as StoryBookRuntimeResponse;
+}
+
+function getRuntimeSceneImageDelivery(scene: StoryBookRuntimeScene) {
+  if (scene.imageSourceKind) return scene.imageSourceKind;
+  if (scene.imageStatus === "ready") return "real";
+  if (scene.imageStatus === "mock") return "demo-art";
+  return "svg-fallback";
+}
+
+function getRuntimeBannerItems(
+  story: StoryBookRuntimeResponse | null | undefined,
+  canUseLocalSpeech: boolean
+) {
+  if (!story) return [];
+
+  const items: Array<{ tone: "warning" | "success" | "info"; label: string; detail: string }> = [];
+  const diagnostics = story.providerMeta.diagnostics;
+  const transport = story.providerMeta.transport;
+  const imageDelivery = story.providerMeta.imageDelivery;
+  const audioDelivery = story.providerMeta.audioDelivery;
+
+  if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
+    items.push({
+      tone: "warning",
+      label: "未连接到 FastAPI brain，当前为本地演示模式",
+      detail: diagnostics?.brain?.fallbackReason
+        ? `回退原因：${diagnostics.brain.fallbackReason}`
+        : "当前结果来自本地回退链路。",
+    });
+  } else if (transport === "remote-brain-proxy") {
+    items.push({
+      tone: "success",
+      label: "FastAPI 实时链路已连接",
+      detail: diagnostics?.brain?.upstreamHost
+        ? `上游：${diagnostics.brain.upstreamHost}`
+        : "当前绘本来自实时后端链路。",
+    });
+  }
+
+  if (imageDelivery === "real") {
+    items.push({
+      tone: "success",
+      label: "真实插画已就绪",
+      detail: "每页将优先展示真实生成的插画结果。",
+    });
+  } else if (imageDelivery === "demo-art") {
+    items.push({
+      tone: "info",
+      label: "图片 provider 未就绪，当前使用演示插画",
+      detail: "这是高质量的本地演示插画，不是简陋兜底图。",
+    });
+  } else {
+    items.push({
+      tone: "warning",
+      label: "图片 provider 未就绪，当前使用兜底插画",
+      detail: "当前页使用蓝图驱动的 SVG 兜底图，仍保留剧情对应关系。",
+    });
+  }
+
+  if (audioDelivery === "real") {
+    items.push({
+      tone: "success",
+      label: "真实朗读已就绪",
+      detail: "每页将优先播放后端生成的真实音频。",
+    });
+  } else if (audioDelivery === "mixed") {
+    items.push({
+      tone: "info",
+      label: canUseLocalSpeech ? "部分真实朗读，缺页将使用本地朗读" : "部分真实朗读，缺页将使用字幕预演",
+      detail: canUseLocalSpeech
+        ? "未命中的页会切到浏览器本地朗读。"
+        : "未命中的页会切到字幕预演。",
+    });
+  } else {
+    items.push({
+      tone: canUseLocalSpeech ? "success" : "warning",
+      label: canUseLocalSpeech ? "音频 provider 未就绪，当前使用本地朗读" : "音频 provider 未就绪，当前仅字幕预演",
+      detail: canUseLocalSpeech
+        ? "浏览器 speechSynthesis 可用，仍可完成逐页朗读。"
+        : "当前浏览器不支持本地朗读，只能进行字幕预演。",
+    });
+  }
+
+  return items;
+}
+
+function getSceneImageDeliveryLabel(scene: ParentStoryBookScene) {
+  return formatStoryBookSceneImageDelivery(
+    getRuntimeSceneImageDelivery(scene as StoryBookRuntimeScene)
+  );
 }
 
 export default function StoryBookViewer({
@@ -234,6 +437,14 @@ export default function StoryBookViewer({
   const selectedThemeChip = themeChips.includes(manualTheme.trim()) ? manualTheme.trim() : null;
   const requiresTheme =
     generationMode === "manual-theme" || generationMode === "hybrid";
+  const canUseLocalSpeech =
+    typeof window !== "undefined" &&
+    "speechSynthesis" in window &&
+    typeof window.speechSynthesis?.speak === "function";
+  const runtimeStory = story ? getRuntimeStory(story) : null;
+  const runtimeBanners = story
+    ? getRuntimeBannerItems(runtimeStory, canUseLocalSpeech)
+    : [];
 
   const bodyContent = !story ? (
     <EmptyStoryState
@@ -277,6 +488,26 @@ export default function StoryBookViewer({
         </div>
 
         <Card className={cn("overflow-hidden backdrop-blur-xl", theme.panel)}>
+          {story ? (
+            <div className="space-y-2 border-b border-white/70 bg-white/60 px-4 py-4 sm:px-5">
+              {runtimeBanners.map((item) => (
+                <div
+                  key={item.label}
+                  className={cn(
+                    "rounded-[22px] border px-4 py-3 text-sm leading-6 shadow-sm",
+                    item.tone === "success"
+                      ? "border-emerald-200 bg-emerald-50/90 text-emerald-950"
+                      : item.tone === "info"
+                        ? "border-sky-200 bg-sky-50/90 text-sky-950"
+                        : "border-amber-200 bg-amber-50/90 text-amber-950"
+                  )}
+                >
+                  <div className="font-semibold">{item.label}</div>
+                  <div className="mt-1 text-xs opacity-80">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <CardHeader className="space-y-4 pb-4">
             <div className="space-y-2">
               <CardTitle className="text-2xl tracking-tight text-slate-950">
@@ -552,8 +783,9 @@ export default function StoryBookViewer({
                   <CardContent className="space-y-3 p-4">
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline">
-                        {formatStoryBookAudioDelivery(
-                          story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery
+                        {getStoryAudioRuntimeLabel(
+                          story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery,
+                          canUseLocalSpeech
                         )}
                       </Badge>
                       <Badge variant="outline">
@@ -572,8 +804,9 @@ export default function StoryBookViewer({
                       {formatStoryBookProviderLabel("audio", story.providerMeta.audioProvider)}
                     </p>
                     <p className="text-sm leading-7 text-slate-600">
-                      音频状态：{formatStoryBookAudioDelivery(
-                        story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery
+                      音频状态：{getStoryAudioRuntimeLabel(
+                        story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery,
+                        canUseLocalSpeech
                       )}
                     </p>
                   </CardContent>
@@ -595,7 +828,9 @@ function StoryBookSceneStream({
   theme: StoryBookTheme;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const previewTimerRef = useRef<number | null>(null);
+  const speechTimerRef = useRef<number | null>(null);
   const queueRef = useRef<number[]>([]);
   const sceneRefs = useRef<Record<number, HTMLElement | null>>({});
   const tokenRef = useRef(0);
@@ -608,6 +843,11 @@ function StoryBookSceneStream({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isBookPlaying, setIsBookPlaying] = useState(false);
+  const [imageFallbackMap, setImageFallbackMap] = useState<Record<string, boolean>>({});
+  const canUseLocalSpeech =
+    typeof window !== "undefined" &&
+    "speechSynthesis" in window &&
+    typeof window.speechSynthesis?.speak === "function";
 
   const scenes = useMemo(() => story.scenes ?? [], [story.scenes]);
 
@@ -621,6 +861,18 @@ function StoryBookSceneStream({
       window.clearInterval(previewTimerRef.current);
       previewTimerRef.current = null;
     }
+  }
+
+  function clearSpeech() {
+    if (speechTimerRef.current) {
+      window.clearInterval(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
+    const speech = window.speechSynthesis;
+    if (speech) {
+      speech.cancel();
+    }
+    speechRef.current = null;
   }
 
   function clearAudio() {
@@ -642,6 +894,7 @@ function StoryBookSceneStream({
     invalidate();
     queueRef.current = [];
     clearPreview();
+    clearSpeech();
     clearAudio();
     setPlaybackState("idle");
     setPlaybackSceneIndex(null);
@@ -710,12 +963,14 @@ function StoryBookSceneStream({
     startScenePlayback(nextScene, nextIndex, { continueBook: true });
   }
 
-  function startPreview(
+  function startCaptionTrack(
     scene: ParentStoryBookScene,
     index: number,
-    options?: { continueBook?: boolean }
+    options?: { continueBook?: boolean; advanceOnTimer?: boolean },
+    playbackMode: "preview" | "local" = "preview"
   ) {
     const token = invalidate();
+    clearSpeech();
     clearAudio();
     clearPreview();
 
@@ -724,7 +979,7 @@ function StoryBookSceneStream({
     const totalDuration = safeSegments.length * PREVIEW_STEP_SECONDS;
 
     setPlaybackSceneIndex(index);
-    setPlaybackState("preview");
+    setPlaybackState(playbackMode);
     setCaptionIndex(0);
     setProgress(safeSegments.length ? 1 / safeSegments.length : 1);
     setCurrentTime(0);
@@ -738,13 +993,77 @@ function StoryBookSceneStream({
       step += 1;
       if (step >= safeSegments.length) {
         clearPreview();
-        advanceQueue();
+        if (options?.advanceOnTimer !== false) {
+          advanceQueue();
+        }
         return;
       }
       setCaptionIndex(step);
       setProgress((step + 1) / safeSegments.length);
       setCurrentTime(step * PREVIEW_STEP_SECONDS);
     }, PREVIEW_STEP_SECONDS * 1000);
+
+    return { token, safeSegments, totalDuration };
+  }
+
+  function startPreview(
+    scene: ParentStoryBookScene,
+    index: number,
+    options?: { continueBook?: boolean }
+  ) {
+    startCaptionTrack(scene, index, options, "preview");
+  }
+
+  function startLocalSpeech(
+    scene: ParentStoryBookScene,
+    index: number,
+    options?: { continueBook?: boolean }
+  ) {
+    if (!canUseLocalSpeech || typeof window === "undefined" || !window.speechSynthesis) {
+      startPreview(scene, index, options);
+      return;
+    }
+
+    const { token } = startCaptionTrack(
+      scene,
+      index,
+      { ...options, advanceOnTimer: false },
+      "local"
+    );
+    const speech = window.speechSynthesis;
+    const utterance = new SpeechSynthesisUtterance(scene.audioScript || scene.sceneText);
+    utterance.lang = "zh-CN";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    speechRef.current = utterance;
+
+    utterance.onstart = () => {
+      if (tokenRef.current !== token) return;
+      setPlaybackState("local");
+    };
+    utterance.onpause = () => {
+      if (tokenRef.current !== token) return;
+      setPlaybackState("paused");
+      if (!queueRef.current.length) {
+        setIsBookPlaying(false);
+      }
+    };
+    utterance.onresume = () => {
+      if (tokenRef.current !== token) return;
+      setPlaybackState("local");
+    };
+    utterance.onerror = () => {
+      if (tokenRef.current !== token) return;
+      startPreview(scene, index, options);
+    };
+    utterance.onend = () => {
+      if (tokenRef.current !== token) return;
+      clearSpeech();
+      advanceQueue();
+    };
+
+    speech.cancel();
+    speech.speak(utterance);
   }
 
   function startAudio(
@@ -758,6 +1077,7 @@ function StoryBookSceneStream({
     }
 
     const token = invalidate();
+    clearSpeech();
     clearPreview();
     clearAudio();
 
@@ -815,10 +1135,18 @@ function StoryBookSceneStream({
     };
     audio.onerror = () => {
       if (tokenRef.current !== token) return;
+      if (canUseLocalSpeech) {
+        startLocalSpeech(scene, index, options);
+        return;
+      }
       startPreview(scene, index, options);
     };
     audio.play().catch(() => {
       if (tokenRef.current !== token) return;
+      if (canUseLocalSpeech) {
+        startLocalSpeech(scene, index, options);
+        return;
+      }
       startPreview(scene, index, options);
     });
   }
@@ -832,6 +1160,10 @@ function StoryBookSceneStream({
       startAudio(scene, index, options);
       return;
     }
+    if (canUseLocalSpeech) {
+      startLocalSpeech(scene, index, options);
+      return;
+    }
     startPreview(scene, index, options);
   }
 
@@ -843,8 +1175,20 @@ function StoryBookSceneStream({
         audioRef.current?.pause();
         return;
       }
+      if (playbackState === "local") {
+        if (speechRef.current) {
+          window.speechSynthesis?.pause();
+        }
+        return;
+      }
       if (playbackState === "paused" && audioRef.current) {
         void audioRef.current.play().catch(() => startPreview(scene, index));
+        return;
+      }
+      if (playbackState === "paused" && canUseLocalSpeech) {
+        if (speechRef.current) {
+          window.speechSynthesis?.resume();
+        }
         return;
       }
       if (playbackState === "preview") {
@@ -894,10 +1238,14 @@ function StoryBookSceneStream({
           ) : (
             <Play className="mr-2 h-4 w-4" />
           )}
-          {getBookPlaybackLabel(story.providerMeta.audioDelivery, isBookPlaying)}
+          {getBookPlaybackLabel(
+            story.providerMeta.audioDelivery,
+            canUseLocalSpeech,
+            isBookPlaying
+          )}
         </Button>
         <p className="text-xs text-slate-500">
-          {getBookPlaybackLabel(story.providerMeta.audioDelivery, false)}
+          {getStoryAudioRuntimeLabel(story.providerMeta.audioDelivery, canUseLocalSpeech)}
         </p>
       </div>
 
@@ -905,7 +1253,16 @@ function StoryBookSceneStream({
         {scenes.map((scene, index) => {
           const isPlaying = playbackSceneIndex === index && playbackState !== "idle";
           const isSceneActive = playbackSceneIndex === index;
+          const imageDelivery = getRuntimeSceneImageDelivery(scene as StoryBookRuntimeScene);
           const segments = splitStoryBookCaptionSegments(scene.audioScript || scene.sceneText);
+          const sceneImageFallbackKey = `${story.storyId}:${scene.sceneIndex}`;
+          const useAssetFallback =
+            Boolean(imageFallbackMap[sceneImageFallbackKey]) &&
+            Boolean(scene.assetRef) &&
+            scene.assetRef !== scene.imageUrl;
+          const sceneImageSrc = useAssetFallback
+            ? scene.assetRef || "/storybook/card.svg"
+            : scene.imageUrl || scene.assetRef || "/storybook/card.svg";
           return (
             <article
               key={scene.sceneIndex}
@@ -929,18 +1286,34 @@ function StoryBookSceneStream({
                     {formatStoryBookHighlightSource(scene.highlightSource)}
                   </Badge>
                   {isPlaying ? (
-                    <Badge variant="info">
+                    <Badge variant={playbackState === "preview" ? "warning" : "info"}>
                       <AudioLines className="mr-1.5 h-3.5 w-3.5" />
-                      {scene.audioStatus === "ready" ? "真实朗读中" : "字幕预演中"}
+                      {getSceneAudioPlayingLabel(scene, playbackState, canUseLocalSpeech)}
                     </Badge>
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant={scene.imageStatus === "ready" ? "success" : "warning"}>
-                    {formatStoryBookSceneStatus("image", scene.imageStatus)}
+                  <Badge
+                    variant={
+                      imageDelivery === "real"
+                        ? "success"
+                        : imageDelivery === "demo-art"
+                          ? "info"
+                          : "warning"
+                    }
+                  >
+                    {getSceneImageDeliveryLabel(scene)}
                   </Badge>
-                  <Badge variant={scene.audioStatus === "ready" ? "success" : "warning"}>
-                    {formatStoryBookSceneStatus("audio", scene.audioStatus)}
+                  <Badge
+                    variant={
+                      scene.audioStatus === "ready" && scene.audioUrl
+                        ? "success"
+                        : canUseLocalSpeech
+                          ? "info"
+                          : "warning"
+                    }
+                  >
+                    {getSceneAudioBadgeLabel(scene, canUseLocalSpeech)}
                   </Badge>
                 </div>
               </div>
@@ -948,12 +1321,22 @@ function StoryBookSceneStream({
               <div className="relative mt-4 overflow-hidden rounded-[30px] border border-white/80 bg-white shadow-sm">
                 <div className="relative aspect-[4/5] w-full sm:aspect-[5/6]">
                   <Image
-                    src={scene.imageUrl || scene.assetRef || "/storybook/card.svg"}
+                    src={sceneImageSrc}
                     alt={scene.sceneTitle}
                     fill
                     sizes="(max-width: 768px) 100vw, 720px"
                     className="object-cover"
                     unoptimized
+                    onError={() => {
+                      if (!scene.assetRef || scene.assetRef === scene.imageUrl) return;
+                      setImageFallbackMap((current) => {
+                        if (current[sceneImageFallbackKey]) return current;
+                        return {
+                          ...current,
+                          [sceneImageFallbackKey]: true,
+                        };
+                      });
+                    }}
                   />
                 </div>
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/55 via-slate-950/10 to-transparent px-4 py-4">
@@ -971,7 +1354,12 @@ function StoryBookSceneStream({
                     <div>
                       <p className="text-sm font-semibold text-slate-950">逐页朗读</p>
                       <p className="mt-1 text-xs leading-6 text-slate-500">
-                        {getCaptionStatusTextV2(scene, isPlaying, playbackState)}
+                        {getCaptionStatusTextV2(
+                          scene,
+                          isPlaying,
+                          playbackState,
+                          canUseLocalSpeech
+                        )}
                       </p>
                     </div>
                     <Button
@@ -985,7 +1373,12 @@ function StoryBookSceneStream({
                       ) : (
                         <Play className="mr-2 h-4 w-4" />
                       )}
-                      {getPlaybackActionTextV2(scene, isPlaying, playbackState)}
+                      {getPlaybackActionTextV2(
+                        scene,
+                        isPlaying,
+                        playbackState,
+                        canUseLocalSpeech
+                      )}
                     </Button>
                   </div>
 
@@ -1006,13 +1399,15 @@ function StoryBookSceneStream({
                     />
                   </div>
                   <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                    <span>{formatStoryBookVoiceStyle(scene.voiceStyle)}</span>
+                      <span>{formatStoryBookVoiceStyle(scene.voiceStyle)}</span>
                     <span>
                       {getPlaybackTimeLabelV2(
                         scene,
                         isSceneActive,
                         currentTime,
-                        duration
+                        duration,
+                        canUseLocalSpeech,
+                        playbackState
                       )}
                     </span>
                   </div>
