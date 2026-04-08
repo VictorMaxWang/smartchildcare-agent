@@ -47,6 +47,8 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["providerMeta"]["provider"] == "parent-storybook-rule"
     assert body["providerMeta"]["mode"] == "fallback"
     assert body["providerMeta"]["realProvider"] is False
+    assert body["providerMeta"]["audioDelivery"] == "preview-only"
+    assert body["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
 
 
 def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
@@ -100,6 +102,7 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
     body = response.json()
     assert body["providerMeta"]["mode"] == "live"
     assert body["providerMeta"]["realProvider"] is True
+    assert body["providerMeta"]["audioDelivery"] == "real"
     assert body["fallback"] is False
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "ready"
@@ -162,6 +165,20 @@ def test_parent_storybook_media_endpoint_serves_cached_audio(monkeypatch):
     assert media_response.content == b"RIFF"
 
 
+def test_parent_storybook_media_endpoint_serves_cached_fallback_svg():
+    response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    media_url = body["scenes"][0]["imageUrl"]
+    media_key = media_url.rsplit("/", 1)[-1]
+    media_response = client.get(f"/api/v1/agents/parent/storybook/media/{media_key}")
+
+    assert media_response.status_code == 200
+    assert media_response.headers["content-type"] == "image/svg+xml"
+    assert "今天的小亮点" in media_response.text
+
+
 def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
     class _MixedProvider:
         def __init__(self, *, provider_name: str, media_kind: str):
@@ -211,6 +228,7 @@ def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
     body = response.json()
     assert body["providerMeta"]["mode"] == "mixed"
     assert body["providerMeta"]["realProvider"] is True
+    assert body["providerMeta"]["audioDelivery"] == "preview-only"
     assert body["fallback"] is True
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "fallback"
@@ -226,6 +244,9 @@ def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():
             "pageCount": 8,
             "goalKeywords": ["表达情绪", "勇气"],
             "protagonistArchetype": "bunny",
+            "styleMode": "custom",
+            "customStylePrompt": "梦幻3D儿童绘本，柔焦，浅景深",
+            "customStyleNegativePrompt": "不要照片感，不要复杂背景",
         }
     )
     snake_case_request = ParentStoryBookRequest.model_validate(
@@ -237,6 +258,9 @@ def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():
             "page_count": 4,
             "goal_keywords": ["独立入睡"],
             "protagonist_archetype": "bear",
+            "style_mode": "preset",
+            "custom_style_prompt": "暖色拼贴",
+            "custom_style_negative_prompt": "不要写实人脸",
         }
     )
 
@@ -246,9 +270,15 @@ def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():
     assert request.page_count == 8
     assert request.goal_keywords == ["表达情绪", "勇气"]
     assert request.protagonist_archetype == "bunny"
+    assert request.style_mode == "custom"
+    assert request.custom_style_prompt == "梦幻3D儿童绘本，柔焦，浅景深"
+    assert request.custom_style_negative_prompt == "不要照片感，不要复杂背景"
     assert snake_case_request.generation_mode == "manual-theme"
     assert snake_case_request.page_count == 4
     assert snake_case_request.protagonist_archetype == "bear"
+    assert snake_case_request.style_mode == "preset"
+    assert snake_case_request.custom_style_prompt == "暖色拼贴"
+    assert snake_case_request.custom_style_negative_prompt == "不要写实人脸"
 
 
 def test_parent_storybook_endpoint_rejects_invalid_page_count():

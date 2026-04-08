@@ -117,45 +117,6 @@ function getGenerationModeCopy(mode: ParentStoryBookGenerationMode) {
   }
 }
 
-function getPlaybackActionText(
-  scene: ParentStoryBookScene,
-  isPlaying: boolean,
-  playbackState: PlaybackState
-) {
-  if (scene.audioStatus === "ready" && scene.audioUrl) {
-    if (playbackState === "paused" && isPlaying) return "继续朗读";
-    if (isPlaying) return "暂停朗读";
-    return "播放朗读";
-  }
-  return isPlaying ? "停止预演" : "字幕预演";
-}
-
-function getCaptionStatusText(
-  scene: ParentStoryBookScene,
-  isPlaying: boolean,
-  playbackState: PlaybackState
-) {
-  if (scene.audioStatus === "ready" && scene.audioUrl) {
-    if (playbackState === "loading" && isPlaying) return "正在加载真实配音";
-    if (playbackState === "paused" && isPlaying) return "朗读已暂停";
-    if (isPlaying) return "真实朗读播放中";
-    return "真实朗读已就绪";
-  }
-  return isPlaying ? "字幕预演中" : "当前使用字幕预演";
-}
-
-function getPlaybackTimeLabel(
-  scene: ParentStoryBookScene,
-  isSceneActive: boolean,
-  currentTime: number,
-  duration: number
-) {
-  if (isSceneActive && duration > 0) {
-    return `${formatSeconds(currentTime)} / ${formatSeconds(duration)}`;
-  }
-  return scene.audioStatus === "ready" ? "可播放" : "预演中";
-}
-
 function getPlaybackActionTextV2(
   scene: ParentStoryBookScene,
   isPlaying: boolean,
@@ -218,6 +179,9 @@ export default function StoryBookViewer({
   manualTheme,
   pageCount,
   selectedPresetId,
+  styleMode,
+  customStylePrompt,
+  customStyleNegativePrompt,
   themeChips,
   pageCountOptions,
   generationHint,
@@ -227,6 +191,9 @@ export default function StoryBookViewer({
   onManualThemeChange,
   onSelectThemeChip,
   onPageCountChange,
+  onStyleModeChange,
+  onCustomStylePromptChange,
+  onCustomStyleNegativePromptChange,
   onGenerate,
   onRetry,
   parentHref = "/parent",
@@ -243,6 +210,9 @@ export default function StoryBookViewer({
   manualTheme: string;
   pageCount: ParentStoryBookPageCount;
   selectedPresetId: ParentStoryBookStylePreset;
+  styleMode: ParentStoryBookStyleMode;
+  customStylePrompt: string;
+  customStyleNegativePrompt: string;
   themeChips: string[];
   pageCountOptions: ParentStoryBookPageCount[];
   generationHint?: string | null;
@@ -252,6 +222,9 @@ export default function StoryBookViewer({
   onManualThemeChange: (value: string) => void;
   onSelectThemeChip: (theme: string) => void;
   onPageCountChange: (count: ParentStoryBookPageCount) => void;
+  onStyleModeChange: (mode: ParentStoryBookStyleMode) => void;
+  onCustomStylePromptChange: (value: string) => void;
+  onCustomStyleNegativePromptChange: (value: string) => void;
   onGenerate: () => void;
   onRetry?: () => void;
   parentHref?: string;
@@ -420,34 +393,93 @@ export default function StoryBookViewer({
                   </div>
                 </div>
 
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      风格模式
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          ["preset", "预设风格"],
+                          ["custom", "自定义风格"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <Button
+                          key={value}
+                          type="button"
+                          variant={styleMode === value ? "default" : "outline"}
+                          className={cn("rounded-full", styleMode === value ? theme.accent : theme.quiet)}
+                          onClick={() => onStyleModeChange(value)}
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {styleMode === "custom" ? (
+                    <div className="grid gap-3">
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          自定义风格
+                        </p>
+                        <Input
+                          value={customStylePrompt}
+                          onChange={(event) => onCustomStylePromptChange(event.target.value)}
+                          placeholder="例如：梦幻3D儿童绘本、柔焦、低饱和、电影级光影、浅景深"
+                          className="h-11 rounded-2xl border-white/70 bg-white/88 text-slate-900 placeholder:text-slate-400"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          负面约束
+                        </p>
+                        <Input
+                          value={customStyleNegativePrompt}
+                          onChange={(event) => onCustomStyleNegativePromptChange(event.target.value)}
+                          placeholder="例如：不要照片感、不要复杂背景、不要写实人脸、不要过度文字"
+                          className="h-11 rounded-2xl border-white/70 bg-white/88 text-slate-900 placeholder:text-slate-400"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                     风格预设
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    {PARENT_STORYBOOK_PRESETS.map((item) => {
-                      const presetCopy = getStoryBookPresetCopy(item.id);
-                      const selected = item.id === selectedPresetId;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => onSelectPreset(item.id)}
-                          className={cn(
-                            "rounded-2xl border px-3 py-2 text-left text-sm transition-all",
-                            selected
-                              ? "border-slate-900 bg-white text-slate-950 shadow-sm"
-                              : "border-white/60 bg-white/65 text-slate-600"
-                          )}
-                        >
-                          <div className="font-semibold">{presetCopy.shortLabel}</div>
-                          <div className="mt-1 text-xs opacity-80">
-                            {presetCopy.description}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {styleMode === "preset" ? (
+                    <div className="flex flex-wrap gap-2">
+                      {PARENT_STORYBOOK_PRESETS.map((item) => {
+                        const presetCopy = getStoryBookPresetCopy(item.id);
+                        const selected = item.id === selectedPresetId;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => onSelectPreset(item.id)}
+                            className={cn(
+                              "rounded-2xl border px-3 py-2 text-left text-sm transition-all",
+                              selected
+                                ? "border-slate-900 bg-white text-slate-950 shadow-sm"
+                                : "border-white/60 bg-white/65 text-slate-600"
+                            )}
+                          >
+                            <div className="font-semibold">{presetCopy.shortLabel}</div>
+                            <div className="mt-1 text-xs opacity-80">
+                              {presetCopy.description}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-white/70 bg-white/70 px-4 py-3 text-sm leading-6 text-slate-600">
+                      当前使用自定义风格；预设仅作为切回 preset 时的记忆值，不会混入这次插画 prompt。
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/70 bg-white/72 px-4 py-3">
@@ -520,7 +552,9 @@ export default function StoryBookViewer({
                   <CardContent className="space-y-3 p-4">
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline">
-                        {formatStoryBookAudioDelivery(story.cacheMeta?.audioDelivery)}
+                        {formatStoryBookAudioDelivery(
+                          story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery
+                        )}
                       </Badge>
                       <Badge variant="outline">
                         {formatStoryBookResponseCache(story.cacheMeta?.storyResponse)}
@@ -536,6 +570,11 @@ export default function StoryBookViewer({
                     </p>
                     <p className="text-sm leading-7 text-slate-600">
                       {formatStoryBookProviderLabel("audio", story.providerMeta.audioProvider)}
+                    </p>
+                    <p className="text-sm leading-7 text-slate-600">
+                      音频状态：{formatStoryBookAudioDelivery(
+                        story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery
+                      )}
                     </p>
                   </CardContent>
                 </Card>
@@ -855,8 +894,11 @@ function StoryBookSceneStream({
           ) : (
             <Play className="mr-2 h-4 w-4" />
           )}
-          {isBookPlaying ? "停止全书" : "播放全书"}
+          {getBookPlaybackLabel(story.providerMeta.audioDelivery, isBookPlaying)}
         </Button>
+        <p className="text-xs text-slate-500">
+          {getBookPlaybackLabel(story.providerMeta.audioDelivery, false)}
+        </p>
       </div>
 
       <div className="space-y-5">
@@ -889,7 +931,7 @@ function StoryBookSceneStream({
                   {isPlaying ? (
                     <Badge variant="info">
                       <AudioLines className="mr-1.5 h-3.5 w-3.5" />
-                      {scene.audioStatus === "ready" ? "朗读中" : "预演中"}
+                      {scene.audioStatus === "ready" ? "真实朗读中" : "字幕预演中"}
                     </Badge>
                   ) : null}
                 </div>
@@ -929,7 +971,7 @@ function StoryBookSceneStream({
                     <div>
                       <p className="text-sm font-semibold text-slate-950">逐页朗读</p>
                       <p className="mt-1 text-xs leading-6 text-slate-500">
-                        {getCaptionStatusText(scene, isPlaying, playbackState)}
+                        {getCaptionStatusTextV2(scene, isPlaying, playbackState)}
                       </p>
                     </div>
                     <Button
@@ -943,7 +985,7 @@ function StoryBookSceneStream({
                       ) : (
                         <Play className="mr-2 h-4 w-4" />
                       )}
-                      {getPlaybackActionText(scene, isPlaying, playbackState)}
+                      {getPlaybackActionTextV2(scene, isPlaying, playbackState)}
                     </Button>
                   </div>
 
@@ -966,7 +1008,7 @@ function StoryBookSceneStream({
                   <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-slate-400">
                     <span>{formatStoryBookVoiceStyle(scene.voiceStyle)}</span>
                     <span>
-                      {getPlaybackTimeLabel(
+                      {getPlaybackTimeLabelV2(
                         scene,
                         isSceneActive,
                         currentTime,

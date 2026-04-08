@@ -585,7 +585,10 @@ export function applyParentStoryBookDemoSeed(
       item.source === "goalKeyword"
   );
   const stylePreset = request.stylePreset ?? demoSeed.stylePreset;
-  const stylePrompt = request.stylePrompt || STYLE_PRESET_PROMPTS[stylePreset];
+  const keepCustomStyle = request.styleMode === "custom";
+  const stylePrompt = keepCustomStyle
+    ? request.stylePrompt
+    : request.stylePrompt || STYLE_PRESET_PROMPTS[stylePreset];
   const mergedHighlights =
     themeCandidates.length > 0
       ? [
@@ -608,6 +611,9 @@ export function applyParentStoryBookDemoSeed(
     goalKeywords: request.goalKeywords,
     protagonistArchetype: request.protagonistArchetype,
     stylePreset,
+    styleMode: request.styleMode,
+    customStylePrompt: request.customStylePrompt,
+    customStyleNegativePrompt: request.customStyleNegativePrompt,
     stylePrompt,
     requestSource: preserveRequestSource ? request.requestSource : demoSeed.requestSource,
     highlightCandidates: mergedHighlights,

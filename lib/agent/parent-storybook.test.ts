@@ -18,6 +18,7 @@ function buildRequest(
     generationMode: "child-personalized",
     requestSource: "storybook-test",
     stylePreset: "sunrise-watercolor",
+    styleMode: "preset",
     stylePrompt: "默认晨光水彩风格",
     pageCount: 6,
     goalKeywords: [],
@@ -180,6 +181,33 @@ test("hybrid storybook threads theme and child context into scene text prompt an
   assert.ok(response.scenes.some((scene) => scene.audioScript.includes("先停一停")));
 });
 
+test("custom style overrides preset prompt and reaches image prompt", () => {
+  const response = buildParentStoryBookResponse(
+    buildRequest({
+      styleMode: "custom",
+      stylePreset: "moonlit-cutout",
+      customStylePrompt: "梦幻3D儿童绘本，柔焦，浅景深，电影级光影",
+      customStyleNegativePrompt: "不要照片感、不要复杂背景",
+      stylePrompt:
+        "儿童绘本风格方向：梦幻3D儿童绘本，柔焦，浅景深，电影级光影。负面约束：不要照片感、不要复杂背景。",
+    })
+  );
+
+  assert.ok(response.scenes[0]?.imagePrompt.includes("梦幻3D儿童绘本"));
+  assert.ok(!response.scenes[0]?.imagePrompt.includes("月夜剪纸"));
+});
+
+test("storybook fallback scenes build page-specific image assets instead of static scene svgs", () => {
+  const response = buildParentStoryBookResponse(buildRequest({ pageCount: 8 }));
+  const imageUrls = response.scenes.map((scene) => scene.imageUrl ?? "");
+
+  assert.equal(response.providerMeta.audioDelivery, "preview-only");
+  assert.equal(response.scenes.length, 8);
+  assert.ok(imageUrls.every((url) => url.startsWith("data:image/svg+xml;base64,")));
+  assert.ok(imageUrls.every((url) => !url.includes("/storybook/scene-")));
+  assert.equal(new Set(imageUrls).size, 8);
+});
+
 test("storybook cache key changes when mode theme and page count change", () => {
   const baseRequest = buildRequest();
   const baseKey = buildParentStoryBookCacheKey(baseRequest, "sunrise-watercolor");
@@ -204,8 +232,21 @@ test("storybook cache key changes when mode theme and page count change", () => 
     "sunrise-watercolor"
   );
 
+  const customStyleKey = buildParentStoryBookCacheKey(
+    buildRequest({
+      styleMode: "custom",
+      customStylePrompt: "梦幻3D儿童绘本",
+      customStyleNegativePrompt: "不要照片感",
+    }),
+    "sunrise-watercolor"
+  );
+
   assert.notEqual(baseKey, themeKey);
   assert.notEqual(baseKey, pageKey);
   assert.notEqual(baseKey, modeKey);
-  assert.equal(new Set([baseKey, themeKey, pageKey, modeKey]).size, 4);
+  assert.notEqual(baseKey, customStyleKey);
+  assert.equal(
+    new Set([baseKey, themeKey, pageKey, modeKey, customStyleKey]).size,
+    5
+  );
 });

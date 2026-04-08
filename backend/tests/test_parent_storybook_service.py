@@ -63,7 +63,7 @@ class _SceneProvider:
         self.calls.append(kwargs)
         if "image_prompt" in kwargs:
             status = self.image_status or "fallback"
-            image_url = "https://cdn.example.com/story-1.png" if status == "ready" else "/storybook/scene-1.svg"
+            image_url = "https://cdn.example.com/story-1.png" if status == "ready" else None
             return ProviderResult(
                 output={
                     "imagePrompt": kwargs["image_prompt"],
@@ -108,10 +108,12 @@ def test_parent_storybook_service_returns_six_page_storybook_by_default():
     assert result["providerMeta"]["imageProvider"] == "storybook-asset"
     assert result["providerMeta"]["audioProvider"] == "storybook-mock-preview"
     assert result["providerMeta"]["mode"] == "fallback"
+    assert result["providerMeta"]["audioDelivery"] == "preview-only"
     assert result["providerMeta"]["realProvider"] is False
     assert result["fallback"] is True
     assert result["scenes"][0]["imagePrompt"]
-    assert result["scenes"][0]["assetRef"] == "/storybook/scene-1.svg"
+    assert result["scenes"][0]["assetRef"].startswith("/api/ai/parent-storybook/media/")
+    assert "/storybook/scene-" not in result["scenes"][0]["assetRef"]
     assert result["scenes"][0]["audioScript"]
 
 
@@ -135,6 +137,7 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
     assert result["fallback"] is False
     assert result["providerMeta"]["imageProvider"] == "vivo-story-image"
     assert result["providerMeta"]["audioProvider"] == "vivo-story-tts"
+    assert result["providerMeta"]["audioDelivery"] == "real"
     assert result["scenes"][0]["imageStatus"] == "ready"
     assert result["scenes"][0]["audioStatus"] == "ready"
     assert result["scenes"][0]["imageUrl"].startswith("https://cdn.example.com/")
@@ -161,6 +164,7 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
     assert result["fallback"] is True
     assert result["providerMeta"]["imageProvider"] == "vivo-story-image"
     assert result["providerMeta"]["audioProvider"] == "storybook-mock-preview"
+    assert result["providerMeta"]["audioDelivery"] == "preview-only"
     assert result["scenes"][0]["imageStatus"] == "ready"
     assert result["scenes"][0]["audioStatus"] == "fallback"
 
@@ -200,6 +204,32 @@ def test_parent_storybook_service_includes_style_preset_in_prompt(monkeypatch):
 
     assert result["stylePreset"] == "moonlit-cutout"
     assert "月夜剪纸" in image_provider.calls[0]["image_prompt"]
+
+
+def test_parent_storybook_service_custom_style_overrides_preset_prompt(monkeypatch):
+    image_provider = _SceneProvider(provider_name="vivo-story-image", image_status="ready")
+    audio_provider = _SceneProvider(provider_name="storybook-mock-preview", audio_status="fallback")
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = _base_payload()
+    payload["stylePreset"] = "moonlit-cutout"
+    payload["styleMode"] = "custom"
+    payload["customStylePrompt"] = "梦幻3D儿童绘本，柔焦，浅景深"
+    payload["customStyleNegativePrompt"] = "不要照片感、不要复杂背景"
+
+    asyncio.run(run_parent_storybook(payload))
+
+    assert "梦幻3D儿童绘本" in image_provider.calls[0]["image_prompt"]
+    assert "不要照片感" in image_provider.calls[0]["image_prompt"]
+    assert "月夜剪纸" not in image_provider.calls[0]["image_prompt"]
 
 
 def test_parent_storybook_service_reuses_media_cache(monkeypatch):
@@ -258,7 +288,10 @@ def test_parent_storybook_service_supports_page_count_variants_and_manual_theme_
         assert result["childId"] == "storybook-guest"
         assert len(result["scenes"]) == page_count
         assert result["providerMeta"]["sceneCount"] == page_count
+        assert result["providerMeta"]["audioDelivery"] == "preview-only"
         assert all(scene["audioScript"] for scene in result["scenes"])
+        assert all(scene["assetRef"].startswith("/api/ai/parent-storybook/media/") for scene in result["scenes"])
+        assert all("/storybook/scene-" not in scene["assetRef"] for scene in result["scenes"])
         assert "独立入睡" in result["summary"]
         assert "今晚" in result["scenes"][-1]["sceneText"]
 

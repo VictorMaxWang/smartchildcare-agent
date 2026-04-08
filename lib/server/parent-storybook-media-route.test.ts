@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   cacheParentStoryBookAudioDataUrl,
+  cacheParentStoryBookMediaDataUrl,
   parentStoryBookCacheInternals,
-  readCachedParentStoryBookAudio,
+  readCachedParentStoryBookMedia,
 } from "./parent-storybook-cache.ts";
 
 const mediaRouteRoot = fileURLToPath(
@@ -29,8 +30,8 @@ test("parent storybook media keeps a single dynamic route directory", () => {
 });
 
 test("parent storybook media cache keeps the opaque media URL contract", () => {
-  const { audioAssetCache } = parentStoryBookCacheInternals;
-  audioAssetCache.clear();
+  const { mediaAssetCache } = parentStoryBookCacheInternals;
+  mediaAssetCache.clear();
 
   const audioUrl = cacheParentStoryBookAudioDataUrl(
     "data:audio/wav;base64,UklGRg==",
@@ -46,7 +47,7 @@ test("parent storybook media cache keeps the opaque media URL contract", () => {
   const mediaKey = audioUrl?.split("/").at(-1);
   assert.ok(mediaKey);
 
-  const cachedAudio = readCachedParentStoryBookAudio(mediaKey);
+  const cachedAudio = readCachedParentStoryBookMedia(mediaKey);
   assert.ok(cachedAudio);
   assert.equal(cachedAudio.contentType, "audio/wav");
   assert.deepEqual(
@@ -54,5 +55,26 @@ test("parent storybook media cache keeps the opaque media URL contract", () => {
     Array.from(Buffer.from("UklGRg==", "base64"))
   );
 
-  audioAssetCache.clear();
+  mediaAssetCache.clear();
+});
+
+test("parent storybook media cache also serves svg fallback assets", () => {
+  const { mediaAssetCache } = parentStoryBookCacheInternals;
+  mediaAssetCache.clear();
+
+  const imageUrl = cacheParentStoryBookMediaDataUrl(
+    `data:image/svg+xml;base64,${Buffer.from("<svg><text>Page 5</text></svg>").toString("base64")}`,
+    "storybook-1:image:5"
+  );
+
+  assert.equal(typeof imageUrl, "string");
+  const mediaKey = imageUrl?.split("/").at(-1);
+  assert.ok(mediaKey);
+
+  const cachedImage = readCachedParentStoryBookMedia(mediaKey);
+  assert.ok(cachedImage);
+  assert.equal(cachedImage.contentType, "image/svg+xml");
+  assert.match(cachedImage.bytes.toString("utf8"), /Page 5/);
+
+  mediaAssetCache.clear();
 });

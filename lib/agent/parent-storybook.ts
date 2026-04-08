@@ -1048,115 +1048,10 @@ function buildStoryIngredients(request: ParentStoryBookRequest) {
   } satisfies StoryIngredients;
 }
 
-function buildSceneTitle(stage: StoryStage) {
-  switch (stage) {
-    case "opening":
-      return "月光翻开第一页";
-    case "setup":
-      return "小脚步在路上";
-    case "challenge":
-      return "遇到一点点难";
-    case "support":
-      return "有人轻轻托住它";
-    case "attempt":
-      return "它决定再试一下";
-    case "wobble":
-      return "风吹来时先停一停";
-    case "small-success":
-      return "小小光亮出现了";
-    case "landing":
-      return "把温柔带回今晚";
-  }
-}
-
-function buildSceneText(stage: StoryStage, ingredients: StoryIngredients) {
-  const {
-    protagonistName,
-    focusTheme,
-    summaryHighlight,
-    challengeDetail,
-    supportDetail,
-    attemptDetail,
-    successDetail,
-    wobbleDetail,
-    tonightAction,
-    tomorrowObservation,
-    generationMode,
-  } = ingredients;
-
-  switch (stage) {
-    case "opening":
-      return `${protagonistName} 今天想练习“${focusTheme}”。白天里，它已经悄悄做到了一点点：${summaryHighlight}。`;
-    case "setup":
-      return `它没有一下子就变得很厉害，而是先听一听、停一停，再把脚步放轻。${protagonistName} 知道，慢慢来也是一种本事。`;
-    case "challenge":
-      return `可当新的小关卡出现时，${protagonistName} 还是会有点犹豫。${challengeDetail}`;
-    case "support":
-      return `这时，老师和家长没有催它，只把声音放轻、把节奏放慢。${supportDetail}`;
-    case "attempt":
-      return `${protagonistName} 先做了一个最小的动作，再试一次。${attemptDetail}`;
-    case "wobble":
-      return `中间也会有一点摇晃，但那不是退步。${wobbleDetail}`;
-    case "small-success":
-      return `慢慢地，${protagonistName} 发现自己真的做到了。${successDetail}`;
-    case "landing":
-      return generationMode === "manual-theme"
-        ? `今晚，只要先做一件小事：${tonightAction}。明天，再一起看看${tomorrowObservation}。`
-        : `把这份小小的力量带回今晚吧：${tonightAction}。明天，再一起看看${tomorrowObservation}。`;
-  }
-}
-
 function buildSceneVoiceStyle(stage: StoryStage) {
   if (stage === "landing") return "gentle-bedtime";
   if (stage === "challenge" || stage === "wobble") return "warm-storytelling";
   return "calm-encouraging";
-}
-
-function buildSceneImagePrompt(
-  stage: StoryStage,
-  sceneTitle: string,
-  sceneText: string,
-  ingredients: StoryIngredients
-) {
-  const keywordText = ingredients.goalKeywords.length
-    ? `，关键词：${ingredients.goalKeywords.join("、")}`
-    : "";
-  const promptHint = ingredients.promptHint ? `，补充要求：${ingredients.promptHint}` : "";
-
-  return [
-    ingredients.stylePrompt,
-    `儿童绘本插画，移动端纵向大画幅，拟人小动物主角“${ingredients.protagonistName}”`,
-    `原型 ${ingredients.protagonistArchetype}，主题“${ingredients.focusTheme}”${keywordText}`,
-    `分镜阶段：${stage}，标题“${sceneTitle}”`,
-    `画面内容：${sceneText}`,
-    `不要直接画真实孩子本人，不要照片感，不要复杂背景，不要说教标语${promptHint}`,
-  ].join("，");
-}
-
-function buildSceneAudioScript(sceneTitle: string, sceneText: string) {
-  return `${sceneTitle}。${sceneText}`;
-}
-
-function buildCardScene(ingredients: StoryIngredients): ParentStoryBookScene {
-  const sceneTitle = "把今天轻轻收好";
-  const sceneText = `${ingredients.protagonistName} 把今天那一点点亮光抱进怀里。今晚只做一件小事：${ingredients.tonightAction}。`;
-  return {
-    sceneIndex: 1,
-    sceneTitle,
-    sceneText,
-    imagePrompt: buildSceneImagePrompt("landing", sceneTitle, sceneText, ingredients),
-    imageUrl: "/storybook/card.svg",
-    assetRef: "/storybook/card.svg",
-    imageStatus: "fallback",
-    audioUrl: null,
-    audioRef: "storybook-audio-card",
-    audioScript: buildSceneAudioScript(sceneTitle, sceneText),
-    audioStatus: "fallback",
-    voiceStyle: "gentle-bedtime",
-    highlightSource: "rule",
-    imageCacheHit: false,
-    audioCacheHit: false,
-  };
 }
 
 function selectHighlight(
@@ -1174,42 +1069,6 @@ function selectHighlight(
     priority: 99,
     source: "rule",
   };
-}
-
-function buildStoryScenes(ingredients: StoryIngredients) {
-  if (ingredients.storyMode === "card") {
-    return [buildCardScene(ingredients)];
-  }
-
-  return PAGE_STRUCTURES[ingredients.pageCount].map((stage, index) => {
-    const fallbackDetail =
-      stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight;
-    const highlight = selectHighlight(
-      ingredients.highlightCandidates,
-      index,
-      buildSceneTitle(stage),
-      fallbackDetail
-    );
-    const sceneTitle = buildSceneTitle(stage);
-    const sceneText = buildSceneText(stage, ingredients);
-    return {
-      sceneIndex: index + 1,
-      sceneTitle,
-      sceneText,
-      imagePrompt: buildSceneImagePrompt(stage, sceneTitle, sceneText, ingredients),
-      imageUrl: `/storybook/scene-${Math.min(index + 1, 3)}.svg`,
-      assetRef: `/storybook/scene-${Math.min(index + 1, 3)}.svg`,
-      imageStatus: "fallback",
-      audioUrl: null,
-      audioRef: `storybook-audio-${index + 1}`,
-      audioScript: buildSceneAudioScript(sceneTitle, sceneText),
-      audioStatus: "fallback",
-      voiceStyle: buildSceneVoiceStyle(stage),
-      highlightSource: normalizeText(highlight.source) || highlight.kind,
-      imageCacheHit: false,
-      audioCacheHit: false,
-    } satisfies ParentStoryBookScene;
-  });
 }
 
 function buildSceneTitleV2(stage: StoryStage) {

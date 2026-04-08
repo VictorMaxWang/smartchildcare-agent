@@ -127,8 +127,10 @@ export function formatStoryBookResponseCache(value?: "hit" | "miss" | "bypass") 
 }
 
 export function formatStoryBookAudioDelivery(
-  value?: "stream-url" | "inline-data-url" | "preview-only"
+  value?: "stream-url" | "inline-data-url" | "preview-only" | "real" | "mixed"
 ) {
+  if (value === "real") return "真实逐页朗读";
+  if (value === "mixed") return "部分真实朗读";
   if (value === "stream-url") return "短链音频";
   if (value === "inline-data-url") return "内联音频";
   return "字幕预演";

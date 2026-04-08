@@ -134,3 +134,26 @@ test("applyParentStoryBookDemoSeed preserves explicit v2 controls for hybrid req
   assert.equal(seededRequest.protagonistArchetype, "bear");
   assert.equal(seededRequest.requestSource, request.requestSource);
 });
+
+test("applyParentStoryBookDemoSeed keeps explicit custom style controls", () => {
+  const request = {
+    ...buildRequest(),
+    styleMode: "custom",
+    customStylePrompt: "梦幻3D儿童绘本",
+    customStyleNegativePrompt: "不要照片感",
+    stylePrompt: "儿童绘本风格方向：梦幻3D儿童绘本。负面约束：不要照片感。",
+  } satisfies ParentStoryBookRequest;
+
+  const seededRequest = applyParentStoryBookDemoSeed(
+    request,
+    "recording-c1-bedtime"
+  );
+
+  assert.equal(seededRequest.styleMode, "custom");
+  assert.equal(seededRequest.customStylePrompt, "梦幻3D儿童绘本");
+  assert.equal(seededRequest.customStyleNegativePrompt, "不要照片感");
+  assert.equal(
+    seededRequest.stylePrompt,
+    "儿童绘本风格方向：梦幻3D儿童绘本。负面约束：不要照片感。"
+  );
+});
