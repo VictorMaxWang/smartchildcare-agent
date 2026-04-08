@@ -75,12 +75,20 @@ class ParentStoryBookDiagnosticsBrain(ParentStoryBookModel):
     reachable: bool = False
     fallback_reason: str | None = None
     upstream_host: str | None = None
+    status_code: int | None = None
+    retry_strategy: Literal["none", "normalized-base-retry"] | None = None
 
 
 class ParentStoryBookDiagnostics(ParentStoryBookModel):
     brain: ParentStoryBookDiagnosticsBrain = Field(default_factory=ParentStoryBookDiagnosticsBrain)
     image: ParentStoryBookDiagnosticsMedia = Field(default_factory=ParentStoryBookDiagnosticsMedia)
     audio: ParentStoryBookDiagnosticsMedia = Field(default_factory=ParentStoryBookDiagnosticsMedia)
+
+
+class ParentStoryBookCaptionTiming(ParentStoryBookModel):
+    mode: Literal["tts-cues", "speech-boundary", "duration-derived"]
+    segment_texts: list[str] = Field(default_factory=list)
+    segment_durations_ms: list[int] = Field(default_factory=list)
 
 
 class ParentStoryBookScene(ParentStoryBookModel):
@@ -96,6 +104,7 @@ class ParentStoryBookScene(ParentStoryBookModel):
     audio_ref: str | None = None
     audio_script: str
     audio_status: ParentStoryBookMediaStatus
+    caption_timing: ParentStoryBookCaptionTiming | None = None
     voice_style: str
     highlight_source: str
     image_cache_hit: bool = False

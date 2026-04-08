@@ -5,7 +5,7 @@ import type {
 } from "@/lib/ai/types";
 import { stableStorybookHash } from "./storybook-presets";
 
-const STORYBOOK_CACHE_PREFIX = "smartchildcare:parent-storybook:v4-dual-track-1";
+const STORYBOOK_CACHE_PREFIX = "smartchildcare:parent-storybook:v5-scene-renderer-1";
 export const STORYBOOK_CACHE_TTL_MS = 15 * 60 * 1000;
 
 export interface ParentStoryBookClientCacheState {

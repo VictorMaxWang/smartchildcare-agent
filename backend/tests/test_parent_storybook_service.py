@@ -115,11 +115,15 @@ def test_parent_storybook_service_returns_six_page_storybook_by_default():
     assert result["fallback"] is True
     assert result["scenes"][0]["imagePrompt"]
     assert result["scenes"][0]["imageSourceKind"] == "demo-art"
-    assert result["scenes"][0]["assetRef"].startswith("/storybook/demo-v3/")
+    assert result["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert result["scenes"][0]["assetRef"] == result["scenes"][0]["imageUrl"]
     assert result["scenes"][0]["audioScript"]
+    assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
     assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
     assert "storybook_image_provider" in result["providerMeta"]["diagnostics"]["image"]["missingConfig"]
+    assert result["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
+    assert result["providerMeta"]["diagnostics"]["brain"]["retryStrategy"] == "none"
 
 
 def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch):
@@ -149,6 +153,7 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
     assert result["scenes"][0]["imageUrl"].startswith("https://cdn.example.com/")
     assert result["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
     assert result["scenes"][0]["imageSourceKind"] == "real"
+    assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "vivo-story-image"
     assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "vivo-story-tts"
 
@@ -178,6 +183,7 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
     assert result["scenes"][0]["imageStatus"] == "ready"
     assert result["scenes"][0]["audioStatus"] == "fallback"
     assert result["scenes"][0]["imageSourceKind"] == "real"
+    assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
 
 
 def test_parent_storybook_service_degrades_to_card_when_context_is_sparse():
@@ -303,7 +309,9 @@ def test_parent_storybook_service_supports_page_count_variants_and_manual_theme_
         assert result["providerMeta"]["audioDelivery"] == "preview-only"
         assert all(scene["audioScript"] for scene in result["scenes"])
         assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])
-        assert all(scene["assetRef"].startswith("/storybook/demo-v3/") for scene in result["scenes"])
+        assert all(scene["imageUrl"].startswith("/api/ai/parent-storybook/media/") for scene in result["scenes"])
+        assert len({scene["imageUrl"] for scene in result["scenes"]}) == page_count
+        assert all(scene["captionTiming"]["mode"] == "duration-derived" for scene in result["scenes"])
         assert "独立入睡" in result["summary"]
         assert "今晚" in result["scenes"][-1]["sceneText"]
 
@@ -341,3 +349,5 @@ def test_parent_storybook_service_hybrid_threads_theme_into_story_content():
     assert any(child_detail in scene["imagePrompt"] for scene in result["scenes"])
     assert any("表达情绪" in scene["audioScript"] for scene in result["scenes"])
     assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])
+    assert len({scene["imageUrl"] for scene in result["scenes"]}) == 4
+    assert all(scene["captionTiming"]["mode"] == "duration-derived" for scene in result["scenes"])

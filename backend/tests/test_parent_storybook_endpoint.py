@@ -50,9 +50,13 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["providerMeta"]["imageDelivery"] == "demo-art"
     assert body["providerMeta"]["audioDelivery"] == "preview-only"
     assert body["scenes"][0]["imageSourceKind"] == "demo-art"
-    assert body["scenes"][0]["imageUrl"].startswith("/storybook/demo-v3/")
+    assert body["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert body["scenes"][0]["assetRef"] == body["scenes"][0]["imageUrl"]
+    assert body["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert body["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
     assert body["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
+    assert body["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
+    assert body["providerMeta"]["diagnostics"]["brain"]["retryStrategy"] == "none"
 
 
 def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
@@ -113,6 +117,7 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
     assert body["scenes"][0]["audioStatus"] == "ready"
     assert body["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
     assert body["scenes"][0]["imageSourceKind"] == "real"
+    assert body["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert body["providerMeta"]["diagnostics"]["brain"]["reachable"] is True
 
 
@@ -222,7 +227,8 @@ def test_parent_storybook_media_endpoint_serves_cached_fallback_svg(monkeypatch)
     assert media_response.status_code == 200
     assert media_response.headers["content-type"] == "image/svg+xml"
     assert "今天的小亮点" in media_response.text
-    assert body["scenes"][0]["imageSourceKind"] == "svg-fallback"
+    assert body["scenes"][0]["imageSourceKind"] == "demo-art"
+    assert body["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
 
 
 def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
@@ -280,6 +286,7 @@ def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "fallback"
     assert body["scenes"][0]["imageSourceKind"] == "real"
+    assert body["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
 
 
 def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():

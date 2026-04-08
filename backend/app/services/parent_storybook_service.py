@@ -9,6 +9,7 @@ from typing import Any, Literal
 from app.core.config import get_settings
 from app.providers.story_audio_provider import (
     MockStoryAudioProvider,
+    build_story_caption_timing,
     can_use_vivo_story_audio_provider,
     resolve_story_audio_provider,
 )
@@ -912,6 +913,307 @@ def _escape_svg_text_v2(value: str) -> str:
     )
 
 
+def _build_demo_art_blueprint_v2(stage: str) -> dict[str, str]:
+    mapping = {
+        "opening": {
+            "environmentFamily": "meadow",
+            "cameraLayout": "wide",
+            "pose": "wave",
+            "expression": "curious",
+            "prop": "spark",
+            "accentEffect": "glow",
+        },
+        "setup": {
+            "environmentFamily": "path",
+            "cameraLayout": "wide",
+            "pose": "observe",
+            "expression": "calm",
+            "prop": "path",
+            "accentEffect": "breeze",
+        },
+        "challenge": {
+            "environmentFamily": "doorway",
+            "cameraLayout": "focused",
+            "pose": "hesitate",
+            "expression": "shy",
+            "prop": "door",
+            "accentEffect": "ripple",
+        },
+        "support": {
+            "environmentFamily": "reading-nook",
+            "cameraLayout": "focused",
+            "pose": "lean-in",
+            "expression": "supported",
+            "prop": "lantern",
+            "accentEffect": "glow",
+        },
+        "attempt": {
+            "environmentFamily": "path",
+            "cameraLayout": "focused",
+            "pose": "step-forward",
+            "expression": "brave",
+            "prop": "star",
+            "accentEffect": "breeze",
+        },
+        "wobble": {
+            "environmentFamily": "path",
+            "cameraLayout": "focused",
+            "pose": "breathe",
+            "expression": "wobbly",
+            "prop": "heart",
+            "accentEffect": "ripple",
+        },
+        "small-success": {
+            "environmentFamily": "meadow",
+            "cameraLayout": "close",
+            "pose": "celebrate",
+            "expression": "bright",
+            "prop": "spark",
+            "accentEffect": "confetti",
+        },
+        "landing": {
+            "environmentFamily": "sleepy-room",
+            "cameraLayout": "close",
+            "pose": "curl-up",
+            "expression": "sleepy",
+            "prop": "moon",
+            "accentEffect": "glow",
+        },
+    }
+    return mapping.get(stage, mapping["opening"]).copy()
+
+
+def _render_demo_backdrop_v2(blueprint: dict[str, Any], ingredients: dict[str, Any], demo: dict[str, str]) -> str:
+    palette = ingredients["style_recipe"]["palette"]
+    style_family = _resolve_demo_art_style_family(ingredients["style_recipe"])
+    sun_color = "#fff7d6" if demo["environmentFamily"] == "sleepy-room" else "#f8fafc" if style_family == "moonlit-cutout" else "#fff3bf"
+
+    if demo["accentEffect"] == "confetti":
+        stage_glow = f"""
+  <circle cx="690" cy="200" r="126" fill="{palette['accent']}" opacity="0.20" />
+  <circle cx="250" cy="220" r="82" fill="{palette['chip']}" opacity="0.34" />
+"""
+    elif demo["accentEffect"] == "ripple":
+        stage_glow = f"""
+  <ellipse cx="690" cy="220" rx="140" ry="86" fill="{palette['chip']}" opacity="0.40" />
+  <ellipse cx="690" cy="220" rx="188" ry="122" fill="{palette['chip']}" opacity="0.18" />
+"""
+    else:
+        stage_glow = f"""
+  <circle cx="690" cy="190" r="110" fill="{sun_color}" opacity="0.88" />
+  <circle cx="212" cy="182" r="56" fill="#ffffff" opacity="0.26" />
+"""
+
+    environment_family = demo["environmentFamily"]
+    if environment_family == "doorway":
+        environment_art = f"""
+  <path d="M184 950C250 846 340 756 450 680C558 608 648 560 728 542" stroke="#fff7ef" stroke-width="92" stroke-linecap="round" opacity="0.85" />
+  <rect x="618" y="330" width="140" height="310" rx="62" fill="#fff7ef" opacity="0.88" />
+  <rect x="650" y="378" width="76" height="228" rx="38" fill="{palette['accent']}" opacity="0.42" />
+"""
+    elif environment_family == "reading-nook":
+        environment_art = """
+  <rect x="124" y="286" width="212" height="182" rx="42" fill="#fff7ef" opacity="0.84" />
+  <rect x="584" y="302" width="188" height="156" rx="34" fill="#ffffff" opacity="0.66" />
+  <rect x="202" y="640" width="494" height="176" rx="88" fill="#fffaf3" opacity="0.88" />
+"""
+    elif environment_family == "sleepy-room":
+        environment_art = """
+  <rect x="150" y="244" width="600" height="498" rx="54" fill="#fffaf3" opacity="0.78" />
+  <rect x="202" y="302" width="156" height="156" rx="28" fill="#dbeafe" opacity="0.72" />
+  <rect x="198" y="744" width="520" height="122" rx="52" fill="#fef3c7" opacity="0.72" />
+"""
+    elif environment_family == "path":
+        environment_art = """
+  <path d="M162 968C238 866 330 780 438 720C554 654 642 618 748 596" stroke="#fff9ef" stroke-width="98" stroke-linecap="round" opacity="0.84" />
+  <ellipse cx="286" cy="864" rx="186" ry="72" fill="#9ad48e" opacity="0.42" />
+  <ellipse cx="682" cy="762" rx="220" ry="82" fill="#f6d694" opacity="0.34" />
+"""
+    else:
+        environment_art = """
+  <ellipse cx="452" cy="708" rx="488" ry="196" fill="#9ad48e" opacity="0.56" />
+  <ellipse cx="666" cy="816" rx="266" ry="110" fill="#f6d694" opacity="0.38" />
+  <ellipse cx="238" cy="840" rx="220" ry="98" fill="#b8e3a2" opacity="0.44" />
+"""
+
+    prop = demo["prop"]
+    if prop == "door":
+        props = f'<path d="M648 430C648 388 680 352 720 352" stroke="{palette["text"]}" stroke-width="12" stroke-linecap="round" opacity="0.54" />'
+    elif prop == "lantern":
+        props = f"""
+  <circle cx="222" cy="372" r="34" fill="#fff1bf" opacity="0.94" />
+  <rect x="212" y="334" width="20" height="86" rx="10" fill="{palette['accent']}" opacity="0.64" />
+"""
+    elif prop == "moon":
+        props = """
+  <path d="M706 118C668 154 664 214 700 252C642 248 594 202 594 144C594 84 644 36 706 36C728 36 748 42 766 52C744 64 724 86 706 118Z" fill="#fff7d6" opacity="0.82" />
+"""
+    elif prop == "star":
+        props = """
+  <path d="M676 332L690 366L724 366L698 386L708 420L676 400L644 420L654 386L628 366L662 366Z" fill="#fff7d6" opacity="0.92" />
+"""
+    elif prop == "heart":
+        props = """
+  <path d="M690 352C690 326 670 308 648 308C630 308 614 318 606 334C598 318 582 308 564 308C542 308 522 326 522 352C522 404 606 446 606 446C606 446 690 404 690 352Z" fill="#fca5a5" opacity="0.72" />
+"""
+    else:
+        props = '<circle cx="666" cy="320" r="28" fill="#fff7d6" opacity="0.88" />'
+
+    return f"""
+  <rect width="900" height="1200" rx="56" fill="url(#storybook-bg-{blueprint['pageIndex']})" />
+  {stage_glow}
+  {environment_art}
+  {props}
+  <rect y="0" width="900" height="1200" rx="56" fill="url(#storybook-wash-{blueprint['pageIndex']})" opacity="0.18" />
+"""
+
+
+def _render_demo_accent_v2(ingredients: dict[str, Any], demo: dict[str, str]) -> str:
+    accent = ingredients["style_recipe"]["palette"]["accent"]
+    if demo["accentEffect"] == "confetti":
+        return f"""
+  <circle cx="164" cy="246" r="10" fill="{accent}" opacity="0.72" />
+  <circle cx="214" cy="228" r="7" fill="{accent}" opacity="0.52" />
+  <circle cx="746" cy="284" r="9" fill="{accent}" opacity="0.74" />
+  <circle cx="708" cy="246" r="6" fill="{accent}" opacity="0.54" />
+"""
+    if demo["accentEffect"] == "ripple":
+        return f"""
+  <path d="M192 930C252 892 320 872 396 872" stroke="{accent}" stroke-width="10" stroke-linecap="round" opacity="0.34" />
+  <path d="M506 904C580 860 660 840 736 840" stroke="{accent}" stroke-width="10" stroke-linecap="round" opacity="0.28" />
+"""
+    if demo["accentEffect"] == "breeze":
+        return f"""
+  <path d="M134 318C204 286 270 286 332 320" stroke="{accent}" stroke-width="8" stroke-linecap="round" opacity="0.26" />
+  <path d="M602 274C666 246 730 250 782 286" stroke="{accent}" stroke-width="8" stroke-linecap="round" opacity="0.26" />
+"""
+    return f"""
+  <circle cx="210" cy="290" r="34" fill="{accent}" opacity="0.16" />
+  <circle cx="708" cy="260" r="28" fill="{accent}" opacity="0.14" />
+"""
+
+
+def _render_protagonist_svg_v2(blueprint: dict[str, Any], demo: dict[str, str]) -> str:
+    archetype = _normalize_text(blueprint["protagonist"].get("archetype")) or "bunny"
+    body_color = (
+        "#8c6b4f"
+        if archetype == "bear"
+        else "#d97706"
+        if archetype == "fox"
+        else "#a16207"
+        if archetype == "deer"
+        else "#7c6f64"
+        if archetype == "otter"
+        else "#f8fafc"
+    )
+    body_stroke = "#94a3b8" if archetype == "bunny" else "#4b3a2c"
+    belly_color = "#ffedd5" if archetype == "fox" else "#efe3d1"
+    center_x = 452 if demo["cameraLayout"] == "wide" else 468 if demo["cameraLayout"] == "focused" else 486
+    center_y = 742 if demo["cameraLayout"] == "wide" else 764 if demo["cameraLayout"] == "focused" else 788
+    body_scale = 0.86 if demo["cameraLayout"] == "wide" else 0.96 if demo["cameraLayout"] == "focused" else 1.04
+    head_y = center_y - 170 * body_scale
+    body_y = center_y
+    eye_y = head_y + 12
+    mouth_y = head_y + 46
+    arm_lift = 42 if demo["pose"] in {"wave", "celebrate"} else 18 if demo["pose"] == "lean-in" else -6 if demo["pose"] == "hesitate" else 12
+    left_arm_end_x = center_x - 72 * body_scale
+    left_arm_end_y = body_y - 32 * body_scale - arm_lift
+    right_arm_end_x = center_x + 72 * body_scale
+    right_arm_end_y = body_y - 30 * body_scale - (26 if demo["pose"] == "step-forward" else arm_lift * 0.7)
+    leg_spread = 34 if demo["pose"] == "step-forward" else 12 if demo["pose"] == "curl-up" else 24
+    if demo["expression"] == "bright":
+        mouth_path = f"M{center_x - 22 * body_scale} {mouth_y}C{center_x - 8 * body_scale} {mouth_y + 18 * body_scale},{center_x + 8 * body_scale} {mouth_y + 18 * body_scale},{center_x + 22 * body_scale} {mouth_y}"
+    elif demo["expression"] in {"shy", "wobbly"}:
+        mouth_path = f"M{center_x - 12 * body_scale} {mouth_y + 6 * body_scale}C{center_x - 2 * body_scale} {mouth_y - 6 * body_scale},{center_x + 4 * body_scale} {mouth_y - 6 * body_scale},{center_x + 12 * body_scale} {mouth_y + 4 * body_scale}"
+    else:
+        mouth_path = f"M{center_x - 16 * body_scale} {mouth_y}C{center_x - 6 * body_scale} {mouth_y + 8 * body_scale},{center_x + 6 * body_scale} {mouth_y + 8 * body_scale},{center_x + 16 * body_scale} {mouth_y}"
+
+    if archetype == "bunny":
+        ears = f"""
+    <ellipse cx="{center_x - 48 * body_scale}" cy="{head_y - 86 * body_scale}" rx="{18 * body_scale}" ry="{82 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+    <ellipse cx="{center_x + 48 * body_scale}" cy="{head_y - 86 * body_scale}" rx="{18 * body_scale}" ry="{82 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+    <ellipse cx="{center_x - 48 * body_scale}" cy="{head_y - 96 * body_scale}" rx="{8 * body_scale}" ry="{44 * body_scale}" fill="#fecdd3" opacity="0.74" />
+    <ellipse cx="{center_x + 48 * body_scale}" cy="{head_y - 96 * body_scale}" rx="{8 * body_scale}" ry="{44 * body_scale}" fill="#fecdd3" opacity="0.74" />
+"""
+    elif archetype == "bear":
+        ears = f"""
+    <circle cx="{center_x - 54 * body_scale}" cy="{head_y - 44 * body_scale}" r="{28 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+    <circle cx="{center_x + 54 * body_scale}" cy="{head_y - 44 * body_scale}" r="{28 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+"""
+    elif archetype == "deer":
+        ears = f"""
+    <circle cx="{center_x - 48 * body_scale}" cy="{head_y - 40 * body_scale}" r="{24 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+    <circle cx="{center_x + 48 * body_scale}" cy="{head_y - 40 * body_scale}" r="{24 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+    <path d="M{center_x - 34 * body_scale} {head_y - 68 * body_scale}C{center_x - 52 * body_scale} {head_y - 122 * body_scale},{center_x - 74 * body_scale} {head_y - 134 * body_scale},{center_x - 88 * body_scale} {head_y - 170 * body_scale}" stroke="{body_stroke}" stroke-width="{6 * body_scale}" stroke-linecap="round" />
+    <path d="M{center_x + 34 * body_scale} {head_y - 68 * body_scale}C{center_x + 52 * body_scale} {head_y - 122 * body_scale},{center_x + 74 * body_scale} {head_y - 134 * body_scale},{center_x + 88 * body_scale} {head_y - 170 * body_scale}" stroke="{body_stroke}" stroke-width="{6 * body_scale}" stroke-linecap="round" />
+"""
+    elif archetype == "fox":
+        ears = f"""
+    <polygon points="{center_x - 70 * body_scale},{head_y - 24 * body_scale} {center_x - 30 * body_scale},{head_y - 94 * body_scale} {center_x - 8 * body_scale},{head_y - 10 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+    <polygon points="{center_x + 70 * body_scale},{head_y - 24 * body_scale} {center_x + 30 * body_scale},{head_y - 94 * body_scale} {center_x + 8 * body_scale},{head_y - 10 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" />
+"""
+    else:
+        ears = f"""
+    <circle cx="{center_x - 42 * body_scale}" cy="{head_y - 26 * body_scale}" r="{20 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{6 * body_scale}" />
+    <circle cx="{center_x + 42 * body_scale}" cy="{head_y - 26 * body_scale}" r="{20 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{6 * body_scale}" />
+"""
+
+    if archetype == "fox":
+        tail = f'<path d="M{center_x + 110 * body_scale} {body_y + 24 * body_scale}C{center_x + 182 * body_scale} {body_y + 10 * body_scale},{center_x + 196 * body_scale} {body_y + 96 * body_scale},{center_x + 130 * body_scale} {body_y + 130 * body_scale}" stroke="{body_stroke}" stroke-width="{20 * body_scale}" stroke-linecap="round" fill="none" />'
+    elif archetype == "otter":
+        tail = f'<path d="M{center_x + 106 * body_scale} {body_y + 60 * body_scale}C{center_x + 176 * body_scale} {body_y + 94 * body_scale},{center_x + 154 * body_scale} {body_y + 160 * body_scale},{center_x + 94 * body_scale} {body_y + 166 * body_scale}" stroke="{body_stroke}" stroke-width="{18 * body_scale}" stroke-linecap="round" fill="none" />'
+    else:
+        tail = ""
+
+    return f"""
+  <g filter="url(#shadow-{blueprint['pageIndex']})">
+    {ears}
+    <ellipse cx="{center_x}" cy="{head_y}" rx="{88 * body_scale}" ry="{94 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{8 * body_scale}" />
+    <ellipse cx="{center_x}" cy="{body_y}" rx="{118 * body_scale}" ry="{140 * body_scale}" fill="{body_color}" stroke="{body_stroke}" stroke-width="{8 * body_scale}" />
+    <ellipse cx="{center_x}" cy="{body_y + 10 * body_scale}" rx="{66 * body_scale}" ry="{84 * body_scale}" fill="{belly_color}" opacity="0.94" />
+    <ellipse cx="{center_x - 32 * body_scale}" cy="{eye_y}" rx="{10 * body_scale}" ry="{14 * body_scale}" fill="{body_stroke}" />
+    <ellipse cx="{center_x + 32 * body_scale}" cy="{eye_y}" rx="{10 * body_scale}" ry="{14 * body_scale}" fill="{body_stroke}" />
+    <ellipse cx="{center_x}" cy="{head_y + 44 * body_scale}" rx="{18 * body_scale}" ry="{14 * body_scale}" fill="#f59ab5" />
+    <path d="{mouth_path}" stroke="{body_stroke}" stroke-width="{7 * body_scale}" stroke-linecap="round" fill="none" />
+    <path d="M{center_x - 74 * body_scale} {body_y - 56 * body_scale}C{center_x - 106 * body_scale} {body_y - 18 * body_scale},{left_arm_end_x} {left_arm_end_y},{left_arm_end_x - 4 * body_scale} {left_arm_end_y + 24 * body_scale}" stroke="{body_stroke}" stroke-width="{16 * body_scale}" stroke-linecap="round" fill="none" />
+    <path d="M{center_x + 74 * body_scale} {body_y - 56 * body_scale}C{center_x + 104 * body_scale} {body_y - 18 * body_scale},{right_arm_end_x} {right_arm_end_y},{right_arm_end_x + 6 * body_scale} {right_arm_end_y + 20 * body_scale}" stroke="{body_stroke}" stroke-width="{16 * body_scale}" stroke-linecap="round" fill="none" />
+    <path d="M{center_x - 42 * body_scale} {body_y + 126 * body_scale}C{center_x - 42 * body_scale} {body_y + 194 * body_scale},{center_x - leg_spread * body_scale} {body_y + 242 * body_scale},{center_x - 24 * body_scale} {body_y + 282 * body_scale}" stroke="{body_stroke}" stroke-width="{18 * body_scale}" stroke-linecap="round" fill="none" />
+    <path d="M{center_x + 42 * body_scale} {body_y + 126 * body_scale}C{center_x + 42 * body_scale} {body_y + 194 * body_scale},{center_x + leg_spread * body_scale} {body_y + 242 * body_scale},{center_x + 24 * body_scale} {body_y + 282 * body_scale}" stroke="{body_stroke}" stroke-width="{18 * body_scale}" stroke-linecap="round" fill="none" />
+    {tail}
+  </g>
+"""
+
+
+def _build_demo_art_scene_svg_v2(blueprint: dict[str, Any], scene_text: str, ingredients: dict[str, Any]) -> str:
+    palette = ingredients["style_recipe"]["palette"]
+    demo = _build_demo_art_blueprint_v2(blueprint["stage"])
+    return f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" fill="none">
+  <defs>
+    <linearGradient id="storybook-bg-{blueprint['pageIndex']}" x1="110" y1="70" x2="790" y2="1140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="{palette['backgroundStart']}" />
+      <stop offset="1" stop-color="{palette['backgroundEnd']}" />
+    </linearGradient>
+    <linearGradient id="storybook-wash-{blueprint['pageIndex']}" x1="150" y1="120" x2="760" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" />
+      <stop offset="1" stop-color="{palette['chip']}" />
+    </linearGradient>
+    <filter id="shadow-{blueprint['pageIndex']}" x="120" y="140" width="660" height="900" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#0f172a" flood-opacity="0.18" />
+    </filter>
+  </defs>
+  {_render_demo_backdrop_v2(blueprint, ingredients, demo)}
+  {_render_demo_accent_v2(ingredients, demo)}
+  {_render_protagonist_svg_v2(blueprint, demo)}
+  <rect x="54" y="934" width="792" height="190" rx="40" fill="rgba(255,255,255,0.16)" />
+  <rect x="72" y="952" width="756" height="154" rx="32" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.42)" />
+  <text x="102" y="998" fill="{palette['text']}" font-size="34" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">{_escape_svg_text_v2(blueprint['sceneTitle'])}</text>
+  <text x="102" y="1048" fill="{palette['text']}" font-size="21" font-family="'Noto Sans SC','PingFang SC',sans-serif">{_escape_svg_text_v2(blueprint['visibleAction'])}</text>
+  <text x="102" y="1088" fill="{palette['text']}" font-size="18" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.88">{_escape_svg_text_v2(scene_text[:52])}</text>
+</svg>
+""".strip()
+
+
 def _build_scene_fallback_svg_v2(blueprint: dict[str, Any], scene_text: str, ingredients: dict[str, Any]) -> str:
     palette = ingredients["style_recipe"]["palette"]
     return f"""
@@ -953,6 +1255,7 @@ def _build_story_scenes_v2(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
             if ingredients["story_mode"] == "card"
             else _build_scene_text_v2(blueprint, ingredients)
         )
+        audio_script = _build_scene_audio_script_v2(blueprint, scene_text)
         scenes.append(
             {
                 "sceneIndex": blueprint["pageIndex"],
@@ -961,14 +1264,16 @@ def _build_story_scenes_v2(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
                 "imagePrompt": _build_scene_image_prompt_v2(blueprint, ingredients),
                 "imageUrl": None,
                 "assetRef": None,
+                "demoArtSvg": _build_demo_art_scene_svg_v2(blueprint, scene_text, ingredients),
                 "fallbackSvg": _build_scene_fallback_svg_v2(blueprint, scene_text, ingredients),
                 "imageStatus": "fallback",
                 "audioUrl": None,
                 "audioRef": "storybook-audio-card"
                 if ingredients["story_mode"] == "card"
                 else f"storybook-audio-{blueprint['pageIndex']}",
-                "audioScript": _build_scene_audio_script_v2(blueprint, scene_text),
+                "audioScript": audio_script,
                 "audioStatus": "fallback",
+                "captionTiming": build_story_caption_timing(audio_script),
                 "voiceStyle": blueprint["voiceStyle"],
                 "highlightSource": blueprint["highlightSource"],
                 "imageCacheHit": False,
@@ -1074,17 +1379,11 @@ def _resolve_missing_audio_config(settings: Any) -> list[str]:
     return missing
 
 
-def _resolve_demo_art_image_url(*, scene_blueprint: dict[str, Any], ingredients: dict[str, Any]) -> str:
-    style_family = _resolve_demo_art_style_family(ingredients["style_recipe"])
-    protagonist_archetype = _normalize_text(ingredients["protagonist"].get("archetype")) or "bunny"
-    stage = _normalize_text(scene_blueprint.get("stage")) or "opening"
-    return f"/storybook/demo-v3/{style_family}/{protagonist_archetype}/{stage}.svg"
-
-
 def _resolve_scene_image_asset(
     *,
     story_id: str,
     scene_blueprint: dict[str, Any],
+    scene_text: str,
     image_status: str,
     image_result: Any,
     settings: Any,
@@ -1092,14 +1391,33 @@ def _resolve_scene_image_asset(
 ) -> tuple[str | None, str | None, str]:
     image_url = image_result.output.get("imageUrl")
     asset_ref = image_result.output.get("assetRef")
-    source = _normalize_text(getattr(image_result, "source", ""))
 
     if image_status == "ready" and image_url:
         return image_url, asset_ref or image_url, "real"
 
-    if source == "mock" or not can_use_vivo_story_image_provider(settings):
-        demo_url = _resolve_demo_art_image_url(scene_blueprint=scene_blueprint, ingredients=ingredients)
-        return demo_url, demo_url, "demo-art"
+    demo_svg = scene_blueprint.get("demoArtSvg")
+    if not isinstance(demo_svg, str) or not demo_svg.strip():
+        demo_svg = _build_demo_art_scene_svg_v2(scene_blueprint, scene_text, ingredients)
+    if isinstance(demo_svg, str) and demo_svg.strip():
+        media_key = _build_image_media_key(
+            story_id=story_id,
+            scene_index=scene_blueprint["sceneIndex"] - 1,
+            scene_title=scene_blueprint["sceneTitle"],
+        )
+        get_storybook_media_cache().put_image(
+            media_key,
+            payload={
+                "storyId": story_id,
+                "sceneIndex": scene_blueprint["sceneIndex"],
+                "sceneTitle": scene_blueprint["sceneTitle"],
+                "contentType": "image/svg+xml",
+                "svg": demo_svg,
+                "imageSourceKind": "demo-art",
+                "expiresAt": time() + float(get_storybook_media_cache().cache_window_seconds),
+            },
+        )
+        asset_url = f"/api/ai/parent-storybook/media/{media_key}"
+        return asset_url, asset_url, "demo-art"
 
     fallback_svg = scene_blueprint.get("fallbackSvg")
     if not isinstance(fallback_svg, str) or not fallback_svg.strip():
@@ -1162,6 +1480,8 @@ def _resolve_media_diagnostics(
             "reachable": True,
             "fallbackReason": None,
             "upstreamHost": None,
+            "statusCode": None,
+            "retryStrategy": "none",
         },
         "image": {
             "requestedProvider": _normalize_text(getattr(settings, "storybook_image_provider", "")) or "mock",
@@ -1348,10 +1668,16 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         image_url, asset_ref, image_source_kind = _resolve_scene_image_asset(
             story_id=story_id,
             scene_blueprint=scene_blueprint,
+            scene_text=scene_blueprint["sceneText"],
             image_status=image_status,
             image_result=image_result,
             settings=settings,
             ingredients=ingredients,
+        )
+        caption_timing = (
+            audio_result.output.get("captionTiming")
+            or scene_blueprint.get("captionTiming")
+            or build_story_caption_timing(audio_result.output.get("audioScript") or scene_blueprint["audioScript"])
         )
         audio_url, cached_audio_ref = _maybe_store_audio_asset(
             story_id=story_id,
@@ -1375,6 +1701,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 "audioRef": cached_audio_ref or audio_result.output.get("audioRef"),
                 "audioScript": audio_result.output.get("audioScript") or scene_blueprint["audioScript"],
                 "audioStatus": audio_status,
+                "captionTiming": caption_timing,
                 "voiceStyle": audio_result.output.get("voiceStyle") or scene_blueprint["voiceStyle"],
                 "highlightSource": scene_blueprint["highlightSource"],
                 "imageCacheHit": image_cache_hit,

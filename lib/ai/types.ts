@@ -583,9 +583,22 @@ export interface ParentStoryBookDiagnostics {
     reachable: boolean;
     fallbackReason: string | null;
     upstreamHost: string | null;
+    statusCode?: number | null;
+    retryStrategy?: "none" | "normalized-base-retry";
   };
   image: ParentStoryBookDiagnosticsChannel;
   audio: ParentStoryBookDiagnosticsChannel;
+}
+
+export type ParentStoryBookCaptionTimingMode =
+  | "tts-cues"
+  | "speech-boundary"
+  | "duration-derived";
+
+export interface ParentStoryBookCaptionTiming {
+  mode: ParentStoryBookCaptionTimingMode;
+  segmentTexts: string[];
+  segmentDurationsMs?: number[];
 }
 
 export interface ParentStoryBookProviderMeta {
@@ -627,6 +640,7 @@ export interface ParentStoryBookScene {
   audioRef?: string | null;
   audioScript: string;
   audioStatus: ParentStoryBookMediaStatus;
+  captionTiming?: ParentStoryBookCaptionTiming;
   voiceStyle: string;
   highlightSource: string;
   imageCacheHit?: boolean;

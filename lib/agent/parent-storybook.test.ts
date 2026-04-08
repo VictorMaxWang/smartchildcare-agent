@@ -3,6 +3,12 @@ import test from "node:test";
 
 import type { ParentStoryBookPageCount, ParentStoryBookRequest } from "@/lib/ai/types";
 import { buildParentStoryBookCacheKey } from "../parent/storybook-cache.ts";
+import {
+  buildCaptionTimeline,
+  getCaptionIndexForCharIndex,
+  getCaptionIndexForElapsedMs,
+  resolveSceneCaptionTiming,
+} from "../../components/parent/StoryBookViewer.tsx";
 
 import {
   buildParentStoryBookRequestFromFeed,
@@ -114,6 +120,13 @@ test("buildParentStoryBookRequestFromFeed supports manual-theme without child da
   assert.equal(response.scenes.length, 6);
   assert.equal(response.providerMeta.sceneCount, 6);
   assert.ok(response.scenes.every((scene) => scene.audioScript.length > 0));
+  assert.ok(
+    response.scenes.every(
+      (scene) =>
+        scene.captionTiming?.mode === "duration-derived" &&
+        (scene.captionTiming?.segmentTexts.length ?? 0) > 0
+    )
+  );
   assert.match(response.scenes.at(-1)?.sceneText ?? "", /今晚|明天/);
 });
 
@@ -205,10 +218,18 @@ test("storybook fallback scenes build page-specific demo art assets instead of s
   assert.equal(response.providerMeta.imageDelivery, "demo-art");
   assert.equal(response.providerMeta.audioDelivery, "preview-only");
   assert.equal(response.scenes.length, 8);
-  assert.ok(imageUrls.every((url) => url.startsWith("/storybook/demo-v3/")));
+  assert.ok(imageUrls.every((url) => url.startsWith("data:image/svg+xml;base64,")));
   assert.ok(imageUrls.every((url) => !url.includes("/storybook/scene-")));
   assert.equal(new Set(imageUrls).size, 8);
   assert.ok(response.scenes.every((scene) => scene.imageSourceKind === "demo-art"));
+  assert.ok(
+    response.scenes.every(
+      (scene) =>
+        scene.captionTiming?.mode === "duration-derived" &&
+        (scene.captionTiming?.segmentDurationsMs?.length ?? 0) ===
+          (scene.captionTiming?.segmentTexts.length ?? 0)
+    )
+  );
   assert.equal(response.providerMeta.diagnostics?.brain.reachable, false);
 });
 
@@ -253,4 +274,45 @@ test("storybook cache key changes when mode theme and page count change", () => 
     new Set([baseKey, themeKey, pageKey, modeKey, customStyleKey]).size,
     5
   );
+});
+
+test("caption timing prefers explicit scene timing and falls back to duration derived segments", () => {
+  const explicitScene = {
+    sceneText: "第一句。第二句。",
+    audioScript: "第一句。第二句。",
+    captionTiming: {
+      mode: "speech-boundary",
+      segmentTexts: ["第一句。", "第二句。"],
+      segmentDurationsMs: [3200, 5100],
+    },
+  };
+
+  const explicitTimeline = buildCaptionTimeline(explicitScene as never);
+  assert.deepEqual(explicitTimeline.segments, ["第一句。", "第二句。"]);
+  assert.deepEqual(explicitTimeline.durationsMs, [3200, 5100]);
+  assert.equal(getCaptionIndexForElapsedMs(explicitTimeline, 0), 0);
+  assert.equal(getCaptionIndexForElapsedMs(explicitTimeline, 3500), 1);
+  assert.equal(
+    getCaptionIndexForCharIndex(explicitTimeline, "第一句。第二句。".indexOf("第二句")),
+    1
+  );
+
+  const fallbackTimeline = buildCaptionTimeline({
+    sceneText: "小兔点点先停一下，再轻轻往前走。",
+    audioScript: "小兔点点先停一下，再轻轻往前走。",
+  } as never);
+
+  assert.ok(fallbackTimeline.segments.length > 0);
+  assert.ok(
+    fallbackTimeline.durationsMs.every((duration) => duration >= 2400),
+    "duration-derived segments should never be faster than the minimum preview cadence"
+  );
+
+  const fallbackTiming = resolveSceneCaptionTiming({
+    sceneText: "小兔点点先停一下，再轻轻往前走。",
+    audioScript: "小兔点点先停一下，再轻轻往前走。",
+  } as never);
+
+  assert.equal(fallbackTiming.mode, "duration-derived");
+  assert.equal(fallbackTiming.segmentTexts.length, fallbackTimeline.segments.length);
 });

@@ -10,7 +10,7 @@ import type {
   ParentStoryBookScene,
 } from "@/lib/ai/types";
 
-const STORYBOOK_CACHE_NAMESPACE = "storybook-v2-dual-track-1";
+const STORYBOOK_CACHE_NAMESPACE = "storybook-v2-dual-track-2";
 const STORYBOOK_RESPONSE_TTL_SECONDS = 12 * 60;
 const STORYBOOK_MEDIA_TTL_SECONDS = 20 * 60;
 
@@ -104,6 +104,9 @@ function resolveProviderAudioDelivery(
 }
 
 function resolveSceneImageSourceKind(scene: ParentStoryBookScene) {
+  if (scene.imageSourceKind) {
+    return scene.imageSourceKind;
+  }
   if (scene.imageStatus === "ready" && scene.imageUrl) {
     return "real" as const;
   }
@@ -264,8 +267,27 @@ export function prepareParentStoryBookResponseForDelivery(
         nextScene = {
           ...nextScene,
           imageUrl: cachedImageUrl,
-          assetRef: cachedImageUrl,
-          imageSourceKind: "svg-fallback",
+          assetRef:
+            nextScene.imageSourceKind === "demo-art"
+              ? nextScene.assetRef
+              : cachedImageUrl,
+          imageSourceKind: nextScene.imageSourceKind ?? "svg-fallback",
+        };
+      }
+    }
+
+    if (
+      typeof nextScene.assetRef === "string" &&
+      nextScene.assetRef.startsWith("data:image/svg+xml")
+    ) {
+      const cachedAssetUrl = cacheParentStoryBookMediaDataUrl(
+        nextScene.assetRef,
+        `${nextStory.storyId}:asset:${nextScene.sceneIndex}`
+      );
+      if (cachedAssetUrl) {
+        nextScene = {
+          ...nextScene,
+          assetRef: cachedAssetUrl,
         };
       }
     }

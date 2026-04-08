@@ -153,6 +153,17 @@ type SceneBlueprint = {
   voiceStyle: string;
 };
 
+type SceneCaptionTiming = NonNullable<ParentStoryBookScene["captionTiming"]>;
+
+type DemoArtBlueprint = {
+  environmentFamily: "meadow" | "path" | "doorway" | "reading-nook" | "sleepy-room";
+  cameraLayout: "wide" | "focused" | "close";
+  pose: "wave" | "observe" | "hesitate" | "lean-in" | "step-forward" | "breathe" | "celebrate" | "curl-up";
+  expression: "curious" | "calm" | "shy" | "supported" | "brave" | "wobbly" | "bright" | "sleepy";
+  prop: "spark" | "path" | "door" | "lantern" | "star" | "heart" | "moon";
+  accentEffect: "glow" | "ripple" | "confetti" | "breeze";
+};
+
 type DemoStyleFamily = ParentStoryBookStylePreset;
 
 type SyntheticSnapshotInput = {
@@ -1317,13 +1328,114 @@ function resolveDemoArtArchetype(archetype: string) {
     : "bunny";
 }
 
-function buildDemoArtAssetPath(
-  blueprint: SceneBlueprint,
-  ingredients: StoryIngredients
-) {
-  const styleFamily = resolveDemoStyleFamily(ingredients.styleRecipe);
-  const protagonistArchetype = resolveDemoArtArchetype(blueprint.protagonist.archetype);
-  return `/storybook/demo-v3/${styleFamily}/${protagonistArchetype}/${blueprint.stage}.svg`;
+function splitCaptionSegmentsV2(text: string) {
+  const normalized = text.trim().replace(/\s+/g, " ");
+  if (!normalized) return [];
+
+  const segments = normalized
+    .split(/(?<=[。！？!?])/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (segments.length > 0) return segments;
+
+  return normalized
+    .split(/[，,；;：:]/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildCaptionDurationMsV2(segment: string) {
+  const contentLength = segment.replace(/\s+/g, "").length;
+  const punctuationCount = segment.match(/[，,；;：:。！？!?]/gu)?.length ?? 0;
+  return Math.max(2400, 1700 + contentLength * 95 + punctuationCount * 220);
+}
+
+function buildSceneCaptionTimingV2(text: string): SceneCaptionTiming {
+  const segmentTexts = splitCaptionSegmentsV2(text);
+  const safeSegments = segmentTexts.length > 0 ? segmentTexts : [text.trim()].filter(Boolean);
+  return {
+    mode: "duration-derived",
+    segmentTexts: safeSegments,
+    segmentDurationsMs: safeSegments.map((segment) => buildCaptionDurationMsV2(segment)),
+  };
+}
+
+function buildDemoArtBlueprintV2(blueprint: SceneBlueprint): DemoArtBlueprint {
+  switch (blueprint.stage) {
+    case "opening":
+      return {
+        environmentFamily: "meadow",
+        cameraLayout: "wide",
+        pose: "wave",
+        expression: "curious",
+        prop: "spark",
+        accentEffect: "glow",
+      };
+    case "setup":
+      return {
+        environmentFamily: "path",
+        cameraLayout: "wide",
+        pose: "observe",
+        expression: "calm",
+        prop: "path",
+        accentEffect: "breeze",
+      };
+    case "challenge":
+      return {
+        environmentFamily: "doorway",
+        cameraLayout: "focused",
+        pose: "hesitate",
+        expression: "shy",
+        prop: "door",
+        accentEffect: "ripple",
+      };
+    case "support":
+      return {
+        environmentFamily: "reading-nook",
+        cameraLayout: "focused",
+        pose: "lean-in",
+        expression: "supported",
+        prop: "lantern",
+        accentEffect: "glow",
+      };
+    case "attempt":
+      return {
+        environmentFamily: "path",
+        cameraLayout: "focused",
+        pose: "step-forward",
+        expression: "brave",
+        prop: "star",
+        accentEffect: "breeze",
+      };
+    case "wobble":
+      return {
+        environmentFamily: "path",
+        cameraLayout: "focused",
+        pose: "breathe",
+        expression: "wobbly",
+        prop: "heart",
+        accentEffect: "ripple",
+      };
+    case "small-success":
+      return {
+        environmentFamily: "meadow",
+        cameraLayout: "close",
+        pose: "celebrate",
+        expression: "bright",
+        prop: "spark",
+        accentEffect: "confetti",
+      };
+    case "landing":
+      return {
+        environmentFamily: "sleepy-room",
+        cameraLayout: "close",
+        pose: "curl-up",
+        expression: "sleepy",
+        prop: "moon",
+        accentEffect: "glow",
+      };
+  }
 }
 
 function escapeSvgTextV2(value: string) {
@@ -1333,6 +1445,232 @@ function escapeSvgTextV2(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
+}
+
+function renderDemoBackdropV2(
+  blueprint: SceneBlueprint,
+  ingredients: StoryIngredients,
+  demo: DemoArtBlueprint
+) {
+  const palette = ingredients.styleRecipe.palette;
+  const styleFamily = resolveDemoStyleFamily(ingredients.styleRecipe);
+  const sunColor =
+    demo.environmentFamily === "sleepy-room"
+      ? "#fff7d6"
+      : styleFamily === "moonlit-cutout"
+        ? "#f8fafc"
+        : "#fff3bf";
+  const stageGlow =
+    demo.accentEffect === "confetti"
+      ? `<circle cx="690" cy="200" r="126" fill="${palette.accent}" opacity="0.20" />
+         <circle cx="250" cy="220" r="82" fill="${palette.chip}" opacity="0.34" />`
+      : demo.accentEffect === "ripple"
+        ? `<ellipse cx="690" cy="220" rx="140" ry="86" fill="${palette.chip}" opacity="0.40" />
+           <ellipse cx="690" cy="220" rx="188" ry="122" fill="${palette.chip}" opacity="0.18" />`
+        : `<circle cx="690" cy="190" r="110" fill="${sunColor}" opacity="0.88" />
+           <circle cx="212" cy="182" r="56" fill="#ffffff" opacity="0.26" />`;
+
+  const environmentArt =
+    demo.environmentFamily === "doorway"
+      ? `<path d="M184 950C250 846 340 756 450 680C558 608 648 560 728 542" stroke="#fff7ef" stroke-width="92" stroke-linecap="round" opacity="0.85" />
+         <rect x="618" y="330" width="140" height="310" rx="62" fill="#fff7ef" opacity="0.88" />
+         <rect x="650" y="378" width="76" height="228" rx="38" fill="${palette.accent}" opacity="0.42" />`
+      : demo.environmentFamily === "reading-nook"
+        ? `<rect x="124" y="286" width="212" height="182" rx="42" fill="#fff7ef" opacity="0.84" />
+           <rect x="584" y="302" width="188" height="156" rx="34" fill="#ffffff" opacity="0.66" />
+           <rect x="202" y="640" width="494" height="176" rx="88" fill="#fffaf3" opacity="0.88" />`
+        : demo.environmentFamily === "sleepy-room"
+          ? `<rect x="150" y="244" width="600" height="498" rx="54" fill="#fffaf3" opacity="0.78" />
+             <rect x="202" y="302" width="156" height="156" rx="28" fill="#dbeafe" opacity="0.72" />
+             <rect x="198" y="744" width="520" height="122" rx="52" fill="#fef3c7" opacity="0.72" />`
+          : demo.environmentFamily === "path"
+            ? `<path d="M162 968C238 866 330 780 438 720C554 654 642 618 748 596" stroke="#fff9ef" stroke-width="98" stroke-linecap="round" opacity="0.84" />
+               <ellipse cx="286" cy="864" rx="186" ry="72" fill="#9ad48e" opacity="0.42" />
+               <ellipse cx="682" cy="762" rx="220" ry="82" fill="#f6d694" opacity="0.34" />`
+            : `<ellipse cx="452" cy="708" rx="488" ry="196" fill="#9ad48e" opacity="0.56" />
+               <ellipse cx="666" cy="816" rx="266" ry="110" fill="#f6d694" opacity="0.38" />
+               <ellipse cx="238" cy="840" rx="220" ry="98" fill="#b8e3a2" opacity="0.44" />`;
+
+  const props =
+    demo.prop === "door"
+      ? `<path d="M648 430C648 388 680 352 720 352" stroke="${palette.text}" stroke-width="12" stroke-linecap="round" opacity="0.54" />`
+      : demo.prop === "lantern"
+        ? `<circle cx="222" cy="372" r="34" fill="#fff1bf" opacity="0.94" />
+           <rect x="212" y="334" width="20" height="86" rx="10" fill="${palette.accent}" opacity="0.64" />`
+        : demo.prop === "moon"
+          ? `<path d="M706 118C668 154 664 214 700 252C642 248 594 202 594 144C594 84 644 36 706 36C728 36 748 42 766 52C744 64 724 86 706 118Z" fill="#fff7d6" opacity="0.82" />`
+          : demo.prop === "star"
+            ? `<path d="M676 332L690 366L724 366L698 386L708 420L676 400L644 420L654 386L628 366L662 366Z" fill="#fff7d6" opacity="0.92" />`
+            : demo.prop === "heart"
+              ? `<path d="M690 352C690 326 670 308 648 308C630 308 614 318 606 334C598 318 582 308 564 308C542 308 522 326 522 352C522 404 606 446 606 446C606 446 690 404 690 352Z" fill="#fca5a5" opacity="0.72" />`
+              : `<circle cx="666" cy="320" r="28" fill="#fff7d6" opacity="0.88" />`;
+
+  return `
+  <rect width="900" height="1200" rx="56" fill="url(#storybook-bg-${blueprint.pageIndex})" />
+  ${stageGlow}
+  ${environmentArt}
+  ${props}
+  <rect y="0" width="900" height="1200" rx="56" fill="url(#storybook-wash-${blueprint.pageIndex})" opacity="0.18" />
+  `;
+}
+
+function renderDemoAccentV2(
+  blueprint: SceneBlueprint,
+  ingredients: StoryIngredients,
+  demo: DemoArtBlueprint
+) {
+  const accent = ingredients.styleRecipe.palette.accent;
+  if (demo.accentEffect === "confetti") {
+    return `
+    <circle cx="164" cy="246" r="10" fill="${accent}" opacity="0.72" />
+    <circle cx="214" cy="228" r="7" fill="${accent}" opacity="0.52" />
+    <circle cx="746" cy="284" r="9" fill="${accent}" opacity="0.74" />
+    <circle cx="708" cy="246" r="6" fill="${accent}" opacity="0.54" />
+    `;
+  }
+  if (demo.accentEffect === "ripple") {
+    return `
+    <path d="M192 930C252 892 320 872 396 872" stroke="${accent}" stroke-width="10" stroke-linecap="round" opacity="0.34" />
+    <path d="M506 904C580 860 660 840 736 840" stroke="${accent}" stroke-width="10" stroke-linecap="round" opacity="0.28" />
+    `;
+  }
+  if (demo.accentEffect === "breeze") {
+    return `
+    <path d="M134 318C204 286 270 286 332 320" stroke="${accent}" stroke-width="8" stroke-linecap="round" opacity="0.26" />
+    <path d="M602 274C666 246 730 250 782 286" stroke="${accent}" stroke-width="8" stroke-linecap="round" opacity="0.26" />
+    `;
+  }
+  return `
+  <circle cx="210" cy="290" r="34" fill="${accent}" opacity="0.16" />
+  <circle cx="708" cy="260" r="28" fill="${accent}" opacity="0.14" />
+  `;
+}
+
+function renderProtagonistSvgV2(
+  blueprint: SceneBlueprint,
+  ingredients: StoryIngredients,
+  demo: DemoArtBlueprint
+) {
+  const archetype = resolveDemoArtArchetype(blueprint.protagonist.archetype);
+  const bodyColor =
+    archetype === "bear"
+      ? "#8c6b4f"
+      : archetype === "fox"
+        ? "#d97706"
+        : archetype === "deer"
+          ? "#a16207"
+          : archetype === "otter"
+            ? "#7c6f64"
+            : "#f8fafc";
+  const bodyStroke = archetype === "bunny" ? "#94a3b8" : "#4b3a2c";
+  const bellyColor = archetype === "fox" ? "#ffedd5" : "#efe3d1";
+  const centerX =
+    demo.cameraLayout === "wide" ? 452 : demo.cameraLayout === "focused" ? 468 : 486;
+  const centerY =
+    demo.cameraLayout === "wide" ? 742 : demo.cameraLayout === "focused" ? 764 : 788;
+  const bodyScale =
+    demo.cameraLayout === "wide" ? 0.86 : demo.cameraLayout === "focused" ? 0.96 : 1.04;
+  const headY = centerY - 170 * bodyScale;
+  const bodyY = centerY;
+  const eyeY = headY + 12;
+  const mouthY = headY + 46;
+  const armLift =
+    demo.pose === "wave" || demo.pose === "celebrate"
+      ? 42
+      : demo.pose === "lean-in"
+        ? 18
+        : demo.pose === "hesitate"
+          ? -6
+          : 12;
+  const leftArmEndX = centerX - 72 * bodyScale;
+  const leftArmEndY = bodyY - 32 * bodyScale - armLift;
+  const rightArmEndX = centerX + 72 * bodyScale;
+  const rightArmEndY =
+    bodyY - 30 * bodyScale - (demo.pose === "step-forward" ? 26 : armLift * 0.7);
+  const legSpread = demo.pose === "step-forward" ? 34 : demo.pose === "curl-up" ? 12 : 24;
+  const mouthPath =
+    demo.expression === "bright"
+      ? `M${centerX - 22 * bodyScale} ${mouthY}C${centerX - 8 * bodyScale} ${mouthY + 18 * bodyScale},${centerX + 8 * bodyScale} ${mouthY + 18 * bodyScale},${centerX + 22 * bodyScale} ${mouthY}`
+      : demo.expression === "shy" || demo.expression === "wobbly"
+        ? `M${centerX - 12 * bodyScale} ${mouthY + 6 * bodyScale}C${centerX - 2 * bodyScale} ${mouthY - 6 * bodyScale},${centerX + 4 * bodyScale} ${mouthY - 6 * bodyScale},${centerX + 12 * bodyScale} ${mouthY + 4 * bodyScale}`
+        : `M${centerX - 16 * bodyScale} ${mouthY}C${centerX - 6 * bodyScale} ${mouthY + 8 * bodyScale},${centerX + 6 * bodyScale} ${mouthY + 8 * bodyScale},${centerX + 16 * bodyScale} ${mouthY}`;
+  const ears =
+    archetype === "bunny"
+      ? `<ellipse cx="${centerX - 48 * bodyScale}" cy="${headY - 86 * bodyScale}" rx="${18 * bodyScale}" ry="${82 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />
+         <ellipse cx="${centerX + 48 * bodyScale}" cy="${headY - 86 * bodyScale}" rx="${18 * bodyScale}" ry="${82 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />
+         <ellipse cx="${centerX - 48 * bodyScale}" cy="${headY - 96 * bodyScale}" rx="${8 * bodyScale}" ry="${44 * bodyScale}" fill="#fecdd3" opacity="0.74" />
+         <ellipse cx="${centerX + 48 * bodyScale}" cy="${headY - 96 * bodyScale}" rx="${8 * bodyScale}" ry="${44 * bodyScale}" fill="#fecdd3" opacity="0.74" />`
+      : archetype === "bear"
+        ? `<circle cx="${centerX - 54 * bodyScale}" cy="${headY - 44 * bodyScale}" r="${28 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />
+           <circle cx="${centerX + 54 * bodyScale}" cy="${headY - 44 * bodyScale}" r="${28 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />`
+        : archetype === "deer"
+          ? `<circle cx="${centerX - 48 * bodyScale}" cy="${headY - 40 * bodyScale}" r="${24 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />
+             <circle cx="${centerX + 48 * bodyScale}" cy="${headY - 40 * bodyScale}" r="${24 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />
+             <path d="M${centerX - 34 * bodyScale} ${headY - 68 * bodyScale}C${centerX - 52 * bodyScale} ${headY - 122 * bodyScale},${centerX - 74 * bodyScale} ${headY - 134 * bodyScale},${centerX - 88 * bodyScale} ${headY - 170 * bodyScale}" stroke="${bodyStroke}" stroke-width="${6 * bodyScale}" stroke-linecap="round" />
+             <path d="M${centerX + 34 * bodyScale} ${headY - 68 * bodyScale}C${centerX + 52 * bodyScale} ${headY - 122 * bodyScale},${centerX + 74 * bodyScale} ${headY - 134 * bodyScale},${centerX + 88 * bodyScale} ${headY - 170 * bodyScale}" stroke="${bodyStroke}" stroke-width="${6 * bodyScale}" stroke-linecap="round" />`
+          : archetype === "fox"
+            ? `<polygon points="${centerX - 70 * bodyScale},${headY - 24 * bodyScale} ${centerX - 30 * bodyScale},${headY - 94 * bodyScale} ${centerX - 8 * bodyScale},${headY - 10 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />
+               <polygon points="${centerX + 70 * bodyScale},${headY - 24 * bodyScale} ${centerX + 30 * bodyScale},${headY - 94 * bodyScale} ${centerX + 8 * bodyScale},${headY - 10 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" />`
+            : `<circle cx="${centerX - 42 * bodyScale}" cy="${headY - 26 * bodyScale}" r="${20 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${6 * bodyScale}" />
+               <circle cx="${centerX + 42 * bodyScale}" cy="${headY - 26 * bodyScale}" r="${20 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${6 * bodyScale}" />`;
+  const tail =
+    archetype === "fox"
+      ? `<path d="M${centerX + 110 * bodyScale} ${bodyY + 24 * bodyScale}C${centerX + 182 * bodyScale} ${bodyY + 10 * bodyScale},${centerX + 196 * bodyScale} ${bodyY + 96 * bodyScale},${centerX + 130 * bodyScale} ${bodyY + 130 * bodyScale}" stroke="${bodyStroke}" stroke-width="${20 * bodyScale}" stroke-linecap="round" fill="none" />`
+      : archetype === "otter"
+        ? `<path d="M${centerX + 106 * bodyScale} ${bodyY + 60 * bodyScale}C${centerX + 176 * bodyScale} ${bodyY + 94 * bodyScale},${centerX + 154 * bodyScale} ${bodyY + 160 * bodyScale},${centerX + 94 * bodyScale} ${bodyY + 166 * bodyScale}" stroke="${bodyStroke}" stroke-width="${18 * bodyScale}" stroke-linecap="round" fill="none" />`
+        : "";
+
+  return `
+  <g filter="url(#shadow-${blueprint.pageIndex})">
+    ${ears}
+    <ellipse cx="${centerX}" cy="${headY}" rx="${88 * bodyScale}" ry="${94 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${8 * bodyScale}" />
+    <ellipse cx="${centerX}" cy="${bodyY}" rx="${118 * bodyScale}" ry="${140 * bodyScale}" fill="${bodyColor}" stroke="${bodyStroke}" stroke-width="${8 * bodyScale}" />
+    <ellipse cx="${centerX}" cy="${bodyY + 10 * bodyScale}" rx="${66 * bodyScale}" ry="${84 * bodyScale}" fill="${bellyColor}" opacity="0.94" />
+    <ellipse cx="${centerX - 32 * bodyScale}" cy="${eyeY}" rx="${10 * bodyScale}" ry="${14 * bodyScale}" fill="${bodyStroke}" />
+    <ellipse cx="${centerX + 32 * bodyScale}" cy="${eyeY}" rx="${10 * bodyScale}" ry="${14 * bodyScale}" fill="${bodyStroke}" />
+    <ellipse cx="${centerX}" cy="${headY + 44 * bodyScale}" rx="${18 * bodyScale}" ry="${14 * bodyScale}" fill="#f59ab5" />
+    <path d="${mouthPath}" stroke="${bodyStroke}" stroke-width="${7 * bodyScale}" stroke-linecap="round" fill="none" />
+    <path d="M${centerX - 74 * bodyScale} ${bodyY - 56 * bodyScale}C${centerX - 106 * bodyScale} ${bodyY - 18 * bodyScale},${leftArmEndX} ${leftArmEndY},${leftArmEndX - 4 * bodyScale} ${leftArmEndY + 24 * bodyScale}" stroke="${bodyStroke}" stroke-width="${16 * bodyScale}" stroke-linecap="round" fill="none" />
+    <path d="M${centerX + 74 * bodyScale} ${bodyY - 56 * bodyScale}C${centerX + 104 * bodyScale} ${bodyY - 18 * bodyScale},${rightArmEndX} ${rightArmEndY},${rightArmEndX + 6 * bodyScale} ${rightArmEndY + 20 * bodyScale}" stroke="${bodyStroke}" stroke-width="${16 * bodyScale}" stroke-linecap="round" fill="none" />
+    <path d="M${centerX - 42 * bodyScale} ${bodyY + 126 * bodyScale}C${centerX - 42 * bodyScale} ${bodyY + 194 * bodyScale},${centerX - legSpread * bodyScale} ${bodyY + 242 * bodyScale},${centerX - 24 * bodyScale} ${bodyY + 282 * bodyScale}" stroke="${bodyStroke}" stroke-width="${18 * bodyScale}" stroke-linecap="round" fill="none" />
+    <path d="M${centerX + 42 * bodyScale} ${bodyY + 126 * bodyScale}C${centerX + 42 * bodyScale} ${bodyY + 194 * bodyScale},${centerX + legSpread * bodyScale} ${bodyY + 242 * bodyScale},${centerX + 24 * bodyScale} ${bodyY + 282 * bodyScale}" stroke="${bodyStroke}" stroke-width="${18 * bodyScale}" stroke-linecap="round" fill="none" />
+    ${tail}
+  </g>
+  `;
+}
+
+function buildDemoArtSceneSvgV2(
+  blueprint: SceneBlueprint,
+  sceneText: string,
+  ingredients: StoryIngredients
+) {
+  const palette = ingredients.styleRecipe.palette;
+  const demo = buildDemoArtBlueprintV2(blueprint);
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" fill="none">
+  <defs>
+    <linearGradient id="storybook-bg-${blueprint.pageIndex}" x1="110" y1="70" x2="790" y2="1140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="${palette.backgroundStart}" />
+      <stop offset="1" stop-color="${palette.backgroundEnd}" />
+    </linearGradient>
+    <linearGradient id="storybook-wash-${blueprint.pageIndex}" x1="150" y1="120" x2="760" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" />
+      <stop offset="1" stop-color="${palette.chip}" />
+    </linearGradient>
+    <filter id="shadow-${blueprint.pageIndex}" x="120" y="140" width="660" height="900" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#0f172a" flood-opacity="0.18" />
+    </filter>
+  </defs>
+  ${renderDemoBackdropV2(blueprint, ingredients, demo)}
+  ${renderDemoAccentV2(blueprint, ingredients, demo)}
+  ${renderProtagonistSvgV2(blueprint, ingredients, demo)}
+  <rect x="54" y="934" width="792" height="190" rx="40" fill="rgba(255,255,255,0.16)" />
+  <rect x="72" y="952" width="756" height="154" rx="32" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.42)" />
+  <text x="102" y="998" fill="${palette.text}" font-size="34" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">${escapeSvgTextV2(blueprint.sceneTitle)}</text>
+  <text x="102" y="1048" fill="${palette.text}" font-size="21" font-family="'Noto Sans SC','PingFang SC',sans-serif">${escapeSvgTextV2(blueprint.visibleAction)}</text>
+  <text x="102" y="1088" fill="${palette.text}" font-size="18" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.88">${escapeSvgTextV2(sceneText.slice(0, 52))}</text>
+</svg>`.trim();
 }
 
 function buildFallbackSceneSvgV2(
@@ -1386,7 +1724,10 @@ function buildStoryScenesV2(ingredients: StoryIngredients) {
       ingredients.storyMode === "card"
         ? `${ingredients.protagonist.label}把今天那一点点亮光抱进怀里。今晚先做一件小事：${ingredients.tonightAction}。`
         : buildSceneTextV2(blueprint, ingredients);
-    const demoArtImage = buildDemoArtAssetPath(blueprint, ingredients);
+    const audioScript = buildSceneAudioScriptV2(blueprint, sceneText);
+    const demoArtImage = buildSceneFallbackDataUrlV2(
+      buildDemoArtSceneSvgV2(blueprint, sceneText, ingredients)
+    );
     const fallbackSvgImage = buildSceneFallbackDataUrlV2(
       buildFallbackSceneSvgV2(blueprint, sceneText, ingredients)
     );
@@ -1405,8 +1746,9 @@ function buildStoryScenesV2(ingredients: StoryIngredients) {
         ingredients.storyMode === "card"
           ? "storybook-audio-card"
           : `storybook-audio-${blueprint.pageIndex}`,
-      audioScript: buildSceneAudioScriptV2(blueprint, sceneText),
+      audioScript,
       audioStatus: "fallback",
+      captionTiming: buildSceneCaptionTimingV2(audioScript),
       voiceStyle: blueprint.voiceStyle,
       highlightSource: blueprint.highlightSource,
       imageCacheHit: false,
@@ -1494,7 +1836,9 @@ function resolveProviderImageDeliveryFromScenes(
 function buildLocalDiagnostics(
   transport: ParentStoryBookTransport,
   fallbackReason: string | null,
-  upstreamHost?: string | null
+  upstreamHost?: string | null,
+  statusCode?: number | null,
+  retryStrategy: "none" | "normalized-base-retry" = "none"
 ): ParentStoryBookDiagnostics {
   const reachable = transport === "remote-brain-proxy";
   const missingConfig = reachable ? [] : ["brain-unreachable"];
@@ -1504,6 +1848,8 @@ function buildLocalDiagnostics(
       reachable,
       fallbackReason,
       upstreamHost: upstreamHost ?? null,
+      statusCode: statusCode ?? null,
+      retryStrategy,
     },
     image: {
       requestedProvider: "vivo-story-image",
@@ -1528,6 +1874,8 @@ export function buildParentStoryBookResponse(
     source?: ParentStoryBookResponse["source"];
     fallback?: boolean;
     upstreamHost?: string | null;
+    statusCode?: number | null;
+    retryStrategy?: "none" | "normalized-base-retry";
   }
 ): ParentStoryBookResponse {
   const stylePreset = resolveParentStoryBookStylePreset(request.stylePreset);
@@ -1573,7 +1921,9 @@ export function buildParentStoryBookResponse(
       diagnostics: buildLocalDiagnostics(
         options?.transport ?? "next-json-fallback",
         fallbackReason,
-        options?.upstreamHost
+        options?.upstreamHost,
+        options?.statusCode,
+        options?.retryStrategy ?? "none"
       ),
       stylePreset,
       requestSource: request.requestSource ?? "parent-storybook-page",

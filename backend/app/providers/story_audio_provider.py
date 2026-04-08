@@ -15,6 +15,42 @@ def _normalize_text(value: Any) -> str:
     return " ".join(str(value).split())
 
 
+def _split_caption_segments(text: str) -> list[str]:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return []
+
+    buffer: list[str] = []
+    current = ""
+    for char in normalized:
+        current += char
+        if char in "。！？!?":
+            buffer.append(current.strip())
+            current = ""
+    if current.strip():
+        buffer.append(current.strip())
+    if buffer:
+        return buffer
+
+    return [segment.strip() for segment in normalized.replace("；", "，").split("，") if segment.strip()]
+
+
+def _build_caption_duration_ms(segment: str) -> int:
+    content_length = len(segment.replace(" ", ""))
+    punctuation_count = sum(1 for char in segment if char in "，,；;：:。！？!?")
+    return max(2400, 1700 + content_length * 95 + punctuation_count * 220)
+
+
+def build_story_caption_timing(text: str) -> dict[str, Any]:
+    segment_texts = _split_caption_segments(text)
+    safe_segments = segment_texts or [_normalize_text(text)] if _normalize_text(text) else []
+    return {
+        "mode": "duration-derived",
+        "segmentTexts": safe_segments,
+        "segmentDurationsMs": [_build_caption_duration_ms(segment) for segment in safe_segments],
+    }
+
+
 def _has_vivo_credentials(settings: Settings) -> bool:
     app_id = (settings.vivo_app_id or "").strip()
     app_key = settings.vivo_app_key.get_secret_value().strip() if settings.vivo_app_key else ""
@@ -88,6 +124,7 @@ class MockStoryAudioProvider:
                 "audioRef": f"storybook-audio-{scene_index + 1}",
                 "audioScript": script,
                 "audioStatus": "fallback" if story_mode == "storybook" else "mock",
+                "captionTiming": build_story_caption_timing(script),
                 "voiceStyle": resolved_voice_style,
                 "cacheHit": False,
             },
@@ -161,6 +198,7 @@ class VivoStoryAudioProvider:
             "audioRef": tts_result["audioRef"],
             "audioScript": script,
             "audioStatus": "ready",
+            "captionTiming": tts_result.get("captionTiming") or build_story_caption_timing(script),
             "voiceStyle": tts_result.get("voiceStyle") or voice_style or self.settings.storybook_tts_voice,
             "audioBytes": tts_result.get("audioBytes"),
             "audioContentType": tts_result.get("audioContentType") or "audio/wav",

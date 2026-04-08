@@ -96,6 +96,8 @@ function attachTransportMetadata(
     transport: BrainTransport;
     fallbackReason: string | null;
     upstreamHost: string | null;
+    statusCode?: number | null;
+    retryStrategy?: "none" | "normalized-base-retry";
   }
 ) {
   return {
@@ -110,6 +112,11 @@ function attachTransportMetadata(
           reachable: meta.transport === "remote-brain-proxy",
           fallbackReason: meta.fallbackReason,
           upstreamHost: meta.upstreamHost,
+          statusCode: meta.statusCode ?? story.providerMeta.diagnostics?.brain?.statusCode ?? null,
+          retryStrategy:
+            meta.retryStrategy ??
+            story.providerMeta.diagnostics?.brain?.retryStrategy ??
+            "none",
         },
         image: story.providerMeta.diagnostics?.image ?? {
           requestedProvider: story.providerMeta.imageProvider,
@@ -166,6 +173,9 @@ export async function POST(request: Request) {
         transport: cachedResponse.transport,
         fallbackReason: cachedResponse.fallbackReason,
         upstreamHost: cachedResponse.upstreamHost,
+        statusCode: cachedResponse.story.providerMeta.diagnostics?.brain?.statusCode ?? null,
+        retryStrategy:
+          cachedResponse.story.providerMeta.diagnostics?.brain?.retryStrategy ?? "none",
       }
     );
 
@@ -199,6 +209,8 @@ export async function POST(request: Request) {
         transport: "remote-brain-proxy",
         fallbackReason: null,
         upstreamHost: brainForward.upstreamHost,
+        statusCode: brainForward.statusCode,
+        retryStrategy: brainForward.retryStrategy,
       }
     );
 
@@ -230,6 +242,8 @@ export async function POST(request: Request) {
         source: "fallback",
         fallback: true,
         upstreamHost: brainForward.upstreamHost,
+        statusCode: brainForward.statusCode,
+        retryStrategy: brainForward.retryStrategy,
       }),
       {
         cacheState: "bypass",
@@ -239,6 +253,8 @@ export async function POST(request: Request) {
       transport: "next-json-fallback",
       fallbackReason: brainForward.fallbackReason ?? "brain-proxy-unavailable",
       upstreamHost: brainForward.upstreamHost,
+      statusCode: brainForward.statusCode,
+      retryStrategy: brainForward.retryStrategy,
     }
   );
 
