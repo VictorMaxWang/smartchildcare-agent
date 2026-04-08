@@ -1,14 +1,21 @@
 import type {
+  ChildSuggestionSnapshot,
   ConsultationResult,
+  ParentStoryBookGenerationMode,
   ParentStoryBookHighlightCandidate,
+  ParentStoryBookHighlightKind,
+  ParentStoryBookMediaStatus,
   ParentStoryBookMode,
+  ParentStoryBookPageCount,
   ParentStoryBookRequest,
   ParentStoryBookResponse,
   ParentStoryBookScene,
-  ParentStoryBookMediaStatus,
   ParentStoryBookStylePreset,
 } from "@/lib/ai/types";
-import { buildParentAgentChildContext, buildParentChildSuggestionSnapshot } from "@/lib/agent/parent-agent";
+import {
+  buildParentAgentChildContext,
+  buildParentChildSuggestionSnapshot,
+} from "@/lib/agent/parent-agent";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
 import type {
   GrowthRecord,
@@ -21,7 +28,7 @@ import type {
 } from "@/lib/store";
 
 export interface ParentStoryBookPayloadInput {
-  feed: ParentFeed;
+  feed?: ParentFeed | null;
   healthCheckRecords: HealthCheckRecord[];
   mealRecords: MealRecord[];
   growthRecords: GrowthRecord[];
@@ -31,6 +38,12 @@ export interface ParentStoryBookPayloadInput {
   latestConsultation?: ConsultationResult | null;
   requestSource?: string;
   storyMode?: ParentStoryBookMode;
+  generationMode?: ParentStoryBookGenerationMode;
+  manualTheme?: string;
+  manualPrompt?: string;
+  pageCount?: ParentStoryBookPageCount;
+  goalKeywords?: string[];
+  protagonistArchetype?: string;
   stylePreset?: ParentStoryBookStylePreset;
   stylePrompt?: string;
   traceId?: string;
@@ -45,29 +58,135 @@ export interface ParentStoryBookStylePresetDefinition {
   stylePrompt: string;
 }
 
-export const DEFAULT_PARENT_STORYBOOK_STYLE_PRESET: ParentStoryBookStylePreset = "sunrise-watercolor";
+type NormalizedConsultation = {
+  summary: string;
+  homeAction: string;
+  followUp48h: string;
+  parentMessageDraft: string;
+  schoolAction: string;
+};
+
+type NormalizedInterventionCard = {
+  title: string;
+  tonightHomeAction: string;
+  reviewIn48h: string;
+  tomorrowObservationPoint: string;
+};
+
+type StoryStage =
+  | "opening"
+  | "setup"
+  | "challenge"
+  | "support"
+  | "attempt"
+  | "wobble"
+  | "small-success"
+  | "landing";
+
+type StoryIngredients = {
+  childName: string;
+  className?: string;
+  focusTheme: string;
+  goalKeywords: string[];
+  protagonistArchetype: string;
+  protagonistName: string;
+  generationMode: ParentStoryBookGenerationMode;
+  pageCount: ParentStoryBookPageCount;
+  highlightCandidates: ParentStoryBookHighlightCandidate[];
+  summaryHighlight: string;
+  challengeDetail: string;
+  supportDetail: string;
+  attemptDetail: string;
+  successDetail: string;
+  wobbleDetail: string;
+  tonightAction: string;
+  tomorrowObservation: string;
+  promptHint: string;
+  parentNote: string;
+  stylePrompt: string;
+  storyMode: ParentStoryBookMode;
+};
+
+type ProtagonistDefinition = {
+  archetype: string;
+  label: string;
+  visualCue: string;
+};
+
+type SyntheticSnapshotInput = {
+  childId?: string | null;
+  childName?: string;
+  className?: string;
+  theme?: string;
+  goalKeywords?: string[];
+  manualPrompt?: string;
+};
+
+const STORYBOOK_BASE_DATE = Date.UTC(2026, 3, 7, 12, 0, 0);
+const STORYBOOK_FOCUS_FALLBACK = "慢慢长大的力量";
+
+export const DEFAULT_PARENT_STORYBOOK_STYLE_PRESET: ParentStoryBookStylePreset =
+  "sunrise-watercolor";
+export const DEFAULT_PARENT_STORYBOOK_GENERATION_MODE: ParentStoryBookGenerationMode =
+  "child-personalized";
+export const DEFAULT_PARENT_STORYBOOK_PAGE_COUNT: ParentStoryBookPageCount = 6;
+export const PARENT_STORYBOOK_PAGE_OPTIONS: ParentStoryBookPageCount[] = [4, 6, 8];
+export const PARENT_STORYBOOK_THEME_CHIPS = [
+  "勇气",
+  "诚实",
+  "分享",
+  "表达情绪",
+  "规则意识",
+  "独立入睡",
+] as const;
+
+const PAGE_STRUCTURES: Record<ParentStoryBookPageCount, StoryStage[]> = {
+  4: ["opening", "challenge", "attempt", "landing"],
+  6: ["opening", "challenge", "support", "attempt", "small-success", "landing"],
+  8: [
+    "opening",
+    "setup",
+    "challenge",
+    "support",
+    "attempt",
+    "wobble",
+    "small-success",
+    "landing",
+  ],
+};
+
+const PROTAGONIST_DEFINITIONS: ProtagonistDefinition[] = [
+  { archetype: "bunny", label: "小兔团团", visualCue: "圆圆耳朵、软软围巾" },
+  { archetype: "bear", label: "小熊暖暖", visualCue: "毛绒外套、小小灯笼" },
+  { archetype: "deer", label: "小鹿悠悠", visualCue: "细长步子、月光披风" },
+  { archetype: "fox", label: "小狐狸点点", visualCue: "蓬松尾巴、暖橙小背包" },
+  { archetype: "otter", label: "小水獭泡泡", visualCue: "亮晶晶眼睛、柔软披肩" },
+];
 
 export const PARENT_STORYBOOK_STYLE_PRESETS: ParentStoryBookStylePresetDefinition[] = [
   {
     id: "sunrise-watercolor",
     label: "晨光水彩",
     shortLabel: "晨光",
-    description: "暖黄水彩与高光晕染，更适合比赛录屏里的治愈成长瞬间。",
-    stylePrompt: "画面风格偏晨光水彩，暖金色高光，边缘柔和，像纸上晕染开的儿童绘本插图。",
+    description: "暖金色水彩与柔软纸感，适合把成长时刻讲得温柔、明亮。",
+    stylePrompt:
+      "儿童绘本插画，晨光水彩质感，暖金高光，柔软纸张肌理，治愈、童趣、适合移动端纵向绘本。",
   },
   {
     id: "moonlit-cutout",
     label: "月夜剪纸",
     shortLabel: "月夜",
-    description: "靛蓝夜色与层叠纸艺质感，突出睡前故事和晚安情绪。",
-    stylePrompt: "画面风格偏月夜剪纸，靛蓝与奶白层叠，夜空柔雾感明显，像立体纸艺儿童绘本。",
+    description: "静蓝夜色与层叠纸艺，适合睡前情绪、晚安故事与安抚主题。",
+    stylePrompt:
+      "儿童绘本插画，月夜剪纸风格，深蓝与奶白层叠，星光柔雾，安静、轻柔、适合晚安故事。",
   },
   {
     id: "forest-crayon",
     label: "森林蜡笔",
     shortLabel: "森林",
-    description: "浅绿与木质色调配合蜡笔笔触，适合切出更活泼的一套演示画风。",
-    stylePrompt: "画面风格偏森林蜡笔，浅绿和木质色调，保留明显手绘蜡笔纹理和轻冒险氛围。",
+    description: "浅绿木质配色与手绘蜡笔纹理，更活泼，也更适合比赛演示。",
+    stylePrompt:
+      "儿童绘本插画，森林蜡笔风格，浅绿与木色，明显手绘纹理，轻冒险感，温暖而有生命力。",
   },
 ];
 
@@ -81,16 +200,33 @@ function stableHash(value: string) {
 }
 
 function buildStableTimestamp(seed: string) {
-  const base = Date.UTC(2026, 3, 7, 12, 0, 0);
   const offset = Number.parseInt(stableHash(seed).slice(0, 8), 16) % (24 * 60 * 60 * 1000);
-  return new Date(base + offset).toISOString();
+  return new Date(STORYBOOK_BASE_DATE + offset).toISOString();
 }
 
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 }
 
-export function resolveParentStoryBookStylePreset(value?: string | null): ParentStoryBookStylePreset {
+function normalizeKeywords(values?: string[] | null) {
+  if (!values?.length) return [];
+  return Array.from(
+    new Set(values.map((value) => normalizeText(value)).filter(Boolean))
+  ).slice(0, 4);
+}
+
+function resolveParentStoryBookPageCount(
+  value?: number | null
+): ParentStoryBookPageCount {
+  if (value === 4 || value === 6 || value === 8) {
+    return value;
+  }
+  return DEFAULT_PARENT_STORYBOOK_PAGE_COUNT;
+}
+
+export function resolveParentStoryBookStylePreset(
+  value?: string | null
+): ParentStoryBookStylePreset {
   const normalized = normalizeText(value);
   const matched = PARENT_STORYBOOK_STYLE_PRESETS.find((item) => item.id === normalized);
   return matched?.id ?? DEFAULT_PARENT_STORYBOOK_STYLE_PRESET;
@@ -104,6 +240,22 @@ export function getParentStoryBookStylePresetDefinition(value?: string | null) {
   );
 }
 
+function resolveGenerationMode(input: {
+  generationMode?: ParentStoryBookGenerationMode;
+  feed?: ParentFeed | null;
+  manualTheme?: string;
+}) {
+  if (input.generationMode) {
+    return input.generationMode;
+  }
+
+  const hasTheme = Boolean(normalizeText(input.manualTheme));
+  const hasFeed = Boolean(input.feed);
+  if (hasTheme && hasFeed) return "hybrid";
+  if (hasTheme) return "manual-theme";
+  return hasFeed ? "child-personalized" : "manual-theme";
+}
+
 function pickFirstString(values: Array<unknown>) {
   for (const value of values) {
     const text = normalizeText(value);
@@ -112,36 +264,92 @@ function pickFirstString(values: Array<unknown>) {
   return "";
 }
 
-function pickCandidateDetail(candidate?: ParentStoryBookHighlightCandidate | null) {
-  if (!candidate) return "";
-  return normalizeText(candidate.detail) || normalizeText(candidate.title);
+function shortenDetail(value: string, fallback: string) {
+  const normalized = normalizeText(value) || fallback;
+  if (normalized.length <= 38) return normalized;
+  return `${normalized.slice(0, 38)}…`;
 }
 
-function summarizeTrend(trend: WeeklyDietTrend) {
-  const items = [
-    trend.hydrationAvg ? `平均饮水 ${trend.hydrationAvg}ml` : "",
-    trend.balancedRate ? `均衡率 ${trend.balancedRate}%` : "",
-    trend.monotonyDays ? `单一饮食 ${trend.monotonyDays} 天` : "",
-  ].filter(Boolean);
-  return items.join("，");
-}
+function buildSyntheticSnapshot(input: SyntheticSnapshotInput): ChildSuggestionSnapshot {
+  const goalKeywords = normalizeKeywords(input.goalKeywords);
+  const theme = normalizeText(input.theme);
+  const manualPrompt = normalizeText(input.manualPrompt);
+  const fallbackNote =
+    theme || goalKeywords[0] || manualPrompt || STORYBOOK_FOCUS_FALLBACK;
 
-function readRecordText(record: Record<string, unknown>, keys: string[]) {
-  return pickFirstString(keys.map((key) => record[key]));
-}
-
-function normalizeInterventionCard(card?: InterventionCard | Record<string, unknown> | null) {
-  if (!card) return null;
-  const record = card as Record<string, unknown>;
   return {
-    title: pickFirstString([record.title, record.interventionTitle, record.summary, record.reason]),
-    tonightHomeAction: pickFirstString([record.tonightHomeAction, record.homeAction, record.action]),
-    reviewIn48h: pickFirstString([record.reviewIn48h, record.followUp48h, record.reviewWindow]),
-    tomorrowObservationPoint: pickFirstString([record.tomorrowObservationPoint, record.teacherFollowupDraft, record.observationPoint]),
+    child: {
+      id: input.childId ?? "storybook-guest",
+      name: input.childName ?? "小朋友",
+      className: input.className,
+      specialNotes: fallbackNote,
+    },
+    summary: {
+      health: {
+        abnormalCount: 0,
+        handMouthEyeAbnormalCount: 0,
+        moodKeywords: theme ? [theme] : goalKeywords,
+      },
+      meals: {
+        recordCount: 0,
+        hydrationAvg: 0,
+        balancedRate: 0,
+        monotonyDays: 0,
+        allergyRiskCount: 0,
+      },
+      growth: {
+        recordCount: 0,
+        attentionCount: 0,
+        pendingReviewCount: 0,
+        topCategories: theme ? [{ category: theme, count: 1 }] : [],
+      },
+      feedback: {
+        count: 0,
+        statusCounts: {},
+        keywords: goalKeywords,
+      },
+    },
+    ruleFallback: [
+      {
+        title: theme ? `主题：${theme}` : "成长主题",
+        description:
+          manualPrompt ||
+          `把“${fallbackNote}”变成孩子能听、家长愿意读的温柔成长故事。`,
+        level: "info",
+        tags: goalKeywords,
+      },
+    ],
   };
 }
 
-function normalizeConsultation(consultation?: ConsultationResult | null) {
+function normalizeInterventionCard(
+  card?: InterventionCard | Record<string, unknown> | null
+): NormalizedInterventionCard | null {
+  if (!card) return null;
+  const record = card as Record<string, unknown>;
+  return {
+    title: pickFirstString([record.title, record.interventionTitle, record.summary]),
+    tonightHomeAction: pickFirstString([
+      record.tonightHomeAction,
+      record.homeAction,
+      record.action,
+    ]),
+    reviewIn48h: pickFirstString([
+      record.reviewIn48h,
+      record.followUp48h,
+      record.reviewWindow,
+    ]),
+    tomorrowObservationPoint: pickFirstString([
+      record.tomorrowObservationPoint,
+      record.teacherFollowupDraft,
+      record.observationPoint,
+    ]),
+  };
+}
+
+function normalizeConsultation(
+  consultation?: ConsultationResult | null
+): NormalizedConsultation | null {
   if (!consultation) return null;
   return {
     summary: normalizeText(consultation.summary),
@@ -152,34 +360,49 @@ function normalizeConsultation(consultation?: ConsultationResult | null) {
   };
 }
 
-function buildHighlightCandidates(params: {
+function summarizeTrend(trend: WeeklyDietTrend) {
+  const items = [
+    trend.hydrationAvg ? `饮水约 ${trend.hydrationAvg}ml` : "",
+    trend.balancedRate ? `均衡率 ${trend.balancedRate}%` : "",
+    trend.monotonyDays ? `单一饮食 ${trend.monotonyDays} 天` : "",
+  ].filter(Boolean);
+  return items.join("，");
+}
+
+function readRecordText(record: Record<string, unknown>, keys: string[]) {
+  return pickFirstString(keys.map((key) => record[key]));
+}
+
+function buildChildHighlightCandidates(params: {
   feed: ParentFeed;
-  snapshot: ReturnType<typeof buildParentChildSuggestionSnapshot>;
+  snapshot: ChildSuggestionSnapshot;
   latestInterventionCard?: InterventionCard | null;
   latestConsultation?: ConsultationResult | null;
 }) {
   const todayGrowth = params.feed.todayGrowth[0];
-  const warningSuggestion = params.feed.suggestions.find((item) => item.level === "warning") ?? params.feed.suggestions[0];
+  const warningSuggestion =
+    params.feed.suggestions.find((item) => item.level === "warning") ??
+    params.feed.suggestions[0];
   const consultation = normalizeConsultation(params.latestConsultation);
   const card = normalizeInterventionCard(params.latestInterventionCard);
   const latestFeedback = params.feed.latestFeedback ?? params.feed.recentFeedbacks[0];
   const trendSummary = summarizeTrend(params.feed.weeklyTrend);
+  const topCategory = params.snapshot.summary.growth.topCategories[0]?.category;
 
   const candidates: ParentStoryBookHighlightCandidate[] = [];
 
-  const todayGrowthTitle = todayGrowth
-    ? todayGrowth.category
-    : params.snapshot.summary.growth.attentionCount > 0
-      ? "今天有新的成长观察"
-      : "今天的成长节奏很平稳";
-  const todayGrowthDetail = todayGrowth
-    ? readRecordText(todayGrowth as unknown as Record<string, unknown>, ["description", "followUpAction", "category"])
-    : params.feed.suggestions[0]?.description ?? "今天可以把一个小变化放进故事里，让孩子听见自己的进步。";
-
   candidates.push({
     kind: "todayGrowth",
-    title: todayGrowthTitle,
-    detail: todayGrowthDetail,
+    title: todayGrowth?.category || topCategory || "今天的小进步",
+    detail:
+      (todayGrowth &&
+        readRecordText(todayGrowth as unknown as Record<string, unknown>, [
+          "description",
+          "followUpAction",
+          "category",
+        ])) ||
+      warningSuggestion?.description ||
+      "今天出现了一点点值得被看见的成长变化。",
     priority: 1,
     source: "todayGrowth",
   });
@@ -197,7 +420,7 @@ function buildHighlightCandidates(params: {
   if (consultation?.summary) {
     candidates.push({
       kind: "consultationSummary",
-      title: "最近会诊结论",
+      title: "近期建议",
       detail: consultation.summary,
       priority: 3,
       source: "latestConsultation",
@@ -214,7 +437,7 @@ function buildHighlightCandidates(params: {
   if (consultationAction) {
     candidates.push({
       kind: "consultationAction",
-      title: "今晚最适合做的一件事",
+      title: "今晚可以做的小事",
       detail: consultationAction,
       priority: 4,
       source: "interventionCard",
@@ -229,7 +452,7 @@ function buildHighlightCandidates(params: {
   if (feedbackDetail) {
     candidates.push({
       kind: "guardianFeedback",
-      title: "最近家长反馈",
+      title: "家长反馈",
       detail: feedbackDetail,
       priority: 5,
       source: "guardianFeedback",
@@ -239,263 +462,213 @@ function buildHighlightCandidates(params: {
   if (trendSummary) {
     candidates.push({
       kind: "weeklyTrend",
-      title: "一周趋势信号",
+      title: "近一周趋势",
       detail: trendSummary,
       priority: 6,
       source: "weeklyTrend",
     });
   }
 
+  const childTrait = pickFirstString([
+    params.snapshot.summary.feedback.keywords[0],
+    topCategory,
+    params.snapshot.child.specialNotes,
+  ]);
+  if (childTrait) {
+    candidates.push({
+      kind: "childTrait",
+      title: "孩子气质线索",
+      detail: childTrait,
+      priority: 7,
+      source: "childTrait",
+    });
+  }
+
   return candidates
-    .filter((item) => item.detail.trim().length > 0)
+    .map((item) => ({
+      ...item,
+      detail: normalizeText(item.detail),
+      title: normalizeText(item.title),
+    }))
+    .filter((item) => item.detail.length > 0)
     .sort((left, right) => left.priority - right.priority)
-    .slice(0, 5);
+    .slice(0, 6);
 }
 
-function buildStoryMode(
-  childId: string | undefined | null,
-  highlightCandidates: ParentStoryBookHighlightCandidate[],
-  snapshot: ReturnType<typeof buildParentChildSuggestionSnapshot>
-): ParentStoryBookMode {
-  if (!childId) return "card";
-  if (highlightCandidates.length === 0) return "card";
-  if (snapshot.summary.growth.recordCount === 0 && snapshot.summary.feedback.count === 0) return "card";
+function buildThemeHighlightCandidates(input: {
+  manualTheme?: string;
+  manualPrompt?: string;
+  goalKeywords?: string[];
+}) {
+  const manualTheme = normalizeText(input.manualTheme);
+  const manualPrompt = normalizeText(input.manualPrompt);
+  const goalKeywords = normalizeKeywords(input.goalKeywords);
+
+  const candidates: ParentStoryBookHighlightCandidate[] = [];
+
+  if (manualTheme) {
+    candidates.push({
+      kind: "manualTheme",
+      title: `主题：${manualTheme}`,
+      detail:
+        manualPrompt ||
+        `把“${manualTheme}”讲成孩子能听懂、家长愿意读、今晚就能用上的成长故事。`,
+      priority: 1,
+      source: "manualTheme",
+    });
+  }
+
+  goalKeywords.forEach((keyword, index) => {
+    candidates.push({
+      kind: "goalKeyword",
+      title: `关键词：${keyword}`,
+      detail: `故事会把“${keyword}”落到一个能被孩子感受到的小动作里。`,
+      priority: index + 2,
+      source: "goalKeyword",
+    });
+  });
+
+  if (!candidates.length && manualPrompt) {
+    candidates.push({
+      kind: "manualTheme",
+      title: "主题设定",
+      detail: manualPrompt,
+      priority: 1,
+      source: "manualTheme",
+    });
+  }
+
+  return candidates;
+}
+
+function dedupeHighlights(candidates: ParentStoryBookHighlightCandidate[]) {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = [
+      candidate.kind,
+      normalizeText(candidate.title),
+      normalizeText(candidate.detail),
+    ].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function resolveStoryMode(input: {
+  requestStoryMode?: ParentStoryBookMode | "auto";
+  generationMode: ParentStoryBookGenerationMode;
+  snapshot: ChildSuggestionSnapshot;
+  highlightCandidates: ParentStoryBookHighlightCandidate[];
+}) {
+  if (input.requestStoryMode === "card") return "card";
+  if (input.generationMode === "manual-theme" || input.generationMode === "hybrid") {
+    return "storybook";
+  }
+  if (!input.highlightCandidates.length) return "card";
+  if (
+    input.snapshot.summary.growth.recordCount === 0 &&
+    input.snapshot.summary.feedback.count === 0
+  ) {
+    return "card";
+  }
   return "storybook";
 }
 
-function resolveSceneImageRef(mode: ParentStoryBookMode, index: number) {
-  if (mode === "card") return "/storybook/card.svg";
-  return `/storybook/scene-${index + 1}.svg`;
-}
-
-function buildScene(
-  params: {
-    index: number;
-    childName: string;
-    className?: string;
-    mode: ParentStoryBookMode;
-    stylePrompt?: string;
-    highlight: ParentStoryBookHighlightCandidate;
-    nextHighlight?: ParentStoryBookHighlightCandidate;
-    closingNote: string;
-    parentNote: string;
-  }
-): ParentStoryBookScene {
-  const {
-    index,
-    childName,
-    className,
-    mode,
-    stylePrompt,
-    highlight,
-    nextHighlight,
-    closingNote,
-    parentNote,
-  } = params;
-  const mainText = pickCandidateDetail(highlight);
-  const supportingText = pickCandidateDetail(nextHighlight);
-  const imageRef = resolveSceneImageRef(mode, index);
-  const voiceStyle = index === 2 ? "gentle-bedtime" : index === 1 ? "warm-storytelling" : "calm-encouraging";
-  const presetPrompt = normalizeText(stylePrompt);
-
-  const sceneTitleMap: Record<number, string> = {
-    0: "今天被看见的小进步",
-    1: "老师和家长陪着慢慢来",
-    2: "今晚只做一件小事",
-  };
-
-  const sceneTextMap: Record<number, string> = {
-    0: `${childName}${className ? ` 在 ${className}` : ""} 今天被看见的一幕，是 ${mainText || "又向前迈了一小步"}。老师先把这份小进步轻轻收好，让它不只停在白天，也能陪孩子一起回家。`,
-    1: supportingText
-      ? `第二幕里，大人没有催快，只是顺着 ${childName} 今天的节奏继续陪着走。${supportingText}。当孩子被稳稳接住时，原来有点难的事，也会慢慢变得愿意再试一次。`
-      : `${childName} 不需要一下子做到最好，只要有人在旁边陪着把节奏放慢一点，就已经很了不起。`,
-    2: `${closingNote}。${parentNote} 明天继续留意 ${mainText || "孩子在熟悉环节里的回应"}。`,
-  };
-
-  const audioScriptMap: Record<number, string> = {
-    0: `今天被看见的小进步，是 ${mainText || "一个温柔的小进步"}。这件小事值得被轻轻记下来。`,
-    1: supportingText
-      ? `老师和家长一起把节奏放慢，${childName} 就能更安心地继续尝试。`
-      : `慢慢来，已经是很好的节奏，有人陪着就会更稳。`,
-    2: `${closingNote}。${parentNote} 明天再接着看小变化。`,
-  };
-
-  return {
-    sceneIndex: index + 1,
-    sceneTitle: sceneTitleMap[index] ?? "成长片段",
-    sceneText: sceneTextMap[index] ?? mainText,
-    imagePrompt: [
-      presetPrompt,
-      `温暖绘本风，${childName}${className ? ` 在 ${className}` : ""}，${mainText || "柔和的成长瞬间"}，奶油色与浅蓝色，安静、安全、童趣，适合家长睡前阅读`,
-    ]
-      .filter(Boolean)
-      .join("；"),
-    imageUrl: imageRef,
-    assetRef: imageRef,
-    imageStatus: mode === "storybook" ? "fallback" : "mock",
-    audioUrl: null,
-    audioRef: `storybook-audio-${index + 1}`,
-    audioScript: audioScriptMap[index] ?? mainText,
-    audioStatus: mode === "storybook" ? "fallback" : "mock",
-    voiceStyle,
-    highlightSource: highlight.source ?? highlight.kind,
-  };
-}
-
-function buildScenes(params: {
-  childName: string;
-  className?: string;
-  mode: ParentStoryBookMode;
-  stylePrompt?: string;
-  highlightCandidates: ParentStoryBookHighlightCandidate[];
-  closingNote: string;
-  parentNote: string;
+function createSyntheticThemeRequest(input: {
+  feed?: ParentFeed | null;
+  generationMode: ParentStoryBookGenerationMode;
+  manualTheme?: string;
+  manualPrompt?: string;
+  goalKeywords?: string[];
 }) {
-  const { childName, className, mode, stylePrompt, highlightCandidates, closingNote, parentNote } = params;
-  if (mode === "card") {
-    const highlight = highlightCandidates[0] ?? {
-      kind: "todayGrowth" as const,
-      title: "成长小卡",
-      detail: "今天先用一张轻量故事卡，把最值得继续陪伴的小变化收好。",
-      priority: 1,
-      source: "rule",
-    };
-    return [
-      buildScene({
-        index: 0,
-        childName,
-        className,
-        mode,
-        stylePrompt,
-        highlight,
-        closingNote,
-        parentNote,
-      }),
-    ];
-  }
-
-  const [first, second, third] = highlightCandidates;
-  const safeFirst = first ?? {
-    kind: "todayGrowth" as const,
-    title: "今天被看见的小进步",
-    detail: "今天适合把一个刚刚出现的小进步写进故事里，让孩子带着被看见的感觉回家。",
-    priority: 1,
-    source: "rule",
-  };
-  const safeSecond =
-    second ??
-    {
-      kind: "consultationAction" as const,
-      title: "今晚最适合做的一件事",
-      detail: "今晚只做一件简单、稳定、孩子能跟上的陪伴动作，不额外加新要求。",
-      priority: 2,
-      source: "rule",
-    };
-  const safeThird =
-    third ??
-    {
-      kind: "weeklyTrend" as const,
-      title: "继续观察的小提醒",
-      detail: "明天继续看一眼孩子在熟悉环节里的状态变化，把今天的亮点接到下一次。",
-      priority: 3,
-      source: "rule",
-    };
-
-  return [
-    buildScene({
-      index: 0,
-      childName,
-      className,
-      mode,
-      stylePrompt,
-      highlight: safeFirst,
-      nextHighlight: safeSecond,
-      closingNote,
-      parentNote,
-    }),
-    buildScene({
-      index: 1,
-      childName,
-      className,
-      mode,
-      stylePrompt,
-      highlight: safeSecond,
-      nextHighlight: safeThird,
-      closingNote,
-      parentNote,
-    }),
-    buildScene({
-      index: 2,
-      childName,
-      className,
-      mode,
-      stylePrompt,
-      highlight: safeThird,
-      nextHighlight: safeFirst,
-      closingNote,
-      parentNote,
-    }),
-  ];
-}
-
-function buildParentNote(
-  childName: string,
-  mode: ParentStoryBookMode,
-  highlightCandidates: ParentStoryBookHighlightCandidate[],
-  latestInterventionCard?: InterventionCard | Record<string, unknown> | null,
-  latestConsultation?: ConsultationResult | null
-) {
-  const consultation = normalizeConsultation(latestConsultation);
-  const card = normalizeInterventionCard(latestInterventionCard);
-  const primary = pickCandidateDetail(highlightCandidates[0]);
-  const action = pickFirstString([
-    card?.tonightHomeAction,
-    consultation?.homeAction,
-    consultation?.followUp48h,
-    primary,
-  ]);
-
-  if (mode === "card") {
-    return `${childName} 今晚适合先读一张轻量成长卡，再把今天最值得继续陪伴的一幕说给孩子听。`;
-  }
-
-  return action
-    ? `今晚只要做一件小事：${action}。不用催快，也不追求一次做到，只要陪着 ${childName} 把这一步走稳就够了。`
-    : `今晚先把故事读完，再陪孩子把今天最亮的一幕慢慢说出来，让情绪轻一点收尾。`;
-}
-
-function buildMoral(childName: string, highlightCandidates: ParentStoryBookHighlightCandidate[]) {
-  const primary = pickCandidateDetail(highlightCandidates[0]) || `${childName} 正在慢慢长大`;
-  return `孩子真正会记住的，不是被要求快一点，而是有人看见了他的 ${primary}，也愿意陪他把这一小步走稳。`;
-}
-
-export function buildParentStoryBookRequestFromFeed(input: ParentStoryBookPayloadInput): ParentStoryBookRequest {
-  const context = buildParentAgentChildContext({
-    child: input.feed.child,
-    smartInsights: input.feed.suggestions,
-    healthCheckRecords: input.healthCheckRecords,
-    mealRecords: input.mealRecords,
-    growthRecords: input.growthRecords,
-    guardianFeedbacks: input.guardianFeedbacks,
-    taskCheckInRecords: input.taskCheckInRecords,
-    weeklyTrend: input.feed.weeklyTrend,
-    currentInterventionCard: input.latestInterventionCard ?? undefined,
+  const usesChildContext = input.generationMode !== "manual-theme" && Boolean(input.feed);
+  return buildSyntheticSnapshot({
+    childId: usesChildContext ? input.feed?.child.id : null,
+    childName: usesChildContext ? input.feed?.child.name : "小朋友",
+    className: usesChildContext ? input.feed?.child.className : undefined,
+    theme: input.manualTheme,
+    goalKeywords: input.goalKeywords,
+    manualPrompt: input.manualPrompt,
   });
-  const snapshot = buildParentChildSuggestionSnapshot(context);
-  const highlightCandidates = buildHighlightCandidates({
+}
+
+export function buildParentStoryBookRequestFromFeed(
+  input: ParentStoryBookPayloadInput
+): ParentStoryBookRequest {
+  const generationMode = resolveGenerationMode({
+    generationMode: input.generationMode,
     feed: input.feed,
-    snapshot,
-    latestInterventionCard: input.latestInterventionCard,
-    latestConsultation: input.latestConsultation,
+    manualTheme: input.manualTheme,
   });
-  const storyMode = input.storyMode ?? buildStoryMode(input.feed.child.id, highlightCandidates, snapshot);
   const stylePreset = resolveParentStoryBookStylePreset(input.stylePreset);
-  const stylePrompt = normalizeText(input.stylePrompt) || getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
+  const stylePrompt =
+    normalizeText(input.stylePrompt) ||
+    getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
+  const pageCount = resolveParentStoryBookPageCount(input.pageCount);
+  const goalKeywords = normalizeKeywords(input.goalKeywords);
+  const manualTheme = normalizeText(input.manualTheme);
+  const manualPrompt = normalizeText(input.manualPrompt);
+
+  const snapshot =
+    input.feed && generationMode !== "manual-theme"
+      ? buildParentChildSuggestionSnapshot(
+          buildParentAgentChildContext({
+            child: input.feed.child,
+            smartInsights: input.feed.suggestions,
+            healthCheckRecords: input.healthCheckRecords,
+            mealRecords: input.mealRecords,
+            growthRecords: input.growthRecords,
+            guardianFeedbacks: input.guardianFeedbacks,
+            taskCheckInRecords: input.taskCheckInRecords,
+            weeklyTrend: input.feed.weeklyTrend,
+            currentInterventionCard: input.latestInterventionCard ?? undefined,
+          })
+        )
+      : createSyntheticThemeRequest({
+          feed: input.feed,
+          generationMode,
+          manualTheme,
+          manualPrompt,
+          goalKeywords,
+        });
+
+  const childHighlights =
+    input.feed && generationMode !== "manual-theme"
+      ? buildChildHighlightCandidates({
+          feed: input.feed,
+          snapshot,
+          latestInterventionCard: input.latestInterventionCard,
+          latestConsultation: input.latestConsultation,
+        })
+      : [];
+  const themeHighlights = buildThemeHighlightCandidates({
+    manualTheme,
+    manualPrompt,
+    goalKeywords,
+  });
+
+  const highlightCandidates = dedupeHighlights(
+    generationMode === "child-personalized"
+      ? childHighlights
+      : generationMode === "manual-theme"
+        ? themeHighlights
+        : [...themeHighlights, ...childHighlights]
+  );
 
   return {
-    childId: input.feed.child.id,
-    storyMode,
-    requestSource: input.requestSource ?? "parent-home",
+    childId:
+      generationMode === "manual-theme"
+        ? undefined
+        : input.feed?.child.id ?? snapshot.child.id ?? undefined,
+    storyMode: input.storyMode ?? "storybook",
+    generationMode,
+    manualTheme: manualTheme || undefined,
+    manualPrompt: manualPrompt || undefined,
+    pageCount,
+    goalKeywords,
+    protagonistArchetype: normalizeText(input.protagonistArchetype) || undefined,
+    requestSource: input.requestSource ?? "parent-storybook-page",
     stylePreset,
     stylePrompt,
     snapshot,
@@ -507,6 +680,409 @@ export function buildParentStoryBookRequestFromFeed(input: ParentStoryBookPayloa
   };
 }
 
+function resolveFocusTheme(input: {
+  generationMode: ParentStoryBookGenerationMode;
+  manualTheme?: string;
+  goalKeywords?: string[];
+  snapshot: ChildSuggestionSnapshot;
+  highlightCandidates: ParentStoryBookHighlightCandidate[];
+}) {
+  return pickFirstString([
+    input.manualTheme,
+    input.goalKeywords?.[0],
+    input.snapshot.summary.growth.topCategories[0]?.category,
+    input.snapshot.summary.feedback.keywords[0],
+    input.highlightCandidates[0]?.title,
+    STORYBOOK_FOCUS_FALLBACK,
+  ]);
+}
+
+function resolveProtagonistArchetype(input: {
+  requested?: string;
+  focusTheme: string;
+  childName: string;
+  childHints: string[];
+}) {
+  const requested = normalizeText(input.requested);
+  const explicit = PROTAGONIST_DEFINITIONS.find(
+    (item) => item.archetype === requested
+  );
+  if (explicit) return explicit;
+
+  const seed = [
+    requested,
+    input.focusTheme,
+    input.childName,
+    input.childHints.join("|"),
+  ].join("::");
+  const index =
+    Number.parseInt(stableHash(seed).slice(0, 4), 16) %
+    PROTAGONIST_DEFINITIONS.length;
+  return PROTAGONIST_DEFINITIONS[index];
+}
+
+function buildParentNote(input: {
+  childName: string;
+  storyMode: ParentStoryBookMode;
+  tonightAction: string;
+  tomorrowObservation: string;
+  generationMode: ParentStoryBookGenerationMode;
+}) {
+  if (input.storyMode === "card") {
+    return `${input.childName} 今晚先用一张轻量成长卡收束情绪，再把最亮的一点小进步说给孩子听。`;
+  }
+
+  if (input.generationMode === "manual-theme") {
+    return `今晚可以先试一件小事：${input.tonightAction}。明天继续观察：${input.tomorrowObservation}。`;
+  }
+
+  return `${input.childName} 今晚可以先试一件小事：${input.tonightAction}。明天继续观察：${input.tomorrowObservation}。`;
+}
+
+function buildMoral(input: {
+  protagonistName: string;
+  focusTheme: string;
+  summaryHighlight: string;
+}) {
+  return `${input.protagonistName} 记住的，不是“要快一点”，而是“原来我可以慢慢学会 ${input.focusTheme}”。那些被看见的 ${input.summaryHighlight}，会一点点变成真正的力量。`;
+}
+
+function buildStoryIngredients(request: ParentStoryBookRequest) {
+  const generationMode =
+    request.generationMode ?? DEFAULT_PARENT_STORYBOOK_GENERATION_MODE;
+  const pageCount = resolveParentStoryBookPageCount(request.pageCount);
+  const focusTheme = resolveFocusTheme({
+    generationMode,
+    manualTheme: request.manualTheme,
+    goalKeywords: request.goalKeywords,
+    snapshot: request.snapshot,
+    highlightCandidates: request.highlightCandidates,
+  });
+  const childName = normalizeText(request.snapshot.child.name) || "小朋友";
+  const className = normalizeText(request.snapshot.child.className) || undefined;
+  const consultation = normalizeConsultation(request.latestConsultation ?? null);
+  const interventionCard = normalizeInterventionCard(request.latestInterventionCard ?? null);
+  const highlightCandidates = request.highlightCandidates
+    .map((item) => ({
+      ...item,
+      title: normalizeText(item.title),
+      detail: normalizeText(item.detail),
+      source: normalizeText(item.source) || item.kind,
+    }))
+    .filter((item) => item.detail.length > 0)
+    .sort((left, right) => left.priority - right.priority);
+  const summaryHighlight = shortenDetail(
+    highlightCandidates[0]?.detail,
+    "被轻轻看见的小进步"
+  );
+  const supportDetail = shortenDetail(
+    pickFirstString([
+      highlightCandidates.find((item) => item.kind === "consultationAction")?.detail,
+      highlightCandidates.find((item) => item.kind === "guardianFeedback")?.detail,
+      consultation?.summary,
+      consultation?.schoolAction,
+    ]),
+    "大人把节奏放慢一点，先接住情绪，再陪它继续往前。"
+  );
+  const attemptDetail = shortenDetail(
+    pickFirstString([
+      highlightCandidates.find((item) => item.kind === "warningSuggestion")?.detail,
+      highlightCandidates.find((item) => item.kind === "consultationSummary")?.detail,
+      highlightCandidates[1]?.detail,
+    ]),
+    "先试一个小动作，再把脚步放稳。"
+  );
+  const successDetail = shortenDetail(
+    pickFirstString([
+      highlightCandidates.find((item) => item.kind === "todayGrowth")?.detail,
+      highlightCandidates.find((item) => item.kind === "guardianFeedback")?.detail,
+      highlightCandidates[2]?.detail,
+    ]),
+    "原来一点点靠近，也是在认真长大。"
+  );
+  const challengeDetail = shortenDetail(
+    pickFirstString([
+      highlightCandidates.find((item) => item.kind === "warningSuggestion")?.detail,
+      highlightCandidates[0]?.detail,
+      request.manualPrompt,
+    ]),
+    "面对新的小关卡时，心里还是会轻轻打鼓。"
+  );
+  const wobbleDetail = shortenDetail(
+    pickFirstString([
+      highlightCandidates.find((item) => item.kind === "weeklyTrend")?.detail,
+      consultation?.summary,
+      request.manualPrompt,
+    ]),
+    "有一点摇晃很正常，停一停，再出发就好。"
+  );
+  const tonightAction = pickFirstString([
+    interventionCard?.tonightHomeAction,
+    consultation?.homeAction,
+    highlightCandidates.find((item) => item.kind === "consultationAction")?.detail,
+    `和孩子一起做一个关于“${focusTheme}”的小练习`,
+  ]);
+  const tomorrowObservation = pickFirstString([
+    interventionCard?.tomorrowObservationPoint,
+    interventionCard?.reviewIn48h,
+    consultation?.followUp48h,
+    highlightCandidates.find((item) => item.kind === "weeklyTrend")?.detail,
+    `明天再看看孩子遇到“${focusTheme}”时会不会更从容一点`,
+  ]);
+  const childHints = [
+    request.snapshot.summary.feedback.keywords[0] ?? "",
+    request.snapshot.summary.growth.topCategories[0]?.category ?? "",
+    request.snapshot.child.specialNotes ?? "",
+  ].filter(Boolean);
+  const protagonist = resolveProtagonistArchetype({
+    requested: request.protagonistArchetype,
+    focusTheme,
+    childName,
+    childHints,
+  });
+  const storyMode = resolveStoryMode({
+    requestStoryMode: request.storyMode,
+    generationMode,
+    snapshot: request.snapshot,
+    highlightCandidates,
+  });
+  const parentNote = buildParentNote({
+    childName,
+    storyMode,
+    tonightAction,
+    tomorrowObservation,
+    generationMode,
+  });
+
+  return {
+    childName,
+    className,
+    focusTheme,
+    goalKeywords: normalizeKeywords(request.goalKeywords),
+    protagonistArchetype: protagonist.archetype,
+    protagonistName: protagonist.label,
+    generationMode,
+    pageCount,
+    highlightCandidates,
+    summaryHighlight,
+    challengeDetail,
+    supportDetail,
+    attemptDetail,
+    successDetail,
+    wobbleDetail,
+    tonightAction,
+    tomorrowObservation,
+    promptHint: normalizeText(request.manualPrompt),
+    parentNote,
+    stylePrompt:
+      normalizeText(request.stylePrompt) ||
+      getParentStoryBookStylePresetDefinition(request.stylePreset).stylePrompt,
+    storyMode,
+  } satisfies StoryIngredients;
+}
+
+function buildSceneTitle(stage: StoryStage) {
+  switch (stage) {
+    case "opening":
+      return "月光翻开第一页";
+    case "setup":
+      return "小脚步在路上";
+    case "challenge":
+      return "遇到一点点难";
+    case "support":
+      return "有人轻轻托住它";
+    case "attempt":
+      return "它决定再试一下";
+    case "wobble":
+      return "风吹来时先停一停";
+    case "small-success":
+      return "小小光亮出现了";
+    case "landing":
+      return "把温柔带回今晚";
+  }
+}
+
+function buildSceneText(stage: StoryStage, ingredients: StoryIngredients) {
+  const {
+    protagonistName,
+    focusTheme,
+    summaryHighlight,
+    challengeDetail,
+    supportDetail,
+    attemptDetail,
+    successDetail,
+    wobbleDetail,
+    tonightAction,
+    tomorrowObservation,
+    generationMode,
+  } = ingredients;
+
+  switch (stage) {
+    case "opening":
+      return `${protagonistName} 今天想练习“${focusTheme}”。白天里，它已经悄悄做到了一点点：${summaryHighlight}。`;
+    case "setup":
+      return `它没有一下子就变得很厉害，而是先听一听、停一停，再把脚步放轻。${protagonistName} 知道，慢慢来也是一种本事。`;
+    case "challenge":
+      return `可当新的小关卡出现时，${protagonistName} 还是会有点犹豫。${challengeDetail}`;
+    case "support":
+      return `这时，老师和家长没有催它，只把声音放轻、把节奏放慢。${supportDetail}`;
+    case "attempt":
+      return `${protagonistName} 先做了一个最小的动作，再试一次。${attemptDetail}`;
+    case "wobble":
+      return `中间也会有一点摇晃，但那不是退步。${wobbleDetail}`;
+    case "small-success":
+      return `慢慢地，${protagonistName} 发现自己真的做到了。${successDetail}`;
+    case "landing":
+      return generationMode === "manual-theme"
+        ? `今晚，只要先做一件小事：${tonightAction}。明天，再一起看看${tomorrowObservation}。`
+        : `把这份小小的力量带回今晚吧：${tonightAction}。明天，再一起看看${tomorrowObservation}。`;
+  }
+}
+
+function buildSceneVoiceStyle(stage: StoryStage) {
+  if (stage === "landing") return "gentle-bedtime";
+  if (stage === "challenge" || stage === "wobble") return "warm-storytelling";
+  return "calm-encouraging";
+}
+
+function buildSceneImagePrompt(
+  stage: StoryStage,
+  sceneTitle: string,
+  sceneText: string,
+  ingredients: StoryIngredients
+) {
+  const keywordText = ingredients.goalKeywords.length
+    ? `，关键词：${ingredients.goalKeywords.join("、")}`
+    : "";
+  const promptHint = ingredients.promptHint ? `，补充要求：${ingredients.promptHint}` : "";
+
+  return [
+    ingredients.stylePrompt,
+    `儿童绘本插画，移动端纵向大画幅，拟人小动物主角“${ingredients.protagonistName}”`,
+    `原型 ${ingredients.protagonistArchetype}，主题“${ingredients.focusTheme}”${keywordText}`,
+    `分镜阶段：${stage}，标题“${sceneTitle}”`,
+    `画面内容：${sceneText}`,
+    `不要直接画真实孩子本人，不要照片感，不要复杂背景，不要说教标语${promptHint}`,
+  ].join("，");
+}
+
+function buildSceneAudioScript(sceneTitle: string, sceneText: string) {
+  return `${sceneTitle}。${sceneText}`;
+}
+
+function buildCardScene(ingredients: StoryIngredients): ParentStoryBookScene {
+  const sceneTitle = "把今天轻轻收好";
+  const sceneText = `${ingredients.protagonistName} 把今天那一点点亮光抱进怀里。今晚只做一件小事：${ingredients.tonightAction}。`;
+  return {
+    sceneIndex: 1,
+    sceneTitle,
+    sceneText,
+    imagePrompt: buildSceneImagePrompt("landing", sceneTitle, sceneText, ingredients),
+    imageUrl: "/storybook/card.svg",
+    assetRef: "/storybook/card.svg",
+    imageStatus: "fallback",
+    audioUrl: null,
+    audioRef: "storybook-audio-card",
+    audioScript: buildSceneAudioScript(sceneTitle, sceneText),
+    audioStatus: "fallback",
+    voiceStyle: "gentle-bedtime",
+    highlightSource: "rule",
+    imageCacheHit: false,
+    audioCacheHit: false,
+  };
+}
+
+function selectHighlight(
+  candidates: ParentStoryBookHighlightCandidate[],
+  index: number,
+  fallbackTitle: string,
+  fallbackDetail: string
+) {
+  const candidate = candidates[index] ?? candidates[candidates.length - 1];
+  if (candidate) return candidate;
+  return {
+    kind: "weeklyTrend" as ParentStoryBookHighlightKind,
+    title: fallbackTitle,
+    detail: fallbackDetail,
+    priority: 99,
+    source: "rule",
+  };
+}
+
+function buildStoryScenes(ingredients: StoryIngredients) {
+  if (ingredients.storyMode === "card") {
+    return [buildCardScene(ingredients)];
+  }
+
+  return PAGE_STRUCTURES[ingredients.pageCount].map((stage, index) => {
+    const fallbackDetail =
+      stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight;
+    const highlight = selectHighlight(
+      ingredients.highlightCandidates,
+      index,
+      buildSceneTitle(stage),
+      fallbackDetail
+    );
+    const sceneTitle = buildSceneTitle(stage);
+    const sceneText = buildSceneText(stage, ingredients);
+    return {
+      sceneIndex: index + 1,
+      sceneTitle,
+      sceneText,
+      imagePrompt: buildSceneImagePrompt(stage, sceneTitle, sceneText, ingredients),
+      imageUrl: `/storybook/scene-${Math.min(index + 1, 3)}.svg`,
+      assetRef: `/storybook/scene-${Math.min(index + 1, 3)}.svg`,
+      imageStatus: "fallback",
+      audioUrl: null,
+      audioRef: `storybook-audio-${index + 1}`,
+      audioScript: buildSceneAudioScript(sceneTitle, sceneText),
+      audioStatus: "fallback",
+      voiceStyle: buildSceneVoiceStyle(stage),
+      highlightSource: normalizeText(highlight.source) || highlight.kind,
+      imageCacheHit: false,
+      audioCacheHit: false,
+    } satisfies ParentStoryBookScene;
+  });
+}
+
+function buildStoryTitle(request: ParentStoryBookRequest, ingredients: StoryIngredients) {
+  if (ingredients.generationMode === "manual-theme") {
+    return `关于${ingredients.focusTheme}的成长绘本`;
+  }
+  if (ingredients.generationMode === "hybrid") {
+    return `${ingredients.childName}的${ingredients.focusTheme}成长绘本`;
+  }
+  return `${ingredients.childName}的成长绘本`;
+}
+
+function buildStorySummary(request: ParentStoryBookRequest, ingredients: StoryIngredients) {
+  const pageText = `${ingredients.storyMode === "card" ? 1 : ingredients.pageCount} 页`;
+  if (ingredients.generationMode === "manual-theme") {
+    return `这本 ${pageText} 绘本会把“${ingredients.focusTheme}”讲成孩子能听懂的小故事，并在最后自然落到今晚可以做的一件小事。`;
+  }
+  if (ingredients.generationMode === "hybrid") {
+    return `这本 ${pageText} 绘本把“${ingredients.focusTheme}”和 ${ingredients.childName} 最近被看见的成长线索串成一条温柔、可朗读、可继续行动的成长闭环。`;
+  }
+  return `这本 ${pageText} 绘本会把 ${ingredients.childName} 最近被看见的小进步、今晚的陪伴动作和明天的观察点串成完整的成长故事。`;
+}
+
+function buildRequestSeed(request: ParentStoryBookRequest, ingredients: StoryIngredients) {
+  return [
+    request.childId ?? request.snapshot.child.id ?? "storybook-guest",
+    ingredients.storyMode,
+    ingredients.generationMode,
+    ingredients.pageCount,
+    request.stylePreset ?? DEFAULT_PARENT_STORYBOOK_STYLE_PRESET,
+    ingredients.focusTheme,
+    ingredients.protagonistArchetype,
+    request.goalKeywords?.join("|") ?? "",
+    ingredients.highlightCandidates
+      .map((item) => `${item.kind}:${item.title}:${item.detail}`)
+      .join("|"),
+    request.requestSource ?? "",
+  ].join("::");
+}
+
 export function buildParentStoryBookResponse(
   request: ParentStoryBookRequest,
   options?: {
@@ -516,95 +1092,54 @@ export function buildParentStoryBookResponse(
     fallback?: boolean;
   }
 ): ParentStoryBookResponse {
-  const child = request.snapshot.child;
-  const childName = normalizeText(child.name) || "孩子";
-  const className = normalizeText(child.className) || undefined;
-  const highlightCandidates = request.highlightCandidates
-    .filter((item) => normalizeText(item.detail).length > 0)
-    .sort((left, right) => left.priority - right.priority);
-  const requestedMode = request.storyMode === "auto" ? undefined : request.storyMode;
-  const computedMode = buildStoryMode(child.id, highlightCandidates, request.snapshot);
-  const mode = requestedMode === "card" ? "card" : computedMode;
   const stylePreset = resolveParentStoryBookStylePreset(request.stylePreset);
-  const stylePrompt = normalizeText(request.stylePrompt) || getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
-  const storySeed = [
-    request.childId ?? child.id ?? "guest",
-    mode,
+  const ingredients = buildStoryIngredients({
+    ...request,
     stylePreset,
-    stylePrompt,
-    childName,
-    className ?? "",
-    highlightCandidates.map((item) => `${item.kind}:${item.title}:${item.detail}`).join("|"),
-    normalizeText(request.requestSource ?? ""),
-  ].join("::");
+  });
+  const scenes = buildStoryScenes(ingredients);
+  const storySeed = buildRequestSeed(request, ingredients);
   const storyId = `storybook-${stableHash(storySeed)}`;
   const generatedAt = buildStableTimestamp(storySeed);
-  const parentNote = buildParentNote(childName, mode, highlightCandidates, request.latestInterventionCard, request.latestConsultation);
-  const moral = buildMoral(childName, highlightCandidates);
-  const closingNote =
-    mode === "card"
-      ? "今晚先用一张轻量故事卡收尾，也能把被看见的感觉稳稳留住"
-      : "故事到这里先轻轻停一下，把今天的亮点和安心感一起留给睡前时光";
-  const scenes = buildScenes({
-    childName,
-    className,
-    mode,
-    stylePrompt,
-    highlightCandidates,
-    closingNote,
-    parentNote,
-  });
-  const primaryDetail = pickCandidateDetail(highlightCandidates[0]);
-  const summary = primaryDetail
-    ? `${childName} 的今天，可以用“${primaryDetail}”来概括；这本微绘本会继续把当日亮点、今晚动作和明天观察点串成一个睡前小闭环。`
-    : `${childName} 的今天适合用一张安静的成长卡轻轻收尾，把今晚陪伴动作和明天观察点先收进故事里。`;
-
   const fallbackReason =
     options?.fallbackReason ??
-    (mode === "card"
-      ? requestedMode === "card"
-        ? "card-mode-requested"
-        : "sparse-parent-context"
+    (ingredients.storyMode === "card"
+      ? "sparse-parent-context"
       : "mock-storybook-pipeline");
-  const transport = options?.transport ?? "next-json-fallback";
-  const source = options?.source ?? "rule";
-  const fallback = options?.fallback ?? true;
 
   return {
     storyId,
-    childId: child.id ?? request.childId ?? "unknown-child",
-    mode,
-    title:
-      mode === "card"
-        ? `${childName} 的成长小卡`
-        : `${childName} 的晚安小绘本`,
-    summary,
-    moral,
-    parentNote,
-    source,
-    fallback,
+    childId: request.childId ?? request.snapshot.child.id ?? "storybook-guest",
+    mode: ingredients.storyMode,
+    title: buildStoryTitle(request, ingredients),
+    summary: buildStorySummary(request, ingredients),
+    moral: buildMoral({
+      protagonistName: ingredients.protagonistName,
+      focusTheme: ingredients.focusTheme,
+      summaryHighlight: ingredients.summaryHighlight,
+    }),
+    parentNote: ingredients.parentNote,
+    source: options?.source ?? "rule",
+    fallback: options?.fallback ?? true,
     fallbackReason,
     generatedAt,
     stylePreset,
     providerMeta: {
       provider: "parent-storybook-rule",
       mode: "fallback",
-      transport,
+      transport: options?.transport ?? "next-json-fallback",
       imageProvider: "storybook-asset",
       audioProvider: "storybook-mock-preview",
-      requestSource: request.requestSource ?? "parent-home",
+      stylePreset,
+      requestSource: request.requestSource ?? "parent-storybook-page",
       fallbackReason,
       realProvider: false,
-      highlightCount: highlightCandidates.length,
+      highlightCount: ingredients.highlightCandidates.length,
       sceneCount: scenes.length,
       cacheHitCount: 0,
       cacheWindowSeconds: 0,
     },
-    scenes: scenes.map((scene) => ({
-      ...scene,
-      imageCacheHit: false,
-      audioCacheHit: false,
-    })),
+    scenes,
   };
 }
 

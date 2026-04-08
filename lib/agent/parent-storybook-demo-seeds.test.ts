@@ -111,3 +111,26 @@ test("applyParentStoryBookDemoSeed leaves non-matching child requests unchanged"
 
   assert.deepEqual(seededRequest, request);
 });
+
+test("applyParentStoryBookDemoSeed preserves explicit v2 controls for hybrid requests", () => {
+  const request = {
+    ...buildRequest(),
+    generationMode: "hybrid",
+    manualTheme: "表达情绪",
+    pageCount: 8,
+    goalKeywords: ["表达情绪", "勇气"],
+    protagonistArchetype: "bear",
+  } satisfies ParentStoryBookRequest;
+
+  const seededRequest = applyParentStoryBookDemoSeed(
+    request,
+    "recording-c1-bedtime"
+  );
+
+  assert.equal(seededRequest.generationMode, "hybrid");
+  assert.equal(seededRequest.manualTheme, "表达情绪");
+  assert.equal(seededRequest.pageCount, 8);
+  assert.deepEqual(seededRequest.goalKeywords, ["表达情绪", "勇气"]);
+  assert.equal(seededRequest.protagonistArchetype, "bear");
+  assert.equal(seededRequest.requestSource, request.requestSource);
+});

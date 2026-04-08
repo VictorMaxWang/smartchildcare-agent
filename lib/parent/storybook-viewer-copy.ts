@@ -101,6 +101,9 @@ export function formatStoryBookHighlightSource(source: string) {
   if (source === "interventionCard" || source === "consultationAction") return "今晚动作";
   if (source === "guardianFeedback") return "家长反馈";
   if (source === "weeklyTrend") return "7 天趋势";
+  if (source === "manualTheme") return "主题主线";
+  if (source === "goalKeyword") return "关键词";
+  if (source === "childTrait") return "孩子线索";
   if (source === "rule" || source === "ruleFallback") return "规则兜底";
   return source;
 }

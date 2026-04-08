@@ -96,14 +96,15 @@ class _SceneProvider:
         )
 
 
-def test_parent_storybook_service_returns_three_scene_storybook():
+def test_parent_storybook_service_returns_six_page_storybook_by_default():
     result = asyncio.run(run_parent_storybook(_base_payload()))
 
     assert result["mode"] == "storybook"
     assert result["title"]
     assert result["moral"]
     assert result["parentNote"]
-    assert len(result["scenes"]) == 3
+    assert len(result["scenes"]) == 6
+    assert result["providerMeta"]["sceneCount"] == 6
     assert result["providerMeta"]["imageProvider"] == "storybook-asset"
     assert result["providerMeta"]["audioProvider"] == "storybook-mock-preview"
     assert result["providerMeta"]["mode"] == "fallback"
@@ -222,10 +223,75 @@ def test_parent_storybook_service_reuses_media_cache(monkeypatch):
 
     assert first["providerMeta"]["cacheHitCount"] == 0
     assert second["providerMeta"]["cacheHitCount"] == 0
-    assert image_provider.calls and len(image_provider.calls) == 6
-    assert audio_provider.calls and len(audio_provider.calls) == 6
-    assert len(media_cache._entries) == 3
+    assert image_provider.calls and len(image_provider.calls) == 12
+    assert audio_provider.calls and len(audio_provider.calls) == 12
+    assert len(media_cache._entries) == 6
     assert second["scenes"][0]["imageCacheHit"] is False
     assert second["scenes"][0]["audioCacheHit"] is False
     assert first["scenes"][0]["audioUrl"] == second["scenes"][0]["audioUrl"]
     assert second["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
+
+
+def test_parent_storybook_service_supports_page_count_variants_and_manual_theme_without_child_data():
+    for page_count in (4, 6, 8):
+        payload = {
+            "snapshot": {
+                "child": {},
+                "summary": {
+                    "growth": {"recordCount": 0, "topCategories": []},
+                    "feedback": {"count": 0, "keywords": []},
+                },
+                "ruleFallback": [],
+            },
+            "highlightCandidates": [],
+            "generationMode": "manual-theme",
+            "manualTheme": "独立入睡",
+            "manualPrompt": "把睡前分离讲成轻柔、可朗读的晚安故事。",
+            "pageCount": page_count,
+            "goalKeywords": ["独立入睡", "睡前安抚"],
+            "requestSource": "pytest-manual",
+        }
+
+        result = asyncio.run(run_parent_storybook(payload))
+
+        assert result["mode"] == "storybook"
+        assert result["childId"] == "storybook-guest"
+        assert len(result["scenes"]) == page_count
+        assert result["providerMeta"]["sceneCount"] == page_count
+        assert all(scene["audioScript"] for scene in result["scenes"])
+        assert "独立入睡" in result["summary"]
+        assert "今晚" in result["scenes"][-1]["sceneText"]
+
+
+def test_parent_storybook_service_hybrid_threads_theme_into_story_content():
+    payload = _base_payload()
+    child_detail = "先停一停，再轻轻说出难过。"
+    payload.update(
+        {
+            "generationMode": "hybrid",
+            "manualTheme": "表达情绪",
+            "manualPrompt": "让孩子知道情绪可以被看见，也可以慢慢说出来。",
+            "pageCount": 4,
+            "goalKeywords": ["表达情绪"],
+        }
+    )
+    payload["highlightCandidates"] = [
+        {
+            "kind": "warningSuggestion",
+            "title": "先停一停",
+            "detail": child_detail,
+            "priority": 1,
+            "source": "suggestions",
+        },
+        *payload["highlightCandidates"],
+    ]
+
+    result = asyncio.run(run_parent_storybook(payload))
+
+    assert result["mode"] == "storybook"
+    assert len(result["scenes"]) == 4
+    assert any("表达情绪" in scene["sceneText"] for scene in result["scenes"])
+    assert any(child_detail in scene["sceneText"] for scene in result["scenes"])
+    assert any("表达情绪" in scene["imagePrompt"] for scene in result["scenes"])
+    assert any(child_detail in scene["imagePrompt"] for scene in result["scenes"])
+    assert any("表达情绪" in scene["audioScript"] for scene in result["scenes"])

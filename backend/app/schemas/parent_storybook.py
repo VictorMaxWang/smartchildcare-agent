@@ -15,6 +15,8 @@ ParentStoryBookMode = Literal["storybook", "card"]
 ParentStoryBookRequestMode = Literal["storybook", "card", "auto"]
 ParentStoryBookResultSource = Literal["ai", "fallback", "mock", "rule", "vivo"]
 ParentStoryBookMediaStatus = Literal["ready", "mock", "fallback", "empty"]
+ParentStoryBookGenerationMode = Literal["child-personalized", "manual-theme", "hybrid"]
+ParentStoryBookPageCount = Literal[4, 6, 8]
 ParentStoryBookStylePreset = Literal["sunrise-watercolor", "moonlit-cutout", "forest-crayon"]
 ParentStoryBookHighlightKind = Literal[
     "todayGrowth",
@@ -23,6 +25,9 @@ ParentStoryBookHighlightKind = Literal[
     "consultationAction",
     "guardianFeedback",
     "weeklyTrend",
+    "manualTheme",
+    "goalKeyword",
+    "childTrait",
 ]
 
 
@@ -77,6 +82,30 @@ class ParentStoryBookRequest(ParentStoryBookModel):
     story_mode: ParentStoryBookRequestMode | None = Field(
         default=None,
         validation_alias=AliasChoices("storyMode", "story_mode"),
+    )
+    generation_mode: ParentStoryBookGenerationMode | None = Field(
+        default=None,
+        validation_alias=AliasChoices("generationMode", "generation_mode"),
+    )
+    manual_theme: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("manualTheme", "manual_theme"),
+    )
+    manual_prompt: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("manualPrompt", "manual_prompt"),
+    )
+    page_count: ParentStoryBookPageCount | None = Field(
+        default=None,
+        validation_alias=AliasChoices("pageCount", "page_count"),
+    )
+    goal_keywords: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("goalKeywords", "goal_keywords"),
+    )
+    protagonist_archetype: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("protagonistArchetype", "protagonist_archetype"),
     )
     request_source: str | None = Field(
         default=None,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from app.core.config import get_settings
 from app.providers.story_audio_provider import MockStoryAudioProvider, resolve_story_audio_provider
@@ -11,12 +11,40 @@ from app.providers.story_image_provider import MockStoryImageProvider, resolve_s
 from app.services.storybook_media_cache import get_storybook_media_cache
 
 DEFAULT_STYLE_PRESET = "sunrise-watercolor"
-STYLE_PRESET_PROMPTS = {
-    "sunrise-watercolor": "晨光水彩儿童绘本风，暖金高光，纸面晕染，柔和治愈。",
-    "moonlit-cutout": "月夜剪纸儿童绘本风，静蓝夜色，奶白层叠，像立体纸艺舞台。",
-    "forest-crayon": "森林蜡笔儿童绘本风，浅绿木色，明显手绘蜡笔纹理，活泼但温和。",
-}
+DEFAULT_GENERATION_MODE = "child-personalized"
+DEFAULT_PAGE_COUNT = 6
+STORYBOOK_FOCUS_FALLBACK = "慢慢长大的力量"
 PROVIDER_CACHE_WINDOW_SECONDS = 15 * 60
+STYLE_PRESET_PROMPTS = {
+    "sunrise-watercolor": "儿童绘本插画，晨光水彩质感，暖金高光，柔软纸张肌理，治愈、童趣、适合移动端纵向绘本。",
+    "moonlit-cutout": "儿童绘本插画，月夜剪纸风格，深蓝与奶白层叠，星光柔雾，安静、轻柔、适合晚安故事。",
+    "forest-crayon": "儿童绘本插画，森林蜡笔风格，浅绿与木色，明显手绘纹理，轻冒险感，温暖而有生命力。",
+}
+PAGE_STRUCTURES: dict[int, list[str]] = {
+    4: ["opening", "challenge", "attempt", "landing"],
+    6: ["opening", "challenge", "support", "attempt", "small-success", "landing"],
+    8: [
+        "opening",
+        "setup",
+        "challenge",
+        "support",
+        "attempt",
+        "wobble",
+        "small-success",
+        "landing",
+    ],
+}
+PROTAGONISTS = [
+    {"archetype": "bunny", "label": "小兔团团", "visual_cue": "圆圆耳朵、软软围巾"},
+    {"archetype": "bear", "label": "小熊暖暖", "visual_cue": "毛绒外套、小小灯笼"},
+    {"archetype": "deer", "label": "小鹿悠悠", "visual_cue": "细长步子、月光披风"},
+    {"archetype": "fox", "label": "小狐狸点点", "visual_cue": "蓬松尾巴、暖橙小背包"},
+    {"archetype": "otter", "label": "小水獭泡泡", "visual_cue": "亮晶晶眼睛、柔软披肩"},
+]
+STORYBOOK_BASE_DATE = datetime(2026, 4, 7, 12, 0, 0, tzinfo=UTC)
+
+StoryMode = Literal["storybook", "card"]
+GenerationMode = Literal["child-personalized", "manual-theme", "hybrid"]
 
 
 def _payload_get(payload: dict[str, Any], *keys: str) -> Any:
@@ -36,14 +64,64 @@ def _normalize_text(value: Any) -> str:
     return " ".join(_coerce_text(value).split())
 
 
+def _normalize_keywords(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _normalize_text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result[:4]
+
+
 def _stable_hash(seed: str, *, length: int = 12) -> str:
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:length]
 
 
 def _stable_timestamp(seed: str) -> str:
-    base = datetime(2026, 4, 7, 12, 0, 0, tzinfo=UTC)
     offset_seconds = int(_stable_hash(seed), 16) % (24 * 60 * 60)
-    return (base + timedelta(seconds=offset_seconds)).isoformat().replace("+00:00", "Z")
+    return (STORYBOOK_BASE_DATE + timedelta(seconds=offset_seconds)).isoformat().replace("+00:00", "Z")
+
+
+def _resolve_style_preset(payload: dict[str, Any]) -> str:
+    requested = _normalize_text(_payload_get(payload, "stylePreset", "style_preset"))
+    if requested in STYLE_PRESET_PROMPTS:
+        return requested
+    return DEFAULT_STYLE_PRESET
+
+
+def _resolve_style_prompt(payload: dict[str, Any], style_preset: str) -> str:
+    explicit = _normalize_text(_payload_get(payload, "stylePrompt", "style_prompt"))
+    if explicit:
+        return explicit
+    return STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET])
+
+
+def _resolve_generation_mode(payload: dict[str, Any]) -> GenerationMode:
+    requested = _normalize_text(_payload_get(payload, "generationMode", "generation_mode"))
+    if requested in {"child-personalized", "manual-theme", "hybrid"}:
+        return requested  # type: ignore[return-value]
+
+    manual_theme = _normalize_text(_payload_get(payload, "manualTheme", "manual_theme"))
+    snapshot = _payload_get(payload, "snapshot")
+    child = snapshot.get("child") if isinstance(snapshot, dict) else {}
+    has_child = isinstance(child, dict) and bool(_normalize_text(child.get("id")))
+    if manual_theme and has_child:
+        return "hybrid"
+    if manual_theme:
+        return "manual-theme"
+    return "child-personalized"
+
+
+def _resolve_page_count(payload: dict[str, Any]) -> int:
+    value = _payload_get(payload, "pageCount", "page_count")
+    if value in {4, 6, 8}:
+        return int(value)
+    return DEFAULT_PAGE_COUNT
 
 
 def _build_fallback_highlights(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -67,12 +145,12 @@ def _build_fallback_highlights(snapshot: dict[str, Any]) -> list[dict[str, Any]]
                 "source": "ruleFallback",
             }
         )
-        if len(results) >= 3:
+        if len(results) >= 4:
             break
     return results
 
 
-def _normalize_highlights(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _normalize_payload_highlights(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raw_items = _payload_get(payload, "highlightCandidates", "highlight_candidates")
     results: list[dict[str, Any]] = []
 
@@ -108,71 +186,92 @@ def _normalize_highlights(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _normalize_card(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _build_theme_highlights(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    manual_theme = _normalize_text(_payload_get(payload, "manualTheme", "manual_theme"))
+    manual_prompt = _normalize_text(_payload_get(payload, "manualPrompt", "manual_prompt"))
+    goal_keywords = _normalize_keywords(_payload_get(payload, "goalKeywords", "goal_keywords"))
+
+    results: list[dict[str, Any]] = []
+    if manual_theme:
+        results.append(
+            {
+                "kind": "manualTheme",
+                "title": f"主题：{manual_theme}",
+                "detail": manual_prompt
+                or f"把“{manual_theme}”讲成孩子能听懂、家长愿意读、今晚就能用上的成长故事。",
+                "priority": 1,
+                "source": "manualTheme",
+            }
+        )
+
+    for index, keyword in enumerate(goal_keywords, start=2):
+        results.append(
+            {
+                "kind": "goalKeyword",
+                "title": f"关键词：{keyword}",
+                "detail": f"故事会把“{keyword}”落到一个能被孩子感受到的小动作里。",
+                "priority": index,
+                "source": "goalKeyword",
+            }
+        )
+
+    if not results and manual_prompt:
+        results.append(
+            {
+                "kind": "manualTheme",
+                "title": "主题设定",
+                "detail": manual_prompt,
+                "priority": 1,
+                "source": "manualTheme",
+            }
+        )
+
+    return results
 
 
-def _memory_prompt_context(payload: dict[str, Any]) -> dict[str, list[str]]:
-    memory_context = _payload_get(payload, "memoryContext", "memory_context")
-    if not isinstance(memory_context, dict):
-        return {
-            "longTermTraits": [],
-            "recentContinuitySignals": [],
-            "lastConsultationTakeaways": [],
-            "openLoops": [],
-        }
-
-    prompt_context = memory_context.get("promptContext")
-    if not isinstance(prompt_context, dict):
-        prompt_context = memory_context.get("prompt_context")
-    if not isinstance(prompt_context, dict):
-        return {
-            "longTermTraits": [],
-            "recentContinuitySignals": [],
-            "lastConsultationTakeaways": [],
-            "openLoops": [],
-        }
-
-    result: dict[str, list[str]] = {}
-    for key in ("longTermTraits", "recentContinuitySignals", "lastConsultationTakeaways", "openLoops"):
-        value = prompt_context.get(key)
-        if value is None:
-            snake_key = "".join([f"_{char.lower()}" if char.isupper() else char for char in key]).lstrip("_")
-            value = prompt_context.get(snake_key)
-        if isinstance(value, list):
-            result[key] = [_normalize_text(item) for item in value if _normalize_text(item)]
-        else:
-            result[key] = []
-    return result
+def _dedupe_highlights(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for item in items:
+        key = "::".join(
+            [
+                _normalize_text(item.get("kind")),
+                _normalize_text(item.get("title")),
+                _normalize_text(item.get("detail")),
+            ]
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
-def _resolve_style_preset(payload: dict[str, Any]) -> str:
-    requested = _normalize_text(_payload_get(payload, "stylePreset", "style_preset"))
-    if requested in STYLE_PRESET_PROMPTS:
-        return requested
-    return DEFAULT_STYLE_PRESET
+def _build_highlights(payload: dict[str, Any], generation_mode: GenerationMode) -> list[dict[str, Any]]:
+    base_highlights = _normalize_payload_highlights(payload)
+    theme_highlights = _build_theme_highlights(payload)
+    if generation_mode == "manual-theme":
+        return _dedupe_highlights(theme_highlights or base_highlights)
+    if generation_mode == "hybrid":
+        return _dedupe_highlights([*theme_highlights, *base_highlights])
+    return _dedupe_highlights(base_highlights or theme_highlights)
 
 
-def _resolve_style_prompt(payload: dict[str, Any], style_preset: str) -> str:
-    explicit = _normalize_text(_payload_get(payload, "stylePrompt", "style_prompt"))
-    if explicit:
-        return explicit
-    return STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET])
-
-
-def _build_story_mode(payload: dict[str, Any], highlights: list[dict[str, Any]]) -> str:
-    snapshot = _payload_get(payload, "snapshot")
-    child = snapshot.get("child") if isinstance(snapshot, dict) else {}
-    child_id = child.get("id") if isinstance(child, dict) else None
+def _resolve_story_mode(
+    *,
+    payload: dict[str, Any],
+    generation_mode: GenerationMode,
+    highlights: list[dict[str, Any]],
+    snapshot: dict[str, Any],
+) -> StoryMode:
+    requested_mode = _coerce_text(_payload_get(payload, "storyMode", "story_mode"))
+    if requested_mode == "card":
+        return "card"
+    if generation_mode in {"manual-theme", "hybrid"}:
+        return "storybook"
     summary = snapshot.get("summary") if isinstance(snapshot, dict) else {}
     growth = summary.get("growth") if isinstance(summary, dict) else {}
     feedback = summary.get("feedback") if isinstance(summary, dict) else {}
-    requested_mode = _coerce_text(_payload_get(payload, "storyMode", "story_mode"))
-
-    if requested_mode == "card":
-        return "card"
-    if not _coerce_text(child_id):
-        return "card"
     if not highlights:
         return "card"
     if int(growth.get("recordCount") or 0) == 0 and int(feedback.get("count") or 0) == 0:
@@ -180,144 +279,378 @@ def _build_story_mode(payload: dict[str, Any], highlights: list[dict[str, Any]])
     return "storybook"
 
 
-def _build_parent_note(
-    child_name: str,
-    mode: str,
+def _resolve_focus_theme(
+    *,
+    payload: dict[str, Any],
+    snapshot: dict[str, Any],
     highlights: list[dict[str, Any]],
-    latest_intervention_card: dict[str, Any],
-    latest_consultation: dict[str, Any],
 ) -> str:
-    if mode == "card":
-        return f"今晚先读一张轻量成长故事卡，再把 {child_name} 今天最值得继续陪伴的一幕轻轻说给孩子听。"
-
-    action = (
-        _normalize_text(latest_intervention_card.get("tonightHomeAction"))
-        or _normalize_text(latest_consultation.get("homeAction"))
-        or _normalize_text(latest_consultation.get("summary"))
-        or (highlights[1]["detail"] if len(highlights) > 1 else "")
+    summary = snapshot.get("summary") if isinstance(snapshot, dict) else {}
+    growth = summary.get("growth") if isinstance(summary, dict) else {}
+    feedback = summary.get("feedback") if isinstance(summary, dict) else {}
+    top_categories = growth.get("topCategories") if isinstance(growth, dict) else []
+    feedback_keywords = feedback.get("keywords") if isinstance(feedback, dict) else []
+    first_category = top_categories[0].get("category") if isinstance(top_categories, list) and top_categories and isinstance(top_categories[0], dict) else ""
+    first_keyword = feedback_keywords[0] if isinstance(feedback_keywords, list) and feedback_keywords else ""
+    return (
+        _normalize_text(_payload_get(payload, "manualTheme", "manual_theme"))
+        or (_normalize_keywords(_payload_get(payload, "goalKeywords", "goal_keywords")) or [""])[0]
+        or _normalize_text(first_category)
+        or _normalize_text(first_keyword)
+        or _normalize_text(highlights[0].get("title") if highlights else "")
+        or STORYBOOK_FOCUS_FALLBACK
     )
-    if action:
-        return f"听完故事后，今晚只做一件小事：{action} 不用催快，也不追求一次做到，只要陪着孩子把这一小步走稳。"
-    return f"听完故事后，和 {child_name} 一起回顾今天最亮的一幕，让情绪轻一点收尾。"
 
 
-def _build_moral(child_name: str, highlights: list[dict[str, Any]]) -> str:
-    primary = highlights[0]["detail"] if highlights else f"{child_name} 又向前走了一小步"
-    return f"孩子真正会记住的，不是被要求快一点，而是有人看见了 {primary}，也愿意陪他把这一小步走稳。"
+def _shorten_detail(value: str, fallback: str) -> str:
+    normalized = _normalize_text(value) or fallback
+    if len(normalized) <= 38:
+        return normalized
+    return f"{normalized[:38]}…"
 
 
-def _build_scene_script(
-    index: int,
-    child_name: str,
-    class_name: str,
-    highlights: list[dict[str, Any]],
-    memory_hint: str,
-) -> tuple[str, str]:
-    primary = highlights[index]["detail"] if index < len(highlights) else highlights[-1]["detail"]
-    next_detail = highlights[index + 1]["detail"] if index + 1 < len(highlights) else memory_hint
+def _resolve_protagonist(payload: dict[str, Any], *, focus_theme: str, child_name: str, child_hints: list[str]) -> dict[str, str]:
+    requested = _normalize_text(_payload_get(payload, "protagonistArchetype", "protagonist_archetype"))
+    for protagonist in PROTAGONISTS:
+        if protagonist["archetype"] == requested:
+            return protagonist
 
-    if index == 0:
-        title = "今天被看见的小进步"
-        text = f"{child_name}{f' 在 {class_name}' if class_name else ''} 今天被看见的一幕，是：{primary}。老师先把这份小进步轻轻收好，让它不只停在白天，也能陪孩子一起回家。"
-    elif index == 1:
-        title = "老师和家长陪着慢慢来"
-        support = next_detail or "老师和家人的稳定陪伴，让这份努力更容易发生。"
-        text = f"第二幕里，大人没有催快，只是顺着 {child_name} 今天的节奏继续陪着走。{support} 当孩子被稳稳接住时，原来有点难的事，也会慢慢变得愿意再试一次。"
-    else:
-        title = "今晚只做一件小事"
-        closing = next_detail or "明天再回头看，会发现成长就是这样一点点长出来的。"
-        text = f"到了晚上，这份小进步慢慢变成一则可以带回家的晚安故事。今晚先只做一件小事，再把观察点留给明天。{closing}"
-
-    return title, text
+    seed = "::".join([requested, focus_theme, child_name, "|".join(child_hints)])
+    index = int(_stable_hash(seed, length=4), 16) % len(PROTAGONISTS)
+    return PROTAGONISTS[index]
 
 
-def _build_scene_voice_style(index: int) -> str:
-    if index >= 2:
+def _build_parent_note(*, child_name: str, story_mode: StoryMode, tonight_action: str, tomorrow_observation: str, generation_mode: GenerationMode) -> str:
+    if story_mode == "card":
+        return f"{child_name} 今晚先用一张轻量成长卡收束情绪，再把最亮的一点小进步说给孩子听。"
+    if generation_mode == "manual-theme":
+        return f"今晚可以先试一件小事：{tonight_action}。明天继续观察：{tomorrow_observation}。"
+    return f"{child_name} 今晚可以先试一件小事：{tonight_action}。明天继续观察：{tomorrow_observation}。"
+
+
+def _build_moral(*, protagonist_name: str, focus_theme: str, summary_highlight: str) -> str:
+    return (
+        f"{protagonist_name} 记住的，不是“要快一点”，而是“原来我可以慢慢学会 {focus_theme}”。"
+        f"那些被看见的 {summary_highlight}，会一点点变成真正的力量。"
+    )
+
+
+def _build_story_ingredients(payload: dict[str, Any], snapshot: dict[str, Any], child: dict[str, Any], highlights: list[dict[str, Any]]) -> dict[str, Any]:
+    generation_mode = _resolve_generation_mode(payload)
+    focus_theme = _resolve_focus_theme(payload=payload, snapshot=snapshot, highlights=highlights)
+    child_name = _normalize_text(child.get("name")) or "小朋友"
+    class_name = _normalize_text(child.get("className")) or None
+    consultation = _payload_get(payload, "latestConsultation", "latest_consultation")
+    consultation_summary = _normalize_text(consultation.get("summary")) if isinstance(consultation, dict) else ""
+    consultation_home_action = _normalize_text(consultation.get("homeAction")) if isinstance(consultation, dict) else ""
+    consultation_followup = ""
+    if isinstance(consultation, dict):
+        followup_items = consultation.get("followUp48h")
+        if isinstance(followup_items, list) and followup_items:
+            consultation_followup = _normalize_text(followup_items[0])
+
+    intervention = _payload_get(payload, "latestInterventionCard", "latest_intervention_card")
+    intervention_action = _normalize_text(intervention.get("tonightHomeAction")) if isinstance(intervention, dict) else ""
+    intervention_observation = _normalize_text(intervention.get("tomorrowObservationPoint")) if isinstance(intervention, dict) else ""
+    intervention_review = _normalize_text(intervention.get("reviewIn48h")) if isinstance(intervention, dict) else ""
+
+    summary_highlight = _shorten_detail(
+        _normalize_text(highlights[0].get("detail") if highlights else ""),
+        "被轻轻看见的小进步",
+    )
+    support_detail = _shorten_detail(
+        next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") in {"consultationAction", "guardianFeedback"}
+                and _normalize_text(item.get("detail"))
+            ),
+            consultation_summary or "大人把节奏放慢一点，先接住情绪，再陪它继续往前。",
+        ),
+        "大人把节奏放慢一点，先接住情绪，再陪它继续往前。",
+    )
+    attempt_detail = _shorten_detail(
+        next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") in {"warningSuggestion", "consultationSummary"}
+                and _normalize_text(item.get("detail"))
+            ),
+            _normalize_text(highlights[1].get("detail")) if len(highlights) > 1 else "",
+        ),
+        "先试一个小动作，再把脚步放稳。",
+    )
+    success_detail = _shorten_detail(
+        next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") in {"todayGrowth", "guardianFeedback"}
+                and _normalize_text(item.get("detail"))
+            ),
+            _normalize_text(highlights[2].get("detail")) if len(highlights) > 2 else "",
+        ),
+        "原来一点点靠近，也是在认真长大。",
+    )
+    challenge_detail = _shorten_detail(
+        next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") == "warningSuggestion" and _normalize_text(item.get("detail"))
+            ),
+            _normalize_text(highlights[0].get("detail")) if highlights else "",
+        )
+        or _normalize_text(_payload_get(payload, "manualPrompt", "manual_prompt")),
+        "面对新的小关卡时，心里还是会轻轻打鼓。",
+    )
+    wobble_detail = _shorten_detail(
+        next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") == "weeklyTrend" and _normalize_text(item.get("detail"))
+            ),
+            consultation_summary or _normalize_text(_payload_get(payload, "manualPrompt", "manual_prompt")),
+        ),
+        "有一点摇晃很正常，停一停，再出发就好。",
+    )
+    tonight_action = (
+        intervention_action
+        or consultation_home_action
+        or next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") == "consultationAction" and _normalize_text(item.get("detail"))
+            ),
+            "",
+        )
+        or f"和孩子一起做一个关于“{focus_theme}”的小练习"
+    )
+    tomorrow_observation = (
+        intervention_observation
+        or intervention_review
+        or consultation_followup
+        or next(
+            (
+                _normalize_text(item.get("detail"))
+                for item in highlights
+                if item.get("kind") == "weeklyTrend" and _normalize_text(item.get("detail"))
+            ),
+            "",
+        )
+        or f"明天再看看孩子遇到“{focus_theme}”时会不会更从容一点"
+    )
+    child_hints = [
+        _normalize_text(child.get("specialNotes")),
+        _normalize_text(highlights[0].get("title") if highlights else ""),
+    ]
+    protagonist = _resolve_protagonist(
+        payload,
+        focus_theme=focus_theme,
+        child_name=child_name,
+        child_hints=[item for item in child_hints if item],
+    )
+    story_mode = _resolve_story_mode(
+        payload=payload,
+        generation_mode=generation_mode,
+        highlights=highlights,
+        snapshot=snapshot,
+    )
+    parent_note = _build_parent_note(
+        child_name=child_name,
+        story_mode=story_mode,
+        tonight_action=tonight_action,
+        tomorrow_observation=tomorrow_observation,
+        generation_mode=generation_mode,
+    )
+    return {
+        "child_name": child_name,
+        "class_name": class_name,
+        "focus_theme": focus_theme,
+        "goal_keywords": _normalize_keywords(_payload_get(payload, "goalKeywords", "goal_keywords")),
+        "protagonist": protagonist,
+        "generation_mode": generation_mode,
+        "page_count": _resolve_page_count(payload),
+        "highlights": highlights,
+        "summary_highlight": summary_highlight,
+        "challenge_detail": challenge_detail,
+        "support_detail": support_detail,
+        "attempt_detail": attempt_detail,
+        "success_detail": success_detail,
+        "wobble_detail": wobble_detail,
+        "tonight_action": tonight_action,
+        "tomorrow_observation": tomorrow_observation,
+        "prompt_hint": _normalize_text(_payload_get(payload, "manualPrompt", "manual_prompt")),
+        "parent_note": parent_note,
+        "style_prompt": _resolve_style_prompt(payload, _resolve_style_preset(payload)),
+        "story_mode": story_mode,
+    }
+
+
+def _build_scene_title(stage: str) -> str:
+    return {
+        "opening": "月光翻开第一页",
+        "setup": "小脚步在路上",
+        "challenge": "遇到一点点难",
+        "support": "有人轻轻托住它",
+        "attempt": "它决定再试一下",
+        "wobble": "风吹来时先停一停",
+        "small-success": "小小光亮出现了",
+        "landing": "把温柔带回今晚",
+    }[stage]
+
+
+def _build_scene_text(stage: str, ingredients: dict[str, Any]) -> str:
+    protagonist_name = ingredients["protagonist"]["label"]
+    focus_theme = ingredients["focus_theme"]
+    if stage == "opening":
+        return f"{protagonist_name} 今天想练习“{focus_theme}”。白天里，它已经悄悄做到了一点点：{ingredients['summary_highlight']}。"
+    if stage == "setup":
+        return f"它没有一下子就变得很厉害，而是先听一听、停一停，再把脚步放轻。{protagonist_name} 知道，慢慢来也是一种本事。"
+    if stage == "challenge":
+        return f"可当新的小关卡出现时，{protagonist_name} 还是会有点犹豫。{ingredients['challenge_detail']}"
+    if stage == "support":
+        return f"这时，老师和家长没有催它，只把声音放轻、把节奏放慢。{ingredients['support_detail']}"
+    if stage == "attempt":
+        return f"{protagonist_name} 先做了一个最小的动作，再试一次。{ingredients['attempt_detail']}"
+    if stage == "wobble":
+        return f"中间也会有一点摇晃，但那不是退步。{ingredients['wobble_detail']}"
+    if stage == "small-success":
+        return f"慢慢地，{protagonist_name} 发现自己真的做到了。{ingredients['success_detail']}"
+    if ingredients["generation_mode"] == "manual-theme":
+        return f"今晚，只要先做一件小事：{ingredients['tonight_action']}。明天，再一起看看{ingredients['tomorrow_observation']}。"
+    return f"把这份小小的力量带回今晚吧：{ingredients['tonight_action']}。明天，再一起看看{ingredients['tomorrow_observation']}。"
+
+
+def _build_scene_voice_style(stage: str) -> str:
+    if stage == "landing":
         return "gentle-bedtime"
-    if index == 1:
+    if stage in {"challenge", "wobble"}:
         return "warm-storytelling"
     return "calm-encouraging"
 
 
-def _build_scene_image_prompt(
-    *,
-    child_name: str,
-    class_name: str | None,
-    scene_title: str,
-    scene_text: str,
-    style_prompt: str,
-) -> str:
-    parts = [style_prompt]
-    parts.append(
-        f"儿童绘本插图，主角是{child_name}"
-        f"{f'，场景为{class_name}' if class_name else ''}，"
-        f"分镜标题“{scene_title}”，"
-        f"核心文案“{scene_text[:90]}”，"
-        "适合移动端家长睡前阅读，情绪温柔、清晰、可录屏展示。"
+def _build_scene_image_prompt(stage: str, scene_title: str, scene_text: str, ingredients: dict[str, Any]) -> str:
+    keyword_text = (
+        f"，关键词：{'、'.join(ingredients['goal_keywords'])}"
+        if ingredients["goal_keywords"]
+        else ""
     )
-    return " ".join(part for part in parts if part)
+    prompt_hint = f"，补充要求：{ingredients['prompt_hint']}" if ingredients["prompt_hint"] else ""
+    return "，".join(
+        [
+            ingredients["style_prompt"],
+            f"儿童绘本插画，移动端纵向大画幅，拟人小动物主角“{ingredients['protagonist']['label']}”",
+            f"原型 {ingredients['protagonist']['archetype']}，主题“{ingredients['focus_theme']}”{keyword_text}",
+            f"分镜阶段：{stage}，标题“{scene_title}”",
+            f"画面内容：{scene_text}",
+            f"不要直接画真实孩子本人，不要照片感，不要复杂背景，不要说教标语{prompt_hint}",
+        ]
+    )
 
 
-def _build_scene_audio_script(
-    *,
-    child_name: str,
-    scene_index: int,
-    scene_title: str,
-    scene_text: str,
-) -> str:
-    return f"{child_name} 的第 {scene_index + 1} 幕：{scene_title}。{scene_text[:110]}".strip()
+def _build_scene_audio_script(scene_title: str, scene_text: str) -> str:
+    return f"{scene_title}。{scene_text}"
 
 
-def _scene_blueprint(
-    *,
-    index: int,
-    scene_total: int,
-    story_id: str,
-    child_id: str,
-    child_name: str,
-    class_name: str | None,
-    highlights: list[dict[str, Any]],
-    memory_hint: str,
-    parent_note: str,
-    style_prompt: str,
-) -> dict[str, Any]:
-    scene_title, base_scene_text = _build_scene_script(index, child_name, class_name or "", highlights, memory_hint)
-    scene_text = base_scene_text if index < scene_total - 1 else f"{base_scene_text} {parent_note}"
-    highlight = highlights[min(index, len(highlights) - 1)]
-
+def _build_card_scene(ingredients: dict[str, Any]) -> dict[str, Any]:
+    scene_title = "把今天轻轻收好"
+    scene_text = (
+        f"{ingredients['protagonist']['label']} 把今天那一点点亮光抱进怀里。"
+        f"今晚只做一件小事：{ingredients['tonight_action']}。"
+    )
     return {
-        "story_id": story_id,
-        "child_id": child_id,
-        "scene_index": index,
-        "scene_title": scene_title,
-        "scene_text": scene_text,
-        "base_scene_text": base_scene_text,
-        "voice_style": _build_scene_voice_style(index),
-        "image_prompt": _build_scene_image_prompt(
-            child_name=child_name,
-            class_name=class_name,
-            scene_title=scene_title,
-            scene_text=base_scene_text,
-            style_prompt=style_prompt,
-        ),
-        "audio_script": _build_scene_audio_script(
-            child_name=child_name,
-            scene_index=index,
-            scene_title=scene_title,
-            scene_text=base_scene_text,
-        ),
-        "highlight_source": _normalize_text(highlight.get("source"))
-        or _normalize_text(highlight.get("kind"))
-        or "highlight",
+        "sceneIndex": 1,
+        "sceneTitle": scene_title,
+        "sceneText": scene_text,
+        "imagePrompt": _build_scene_image_prompt("landing", scene_title, scene_text, ingredients),
+        "imageUrl": "/storybook/card.svg",
+        "assetRef": "/storybook/card.svg",
+        "imageStatus": "fallback",
+        "audioUrl": None,
+        "audioRef": "storybook-audio-card",
+        "audioScript": _build_scene_audio_script(scene_title, scene_text),
+        "audioStatus": "fallback",
+        "voiceStyle": "gentle-bedtime",
+        "highlightSource": "rule",
+        "imageCacheHit": False,
+        "audioCacheHit": False,
     }
 
 
-def _render_with_fallback(
-    *,
-    primary_provider: Any,
-    fallback_provider: Any,
-    kwargs: dict[str, Any],
-) -> Any:
+def _build_story_scenes(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
+    if ingredients["story_mode"] == "card":
+        return [_build_card_scene(ingredients)]
+
+    scenes: list[dict[str, Any]] = []
+    for index, stage in enumerate(PAGE_STRUCTURES[ingredients["page_count"]]):
+        highlight = ingredients["highlights"][index] if index < len(ingredients["highlights"]) else None
+        scene_title = _build_scene_title(stage)
+        scene_text = _build_scene_text(stage, ingredients)
+        scenes.append(
+            {
+                "sceneIndex": index + 1,
+                "sceneTitle": scene_title,
+                "sceneText": scene_text,
+                "imagePrompt": _build_scene_image_prompt(stage, scene_title, scene_text, ingredients),
+                "imageUrl": f"/storybook/scene-{min(index + 1, 3)}.svg",
+                "assetRef": f"/storybook/scene-{min(index + 1, 3)}.svg",
+                "imageStatus": "fallback",
+                "audioUrl": None,
+                "audioRef": f"storybook-audio-{index + 1}",
+                "audioScript": _build_scene_audio_script(scene_title, scene_text),
+                "audioStatus": "fallback",
+                "voiceStyle": _build_scene_voice_style(stage),
+                "highlightSource": _normalize_text(highlight.get("source")) if isinstance(highlight, dict) else "rule",
+                "imageCacheHit": False,
+                "audioCacheHit": False,
+            }
+        )
+    return scenes
+
+
+def _build_story_title(generation_mode: GenerationMode, *, child_name: str, focus_theme: str) -> str:
+    if generation_mode == "manual-theme":
+        return f"关于{focus_theme}的成长绘本"
+    if generation_mode == "hybrid":
+        return f"{child_name}的{focus_theme}成长绘本"
+    return f"{child_name}的成长绘本"
+
+
+def _build_story_summary(generation_mode: GenerationMode, story_mode: StoryMode, *, child_name: str, focus_theme: str, page_count: int) -> str:
+    page_text = f"{1 if story_mode == 'card' else page_count} 页"
+    if generation_mode == "manual-theme":
+        return f"这本 {page_text} 绘本会把“{focus_theme}”讲成孩子能听懂的小故事，并在最后自然落到今晚可以做的一件小事。"
+    if generation_mode == "hybrid":
+        return f"这本 {page_text} 绘本把“{focus_theme}”和 {child_name} 最近被看见的成长线索串成一条温柔、可朗读、可继续行动的成长闭环。"
+    return f"这本 {page_text} 绘本会把 {child_name} 最近被看见的小进步、今晚的陪伴动作和明天的观察点串成完整的成长故事。"
+
+
+def _build_story_seed(payload: dict[str, Any], ingredients: dict[str, Any], child_id: str) -> str:
+    return "::".join(
+        [
+            child_id or "storybook-guest",
+            ingredients["story_mode"],
+            ingredients["generation_mode"],
+            str(ingredients["page_count"]),
+            _resolve_style_preset(payload),
+            ingredients["focus_theme"],
+            ingredients["protagonist"]["archetype"],
+            "|".join(ingredients["goal_keywords"]),
+            "|".join(
+                f"{item.get('kind')}:{item.get('title')}:{item.get('detail')}"
+                for item in ingredients["highlights"]
+            ),
+            _normalize_text(_payload_get(payload, "requestSource", "request_source")),
+        ]
+    )
+
+
+def _render_with_fallback(*, primary_provider: Any, fallback_provider: Any, kwargs: dict[str, Any]) -> Any:
     if primary_provider.__class__ is fallback_provider.__class__:
         return primary_provider.render_scene(**kwargs)
     try:
@@ -334,13 +667,7 @@ def _provider_mode_from_scenes(scenes: list[dict[str, Any]]) -> str:
     return "fallback"
 
 
-def _provider_label(
-    *,
-    primary_name: str,
-    fallback_name: str,
-    scenes: list[dict[str, Any]],
-    status_key: str,
-) -> str:
+def _provider_label(*, primary_name: str, fallback_name: str, scenes: list[dict[str, Any]], status_key: str) -> str:
     ready = any(scene[status_key] == "ready" for scene in scenes)
     fallback = any(scene[status_key] != "ready" for scene in scenes)
     if ready and fallback and primary_name != fallback_name:
@@ -355,21 +682,11 @@ def _build_media_key(*, story_id: str, scene_index: int, audio_script: str) -> s
     return f"storybook-media-{_stable_hash(seed, length=16)}"
 
 
-def _maybe_store_audio_asset(
-    *,
-    story_id: str,
-    scene_index: int,
-    audio_script: str,
-    voice_style: str,
-    audio_status: str,
-    audio_result: Any,
-) -> tuple[str | None, str | None]:
+def _maybe_store_audio_asset(*, story_id: str, scene_index: int, audio_script: str, voice_style: str, audio_status: str, audio_result: Any) -> tuple[str | None, str | None]:
     audio_url = audio_result.output.get("audioUrl")
-    audio_ref = _coerce_text(audio_result.output.get("audioRef")) or None
-
+    audio_ref = _normalize_text(audio_result.output.get("audioRef")) or None
     if audio_status != "ready":
         return audio_url, audio_ref
-
     audio_bytes = audio_result.output.get("audioBytes")
     if not isinstance(audio_bytes, (bytes, bytearray)) or len(audio_bytes) == 0:
         return audio_url, audio_ref
@@ -402,98 +719,55 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(child, dict):
         raise ValueError("snapshot.child is required")
 
-    child_id = _normalize_text(child.get("id")) or _normalize_text(_payload_get(payload, "childId", "child_id"))
-    child_name = _normalize_text(child.get("name")) or "孩子"
-    class_name = _normalize_text(child.get("className")) or None
-    requested_mode = _coerce_text(_payload_get(payload, "storyMode", "story_mode"))
-    highlights = _normalize_highlights(payload)
-    mode = _build_story_mode(payload, highlights)
-    latest_intervention_card = _normalize_card(
-        _payload_get(payload, "latestInterventionCard", "latest_intervention_card")
-    )
-    latest_consultation = _normalize_card(_payload_get(payload, "latestConsultation", "latest_consultation"))
-    memory_context = _memory_prompt_context(payload)
-    memory_hint = (
-        (memory_context["recentContinuitySignals"][0] if memory_context["recentContinuitySignals"] else "")
-        or (memory_context["lastConsultationTakeaways"][0] if memory_context["lastConsultationTakeaways"] else "")
-        or (memory_context["longTermTraits"][0] if memory_context["longTermTraits"] else "")
-    )
-    style_preset = _resolve_style_preset(payload)
-    style_prompt = _resolve_style_prompt(payload, style_preset)
-    parent_note = _build_parent_note(child_name, mode, highlights, latest_intervention_card, latest_consultation)
-    moral = _build_moral(child_name, highlights)
-
-    story_seed = "::".join(
-        [
-            child_id or "unknown-child",
-            mode,
-            style_preset,
-            style_prompt,
-            child_name,
-            class_name or "",
-            "|".join(f"{item['kind']}:{item['title']}:{item['detail']}" for item in highlights),
-            _normalize_text(_payload_get(payload, "requestSource", "request_source")),
+    child_id = _normalize_text(child.get("id")) or _normalize_text(_payload_get(payload, "childId", "child_id")) or "storybook-guest"
+    generation_mode = _resolve_generation_mode(payload)
+    highlights = _build_highlights(payload, generation_mode)
+    if not highlights:
+        highlights = [
+            {
+                "kind": "weeklyTrend",
+                "title": "成长主题",
+                "detail": "先把一个小小的成长目标，讲成今晚就能开始的温柔故事。",
+                "priority": 1,
+                "source": "rule",
+            }
         ]
-    )
+
+    ingredients = _build_story_ingredients(payload, snapshot, child, highlights)
+    scenes_blueprint = _build_story_scenes(ingredients)
+    style_preset = _resolve_style_preset(payload)
+    story_seed = _build_story_seed(payload, ingredients, child_id)
     story_id = f"storybook-{_stable_hash(story_seed)}"
     generated_at = _stable_timestamp(story_seed)
 
     settings = get_settings()
     fallback_image_provider = MockStoryImageProvider()
     fallback_audio_provider = MockStoryAudioProvider()
-    image_provider = resolve_story_image_provider(settings) if mode == "storybook" else fallback_image_provider
-    audio_provider = resolve_story_audio_provider(settings) if mode == "storybook" else fallback_audio_provider
+    image_provider = resolve_story_image_provider(settings) if ingredients["story_mode"] == "storybook" else fallback_image_provider
+    audio_provider = resolve_story_audio_provider(settings) if ingredients["story_mode"] == "storybook" else fallback_audio_provider
 
-    scene_total = 1 if mode == "card" else 3
-    if not highlights:
-        highlights = [
-            {
-                "kind": "weeklyTrend",
-                "title": "成长故事卡",
-                "detail": "今天先用一张轻量故事卡，把最值得继续陪伴的小变化收好。",
-                "priority": 1,
-                "source": "rule",
-            }
-        ]
-
-    blueprints = [
-        _scene_blueprint(
-            index=index,
-            scene_total=scene_total,
-            story_id=story_id,
-            child_id=child_id or "unknown-child",
-            child_name=child_name,
-            class_name=class_name,
-            highlights=highlights,
-            memory_hint=memory_hint,
-            parent_note=parent_note,
-            style_prompt=style_prompt,
-        )
-        for index in range(scene_total)
-    ]
-
-    async def render_scene(blueprint: dict[str, Any]) -> tuple[Any, Any]:
+    async def render_scene(scene: dict[str, Any]) -> tuple[Any, Any]:
         image_kwargs = {
-            "story_mode": mode,
-            "scene_index": blueprint["scene_index"],
-            "child_name": child_name,
-            "scene_title": blueprint["scene_title"],
-            "scene_text": blueprint["base_scene_text"],
-            "child_id": blueprint["child_id"],
-            "story_id": blueprint["story_id"],
-            "class_name": class_name,
-            "image_prompt": blueprint["image_prompt"],
+            "story_mode": ingredients["story_mode"],
+            "scene_index": scene["sceneIndex"] - 1,
+            "child_name": ingredients["protagonist"]["label"],
+            "scene_title": scene["sceneTitle"],
+            "scene_text": scene["sceneText"],
+            "child_id": child_id,
+            "story_id": story_id,
+            "class_name": ingredients["class_name"],
+            "image_prompt": scene["imagePrompt"],
         }
         audio_kwargs = {
-            "story_mode": mode,
-            "scene_index": blueprint["scene_index"],
-            "child_name": child_name,
-            "scene_title": blueprint["scene_title"],
-            "scene_text": blueprint["base_scene_text"],
-            "child_id": blueprint["child_id"],
-            "story_id": blueprint["story_id"],
-            "audio_script": blueprint["audio_script"],
-            "voice_style": blueprint["voice_style"],
+            "story_mode": ingredients["story_mode"],
+            "scene_index": scene["sceneIndex"] - 1,
+            "child_name": ingredients["protagonist"]["label"],
+            "scene_title": scene["sceneTitle"],
+            "scene_text": scene["sceneText"],
+            "child_id": child_id,
+            "story_id": story_id,
+            "audio_script": scene["audioScript"],
+            "voice_style": scene["voiceStyle"],
         }
         return await asyncio.gather(
             asyncio.to_thread(
@@ -510,73 +784,76 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             ),
         )
 
-    rendered_results = await asyncio.gather(*(render_scene(blueprint) for blueprint in blueprints))
+    rendered_results = await asyncio.gather(*(render_scene(scene) for scene in scenes_blueprint))
 
     cache_hit_count = 0
     scenes: list[dict[str, Any]] = []
-    for blueprint, (image_result, audio_result) in zip(blueprints, rendered_results, strict=True):
+    for scene_blueprint, (image_result, audio_result) in zip(scenes_blueprint, rendered_results, strict=True):
         image_cache_hit = bool(image_result.output.get("cacheHit"))
         audio_cache_hit = bool(audio_result.output.get("cacheHit"))
         cache_hit_count += int(image_cache_hit) + int(audio_cache_hit)
-
         image_status = image_result.output.get("imageStatus", "fallback")
         audio_status = audio_result.output.get("audioStatus", "fallback")
         audio_url, cached_audio_ref = _maybe_store_audio_asset(
             story_id=story_id,
-            scene_index=blueprint["scene_index"],
-            audio_script=audio_result.output.get("audioScript") or blueprint["audio_script"],
-            voice_style=audio_result.output.get("voiceStyle") or blueprint["voice_style"],
+            scene_index=scene_blueprint["sceneIndex"] - 1,
+            audio_script=audio_result.output.get("audioScript") or scene_blueprint["audioScript"],
+            voice_style=audio_result.output.get("voiceStyle") or scene_blueprint["voiceStyle"],
             audio_status=audio_status,
             audio_result=audio_result,
         )
-
         scenes.append(
             {
-                "sceneIndex": blueprint["scene_index"] + 1,
-                "sceneTitle": blueprint["scene_title"],
-                "sceneText": blueprint["scene_text"],
-                "imagePrompt": image_result.output.get("imagePrompt") or blueprint["image_prompt"],
+                "sceneIndex": scene_blueprint["sceneIndex"],
+                "sceneTitle": scene_blueprint["sceneTitle"],
+                "sceneText": scene_blueprint["sceneText"],
+                "imagePrompt": image_result.output.get("imagePrompt") or scene_blueprint["imagePrompt"],
                 "imageUrl": image_result.output.get("imageUrl"),
                 "assetRef": image_result.output.get("assetRef"),
                 "imageStatus": image_status,
                 "audioUrl": audio_url,
                 "audioRef": cached_audio_ref or audio_result.output.get("audioRef"),
-                "audioScript": audio_result.output.get("audioScript") or blueprint["audio_script"],
+                "audioScript": audio_result.output.get("audioScript") or scene_blueprint["audioScript"],
                 "audioStatus": audio_status,
-                "voiceStyle": audio_result.output.get("voiceStyle") or blueprint["voice_style"],
-                "highlightSource": blueprint["highlight_source"],
+                "voiceStyle": audio_result.output.get("voiceStyle") or scene_blueprint["voiceStyle"],
+                "highlightSource": scene_blueprint["highlightSource"],
                 "imageCacheHit": image_cache_hit,
                 "audioCacheHit": audio_cache_hit,
             }
         )
-
-    primary_detail = highlights[0]["detail"] if highlights else "今天多了一点值得被看见的进步"
-    summary = (
-        f"{child_name} 的今天，可以用“{primary_detail}”来概括；这本微绘本会继续把当日亮点、今晚动作和明天观察点串成一个睡前小闭环。"
-        if mode == "storybook"
-        else f"{child_name} 的今天适合先用一张轻量成长故事卡轻轻收尾，把今晚陪伴动作和明天观察点先收进故事里。"
-    )
 
     provider_mode = _provider_mode_from_scenes(scenes)
     if provider_mode == "live":
         fallback_reason = None
     elif provider_mode == "mixed":
         fallback_reason = "partial-media-fallback"
-    elif mode == "card" and requested_mode == "card":
-        fallback_reason = "card-mode-requested"
-    elif mode == "card":
+    elif ingredients["story_mode"] == "card":
         fallback_reason = "sparse-parent-context"
     else:
         fallback_reason = "mock-storybook-pipeline"
 
     return {
         "storyId": story_id,
-        "childId": child_id or "unknown-child",
-        "mode": mode,
-        "title": f"{child_name} 的晚安小绘本" if mode == "storybook" else f"{child_name} 的成长小卡",
-        "summary": summary,
-        "moral": moral,
-        "parentNote": parent_note,
+        "childId": child_id,
+        "mode": ingredients["story_mode"],
+        "title": _build_story_title(
+            ingredients["generation_mode"],
+            child_name=ingredients["child_name"],
+            focus_theme=ingredients["focus_theme"],
+        ),
+        "summary": _build_story_summary(
+            ingredients["generation_mode"],
+            ingredients["story_mode"],
+            child_name=ingredients["child_name"],
+            focus_theme=ingredients["focus_theme"],
+            page_count=ingredients["page_count"],
+        ),
+        "moral": _build_moral(
+            protagonist_name=ingredients["protagonist"]["label"],
+            focus_theme=ingredients["focus_theme"],
+            summary_highlight=ingredients["summary_highlight"],
+        ),
+        "parentNote": ingredients["parent_note"],
         "source": "rule",
         "fallback": provider_mode != "live",
         "fallbackReason": fallback_reason,

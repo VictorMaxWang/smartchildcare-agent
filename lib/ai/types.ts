@@ -529,6 +529,11 @@ export interface ParentMessageReflexionResponse {
 export type ParentStoryBookMode = "storybook" | "card";
 export type ParentStoryBookResultSource = "ai" | "fallback" | "mock" | "rule" | "vivo";
 export type ParentStoryBookMediaStatus = "ready" | "mock" | "fallback" | "empty";
+export type ParentStoryBookGenerationMode =
+  | "child-personalized"
+  | "manual-theme"
+  | "hybrid";
+export type ParentStoryBookPageCount = 4 | 6 | 8;
 export type ParentStoryBookStylePreset =
   | "sunrise-watercolor"
   | "moonlit-cutout"
@@ -539,7 +544,10 @@ export type ParentStoryBookHighlightKind =
   | "consultationSummary"
   | "consultationAction"
   | "guardianFeedback"
-  | "weeklyTrend";
+  | "weeklyTrend"
+  | "manualTheme"
+  | "goalKeyword"
+  | "childTrait";
 
 export interface ParentStoryBookHighlightCandidate {
   kind: ParentStoryBookHighlightKind;
@@ -593,6 +601,12 @@ export interface ParentStoryBookScene {
 export interface ParentStoryBookRequest {
   childId?: string;
   storyMode?: ParentStoryBookMode | "auto";
+  generationMode?: ParentStoryBookGenerationMode;
+  manualTheme?: string;
+  manualPrompt?: string;
+  pageCount?: ParentStoryBookPageCount;
+  goalKeywords?: string[];
+  protagonistArchetype?: string;
   requestSource?: string;
   stylePreset?: ParentStoryBookStylePreset;
   stylePrompt?: string;

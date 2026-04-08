@@ -3,7 +3,7 @@ import type {
   ParentStoryBookResponse,
   ParentStoryBookStylePreset,
 } from "@/lib/ai/types";
-import { stableStorybookHash } from "@/lib/parent/storybook-presets";
+import { stableStorybookHash } from "./storybook-presets";
 
 const STORYBOOK_CACHE_PREFIX = "smartchildcare:parent-storybook";
 export const STORYBOOK_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -27,6 +27,12 @@ export function buildParentStoryBookCacheKey(
     childId: request.childId,
     requestSource: request.requestSource,
     storyMode: request.storyMode,
+    generationMode: request.generationMode,
+    manualTheme: request.manualTheme,
+    manualPrompt: request.manualPrompt,
+    pageCount: request.pageCount,
+    goalKeywords: request.goalKeywords,
+    protagonistArchetype: request.protagonistArchetype,
     stylePreset: presetId,
     stylePrompt: request.stylePrompt,
     snapshot: request.snapshot,

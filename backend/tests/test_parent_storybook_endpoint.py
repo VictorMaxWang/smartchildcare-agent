@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.providers.base import ProviderResult
+from app.schemas.parent_storybook import ParentStoryBookRequest
 
 
 client = TestClient(app)
@@ -41,7 +42,8 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["childId"] == "child-1"
     assert body["mode"] == "storybook"
     assert body["stylePreset"] == "forest-crayon"
-    assert len(body["scenes"]) == 3
+    assert len(body["scenes"]) == 6
+    assert body["providerMeta"]["sceneCount"] == 6
     assert body["providerMeta"]["provider"] == "parent-storybook-rule"
     assert body["providerMeta"]["mode"] == "fallback"
     assert body["providerMeta"]["realProvider"] is False
@@ -212,3 +214,47 @@ def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
     assert body["fallback"] is True
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "fallback"
+
+
+def test_parent_storybook_schema_parses_new_v2_fields_with_aliases():
+    request = ParentStoryBookRequest.model_validate(
+        {
+            **build_payload(),
+            "generationMode": "hybrid",
+            "manualTheme": "表达情绪",
+            "manualPrompt": "把主题讲成一部可朗读的小绘本。",
+            "pageCount": 8,
+            "goalKeywords": ["表达情绪", "勇气"],
+            "protagonistArchetype": "bunny",
+        }
+    )
+    snake_case_request = ParentStoryBookRequest.model_validate(
+        {
+            **build_payload(),
+            "generation_mode": "manual-theme",
+            "manual_theme": "独立入睡",
+            "manual_prompt": "把睡前安抚讲成晚安故事。",
+            "page_count": 4,
+            "goal_keywords": ["独立入睡"],
+            "protagonist_archetype": "bear",
+        }
+    )
+
+    assert request.generation_mode == "hybrid"
+    assert request.manual_theme == "表达情绪"
+    assert request.manual_prompt == "把主题讲成一部可朗读的小绘本。"
+    assert request.page_count == 8
+    assert request.goal_keywords == ["表达情绪", "勇气"]
+    assert request.protagonist_archetype == "bunny"
+    assert snake_case_request.generation_mode == "manual-theme"
+    assert snake_case_request.page_count == 4
+    assert snake_case_request.protagonist_archetype == "bear"
+
+
+def test_parent_storybook_endpoint_rejects_invalid_page_count():
+    payload = build_payload()
+    payload["pageCount"] = 5
+
+    response = client.post("/api/v1/agents/parent/storybook", json=payload)
+
+    assert response.status_code == 422

@@ -24,6 +24,15 @@ function isParentStoryBookRequest(payload: unknown): payload is ParentStoryBookR
   if (!isRecord(payload)) return false;
   if (!isRecord(payload.snapshot)) return false;
   if (!isRecord(payload.snapshot.child)) return false;
+  if (
+    "pageCount" in payload &&
+    payload.pageCount !== undefined &&
+    payload.pageCount !== 4 &&
+    payload.pageCount !== 6 &&
+    payload.pageCount !== 8
+  ) {
+    return false;
+  }
   return Array.isArray(payload.highlightCandidates);
 }
 

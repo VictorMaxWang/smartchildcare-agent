@@ -577,16 +577,40 @@ export function applyParentStoryBookDemoSeed(
     return request;
   }
 
+  const themeCandidates = request.highlightCandidates.filter(
+    (item) =>
+      item.kind === "manualTheme" ||
+      item.kind === "goalKeyword" ||
+      item.source === "manualTheme" ||
+      item.source === "goalKeyword"
+  );
   const stylePreset = request.stylePreset ?? demoSeed.stylePreset;
   const stylePrompt = request.stylePrompt || STYLE_PRESET_PROMPTS[stylePreset];
+  const mergedHighlights =
+    themeCandidates.length > 0
+      ? [
+          ...themeCandidates.map((item) => ({ ...item })),
+          ...demoSeed.highlightCandidates.map((item) => ({ ...item })),
+        ]
+      : demoSeed.highlightCandidates.map((item) => ({ ...item }));
+  const preserveRequestSource =
+    request.generationMode === "manual-theme" ||
+    request.generationMode === "hybrid" ||
+    Boolean(request.manualTheme);
 
   return {
     ...request,
     storyMode: "storybook",
+    generationMode: request.generationMode,
+    manualTheme: request.manualTheme,
+    manualPrompt: request.manualPrompt,
+    pageCount: request.pageCount,
+    goalKeywords: request.goalKeywords,
+    protagonistArchetype: request.protagonistArchetype,
     stylePreset,
     stylePrompt,
-    requestSource: demoSeed.requestSource,
-    highlightCandidates: demoSeed.highlightCandidates.map((item) => ({ ...item })),
+    requestSource: preserveRequestSource ? request.requestSource : demoSeed.requestSource,
+    highlightCandidates: mergedHighlights,
     latestInterventionCard: { ...demoSeed.latestInterventionCard },
     latestConsultation: { ...demoSeed.latestConsultation },
   };
