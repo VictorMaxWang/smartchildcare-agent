@@ -140,19 +140,12 @@ class Settings(BaseSettings):
     storybook_image_height: int = 1024
     storybook_image_poll_interval_ms: int = 1_200
     storybook_image_poll_timeout_ms: int = 12_000
-    storybook_tts_engineid: str = "tts_humanoid_lam"
-    storybook_tts_voice: str = "F245_natural"
+    storybook_tts_engineid: str = "short_audio_synthesis_jovi"
+    storybook_tts_voice: str = "yige"
     storybook_tts_fallback_engineid: str = "short_audio_synthesis_jovi"
-    storybook_tts_fallback_voice: str = "yige"
+    storybook_tts_fallback_voice: str = "vivoHelper"
     storybook_tts_speed: int = 50
     storybook_tts_volume: int = 50
-    storybook_tts_model: str = "unknown"
-    storybook_tts_product: str = "unknown"
-    storybook_tts_package: str = "unknown"
-    storybook_tts_client_version: str = "unknown"
-    storybook_tts_system_version: str = "unknown"
-    storybook_tts_sdk_version: str = "unknown"
-    storybook_tts_android_version: str = "unknown"
     storybook_media_cache_ttl_seconds: int = 900
     storybook_media_cache_max_entries: int = 48
 
