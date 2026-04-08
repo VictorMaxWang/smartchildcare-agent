@@ -299,25 +299,25 @@ function buildScene(
   const presetPrompt = normalizeText(stylePrompt);
 
   const sceneTitleMap: Record<number, string> = {
-    0: "今天的小亮点",
-    1: "大人陪着慢慢来",
-    2: "晚安继续长大",
+    0: "今天被看见的小进步",
+    1: "老师和家长陪着慢慢来",
+    2: "今晚只做一件小事",
   };
 
   const sceneTextMap: Record<number, string> = {
-    0: `${childName}${className ? ` 在 ${className}` : ""} 今天最值得记住的是 ${mainText || "又向前迈了一小步"}。这段小故事先把这一刻轻轻收好。`,
+    0: `${childName}${className ? ` 在 ${className}` : ""} 今天被看见的一幕，是 ${mainText || "又向前迈了一小步"}。老师先把这份小进步轻轻收好，让它不只停在白天，也能陪孩子一起回家。`,
     1: supportingText
-      ? `故事里还有一位一直在陪伴的大人。${supportingText}，所以 ${childName} 可以在熟悉的节奏里慢慢尝试。`
-      : `${childName} 不需要一下子做到最好，只要有人在旁边提醒一小步，就已经很了不起。`,
-    2: `${closingNote}。${parentNote}`,
+      ? `第二幕里，大人没有催快，只是顺着 ${childName} 今天的节奏继续陪着走。${supportingText}。当孩子被稳稳接住时，原来有点难的事，也会慢慢变得愿意再试一次。`
+      : `${childName} 不需要一下子做到最好，只要有人在旁边陪着把节奏放慢一点，就已经很了不起。`,
+    2: `${closingNote}。${parentNote} 明天继续留意 ${mainText || "孩子在熟悉环节里的回应"}。`,
   };
 
   const audioScriptMap: Record<number, string> = {
-    0: `今天的小亮点是 ${mainText || "一个温柔的小进步"}。`,
+    0: `今天被看见的小进步，是 ${mainText || "一个温柔的小进步"}。这件小事值得被轻轻记下来。`,
     1: supportingText
-      ? `大人的陪伴和支持，让 ${childName} 可以更安心地继续尝试。`
-      : `慢慢来，已经是很好的节奏。`,
-    2: `${closingNote}。${parentNote}`,
+      ? `老师和家长一起把节奏放慢，${childName} 就能更安心地继续尝试。`
+      : `慢慢来，已经是很好的节奏，有人陪着就会更稳。`,
+    2: `${closingNote}。${parentNote} 明天再接着看小变化。`,
   };
 
   return {
@@ -356,7 +356,7 @@ function buildScenes(params: {
     const highlight = highlightCandidates[0] ?? {
       kind: "todayGrowth" as const,
       title: "成长小卡",
-      detail: "今天适合用一张轻量故事卡先帮助家长快速阅读。",
+      detail: "今天先用一张轻量故事卡，把最值得继续陪伴的小变化收好。",
       priority: 1,
       source: "rule",
     };
@@ -377,8 +377,8 @@ function buildScenes(params: {
   const [first, second, third] = highlightCandidates;
   const safeFirst = first ?? {
     kind: "todayGrowth" as const,
-    title: "今天的小亮点",
-    detail: "今天适合把一个小进步编进故事里。",
+    title: "今天被看见的小进步",
+    detail: "今天适合把一个刚刚出现的小进步写进故事里，让孩子带着被看见的感觉回家。",
     priority: 1,
     source: "rule",
   };
@@ -387,7 +387,7 @@ function buildScenes(params: {
     {
       kind: "consultationAction" as const,
       title: "今晚最适合做的一件事",
-      detail: "今晚只做一件简单、稳定、孩子能跟上的动作。",
+      detail: "今晚只做一件简单、稳定、孩子能跟上的陪伴动作，不额外加新要求。",
       priority: 2,
       source: "rule",
     };
@@ -396,7 +396,7 @@ function buildScenes(params: {
     {
       kind: "weeklyTrend" as const,
       title: "继续观察的小提醒",
-      detail: "明天继续看一眼孩子的状态变化。",
+      detail: "明天继续看一眼孩子在熟悉环节里的状态变化，把今天的亮点接到下一次。",
       priority: 3,
       source: "rule",
     };
@@ -456,17 +456,17 @@ function buildParentNote(
   ]);
 
   if (mode === "card") {
-    return `${childName} 今天适合先读一张轻量成长卡，帮助家长快速抓住一个小变化。`;
+    return `${childName} 今晚适合先读一张轻量成长卡，再把今天最值得继续陪伴的一幕说给孩子听。`;
   }
 
   return action
-    ? `今晚只要做一件小事：${action}。听完故事后，再带着这件事去陪 ${childName}。`
-    : `今晚先把故事读完，再带着孩子今天的一个小亮点慢慢收尾。`;
+    ? `今晚只要做一件小事：${action}。不用催快，也不追求一次做到，只要陪着 ${childName} 把这一步走稳就够了。`
+    : `今晚先把故事读完，再陪孩子把今天最亮的一幕慢慢说出来，让情绪轻一点收尾。`;
 }
 
 function buildMoral(childName: string, highlightCandidates: ParentStoryBookHighlightCandidate[]) {
   const primary = pickCandidateDetail(highlightCandidates[0]) || `${childName} 正在慢慢长大`;
-  return `孩子的成长不需要一下子完成，只要有人看见他的 ${primary}，明天就会更稳一点。`;
+  return `孩子真正会记住的，不是被要求快一点，而是有人看见了他的 ${primary}，也愿意陪他把这一小步走稳。`;
 }
 
 export function buildParentStoryBookRequestFromFeed(input: ParentStoryBookPayloadInput): ParentStoryBookRequest {
@@ -543,8 +543,8 @@ export function buildParentStoryBookResponse(
   const moral = buildMoral(childName, highlightCandidates);
   const closingNote =
     mode === "card"
-      ? "今天先用一个轻量故事卡收尾，已经足够温柔"
-      : "故事到这里先停一下，留一点轻松给睡前时光";
+      ? "今晚先用一张轻量故事卡收尾，也能把被看见的感觉稳稳留住"
+      : "故事到这里先轻轻停一下，把今天的亮点和安心感一起留给睡前时光";
   const scenes = buildScenes({
     childName,
     className,
@@ -556,8 +556,8 @@ export function buildParentStoryBookResponse(
   });
   const primaryDetail = pickCandidateDetail(highlightCandidates[0]);
   const summary = primaryDetail
-    ? `${childName} 的今天，可以用“${primaryDetail}”来概括。`
-    : `${childName} 的今天适合用一张安静的成长卡轻轻收尾。`;
+    ? `${childName} 的今天，可以用“${primaryDetail}”来概括；这本微绘本会继续把当日亮点、今晚动作和明天观察点串成一个睡前小闭环。`
+    : `${childName} 的今天适合用一张安静的成长卡轻轻收尾，把今晚陪伴动作和明天观察点先收进故事里。`;
 
   const fallbackReason =
     options?.fallbackReason ??

@@ -14,6 +14,7 @@ import {
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { buildParentAgentChildContext, buildParentAgentSuggestionResult, buildParentChildSuggestionSnapshot, type ParentAgentResult } from "@/lib/agent/parent-agent";
+import { resolveDefaultParentStoryBookDemoSeedId } from "@/lib/agent/parent-storybook-demo-seeds";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
 import type { AiSuggestionResponse } from "@/lib/ai/types";
 import { buildParentHomeViewModel } from "@/lib/view-models/role-home";
@@ -27,6 +28,7 @@ const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
 
 export default function ParentHomePage() {
   const {
+    currentUser,
     getParentFeed,
     healthCheckRecords,
     mealRecords,
@@ -116,7 +118,14 @@ export default function ParentHomePage() {
   }
 
   const agentHref = `/parent/agent?child=${feed.child.id}`;
-  const storybookHref = `/parent/storybook?child=${feed.child.id}`;
+  const storybookDemoSeedId = resolveDefaultParentStoryBookDemoSeedId({
+    childId: feed.child.id,
+    currentUserId: currentUser.id,
+    accountKind: currentUser.accountKind,
+  });
+  const storybookHref = storybookDemoSeedId
+    ? `/parent/storybook?child=${feed.child.id}&demoSeed=${storybookDemoSeedId}`
+    : `/parent/storybook?child=${feed.child.id}`;
   const primaryAgentLabel = previewResult ? "继续追问" : "进入 AI 助手";
   const displayInterventionCard = latestInterventionCard ?? previewResult?.interventionCard;
   const displayTonightTaskTitle = displayInterventionCard?.title ?? viewModel.tonightTask.title;

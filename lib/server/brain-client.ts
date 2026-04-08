@@ -77,10 +77,23 @@ function mergeHeaders(base: HeadersInit, extra?: HeadersInit) {
   return headers;
 }
 
+function resolveLocalDevBrainBaseUrl() {
+  const appPort = Number(process.env.APP_PORT?.trim() || "8000");
+  const safePort = Number.isFinite(appPort) && appPort > 0 ? appPort : 8000;
+  return `http://127.0.0.1:${safePort}`;
+}
+
 export function getBrainBaseUrl() {
-  return normalizeBaseUrl(
+  const configuredBaseUrl = normalizeBaseUrl(
     process.env.BRAIN_API_BASE_URL ?? process.env.NEXT_PUBLIC_BACKEND_BASE_URL
   );
+  if (configuredBaseUrl) return configuredBaseUrl;
+
+  if (process.env.NODE_ENV !== "production") {
+    return resolveLocalDevBrainBaseUrl();
+  }
+
+  return null;
 }
 
 export function createBrainTransportHeaders({

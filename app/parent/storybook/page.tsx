@@ -8,6 +8,12 @@ import {
   DEFAULT_PARENT_STORYBOOK_STYLE_PRESET,
   resolveParentStoryBookStylePreset,
 } from "@/lib/agent/parent-storybook";
+import {
+  applyParentStoryBookDemoSeed,
+  getParentStoryBookDemoSeedPreset,
+  resolveDefaultParentStoryBookDemoSeedId,
+  resolveParentStoryBookDemoSeedId,
+} from "@/lib/agent/parent-storybook-demo-seeds";
 import type {
   ParentStoryBookRequest,
   ParentStoryBookResponse,
@@ -27,7 +33,11 @@ export default function ParentStoryBookPage() {
   const searchParams = useSearchParams();
   const childFromQuery = searchParams.get("child") ?? undefined;
   const presetFromQuery = searchParams.get("preset");
+  const explicitDemoSeedId = resolveParentStoryBookDemoSeedId(
+    searchParams.get("demoSeed")
+  );
   const {
+    currentUser,
     getParentFeed,
     healthCheckRecords,
     mealRecords,
@@ -46,9 +56,6 @@ export default function ParentStoryBookPage() {
   const [cacheState, setCacheState] = useState<ParentStoryBookClientCacheState>({
     kind: "none",
   });
-  const [selectedPreset, setSelectedPreset] = useState<ParentStoryBookStylePreset>(
-    resolveParentStoryBookStylePreset(presetFromQuery)
-  );
   const [reloadToken, setReloadToken] = useState(0);
   const networkOnlyRef = useRef(false);
   const storyRef = useRef<ParentStoryBookResponse | null>(null);
@@ -61,12 +68,34 @@ export default function ParentStoryBookPage() {
     return feeds[0];
   }, [childFromQuery, feeds]);
 
+  const resolvedDemoSeedId = useMemo(
+    () =>
+      resolveDefaultParentStoryBookDemoSeedId({
+        childId: selectedFeed?.child.id ?? childFromQuery,
+        currentUserId: currentUser.id,
+        accountKind: currentUser.accountKind,
+        explicitDemoSeedId,
+      }),
+    [childFromQuery, currentUser.accountKind, currentUser.id, explicitDemoSeedId, selectedFeed]
+  );
+  const seededPreset = useMemo(
+    () => getParentStoryBookDemoSeedPreset(resolvedDemoSeedId),
+    [resolvedDemoSeedId]
+  );
+  const [selectedPreset, setSelectedPreset] = useState<ParentStoryBookStylePreset>(() =>
+    presetFromQuery
+      ? resolveParentStoryBookStylePreset(presetFromQuery)
+      : resolveParentStoryBookStylePreset(seededPreset)
+  );
+
   useEffect(() => {
-    const nextPreset = resolveParentStoryBookStylePreset(presetFromQuery);
+    const nextPreset = presetFromQuery
+      ? resolveParentStoryBookStylePreset(presetFromQuery)
+      : resolveParentStoryBookStylePreset(seededPreset);
     setSelectedPreset((currentPreset) =>
       currentPreset === nextPreset ? currentPreset : nextPreset
     );
-  }, [presetFromQuery]);
+  }, [presetFromQuery, seededPreset]);
 
   useEffect(() => {
     storyRef.current = story;
@@ -81,12 +110,17 @@ export default function ParentStoryBookPage() {
     } else {
       url.searchParams.set("preset", selectedPreset);
     }
+    if (resolvedDemoSeedId) {
+      url.searchParams.set("demoSeed", resolvedDemoSeedId);
+    } else {
+      url.searchParams.delete("demoSeed");
+    }
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [selectedPreset]);
+  }, [resolvedDemoSeedId, selectedPreset]);
 
   const request = useMemo<ParentStoryBookRequest | null>(() => {
     if (!selectedFeed) return null;
-    return buildParentStoryBookRequestFromFeed({
+    const baseRequest = buildParentStoryBookRequestFromFeed({
       feed: selectedFeed,
       healthCheckRecords,
       mealRecords,
@@ -98,6 +132,7 @@ export default function ParentStoryBookPage() {
       requestSource: "parent-storybook-page",
       stylePreset: selectedPreset,
     });
+    return applyParentStoryBookDemoSeed(baseRequest, resolvedDemoSeedId);
   }, [
     getChildInterventionCard,
     getLatestConsultationForChild,
@@ -106,6 +141,7 @@ export default function ParentStoryBookPage() {
     healthCheckRecords,
     mealRecords,
     selectedFeed,
+    resolvedDemoSeedId,
     selectedPreset,
     taskCheckInRecords,
   ]);
@@ -119,7 +155,7 @@ export default function ParentStoryBookPage() {
     if (!request || !cacheKey) {
       setStatus("error");
       setStory(null);
-      setErrorMessage("No child data is available for storybook generation.");
+      setErrorMessage("当前没有可用于生成微绘本的孩子数据。");
       setRefreshMessage(null);
       setIsRefreshing(false);
       setCacheState({ kind: "none" });
@@ -171,7 +207,7 @@ export default function ParentStoryBookPage() {
         });
 
         if (!response.ok) {
-          throw new Error(`storybook request failed: ${response.status}`);
+          throw new Error(`微绘本请求失败（${response.status}）`);
         }
 
         const data = (await response.json()) as ParentStoryBookResponse;
@@ -204,12 +240,10 @@ export default function ParentStoryBookPage() {
           const nextMessage =
             error instanceof Error
               ? error.message
-              : "Storybook generation failed.";
+              : "微绘本生成失败。";
 
           if (storyRef.current) {
-            setRefreshMessage(
-              `Refresh failed, keeping previous story: ${nextMessage}`
-            );
+            setRefreshMessage(`刷新失败，已保留上一版微绘本：${nextMessage}`);
             setIsRefreshing(false);
           } else {
             setStory(null);

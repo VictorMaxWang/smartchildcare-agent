@@ -40,6 +40,7 @@ import {
   PARENT_TREND_QUICK_QUESTIONS,
   resolveParentTrendDebugCase,
 } from "@/lib/agent/parent-trend";
+import { resolveDefaultParentStoryBookDemoSeedId } from "@/lib/agent/parent-storybook-demo-seeds";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
 import type {
   AiFollowUpResponse,
@@ -93,6 +94,7 @@ export default function ParentAgentPage() {
     ? resolveParentTrendDebugCase(searchParams.get("trendCase"))
     : null;
   const {
+    currentUser,
     children,
     attendanceRecords,
     getParentFeed,
@@ -226,6 +228,17 @@ export default function ParentAgentPage() {
     [reminders, selectedFeed]
   );
   const questionLoading = suggestionLoading || followUpLoading || displayedTrendLoading;
+  const storybookDemoSeedId = selectedFeed
+    ? resolveDefaultParentStoryBookDemoSeedId({
+        childId: selectedFeed.child.id,
+        currentUserId: currentUser.id,
+        accountKind: currentUser.accountKind,
+      })
+    : null;
+  const storybookHref =
+    selectedFeed && storybookDemoSeedId
+      ? `/parent/storybook?child=${selectedFeed.child.id}&demoSeed=${storybookDemoSeedId}`
+      : `/parent/storybook?child=${selectedFeed?.child.id ?? ""}`;
 
   useEffect(() => {
     if (!selectedChildId && parentFeed[0]?.child.id) {
@@ -287,6 +300,42 @@ export default function ParentAgentPage() {
       }
     },
     []
+  );
+
+  const normalizeTrendFailureMessage = useCallback((message: string, status?: number) => {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return "家长趋势查询暂时不可用，请稍后再试。";
+    }
+
+    const lower = trimmed.toLowerCase();
+    const looksLikeBrainUnavailable =
+      status === 503 ||
+      trimmed.includes("FastAPI brain") ||
+      trimmed.includes("brain") ||
+      trimmed.includes("后端趋势服务") ||
+      trimmed.includes("未接通");
+    if (looksLikeBrainUnavailable) {
+      return "家长趋势服务暂时未接通后端，当前只能先显示失败态，请稍后再试。";
+    }
+
+    if (status === 504 || lower.includes("timeout") || trimmed.includes("超时")) {
+      return "家长趋势服务响应超时，请稍后再试。";
+    }
+
+    if (trimmed.includes("demo_snapshot") || trimmed.includes("回退") || trimmed.includes("降级")) {
+      return "当前结果来自演示快照，不是实时机构数据。";
+    }
+
+    return "家长趋势查询暂时不可用，请稍后再试。";
+  }, []);
+
+  const readTrendRouteError = useCallback(
+    async (response: Response) => {
+      const rawMessage = await readRouteError(response, "家长趋势查询暂时不可用，请稍后再试。");
+      return normalizeTrendFailureMessage(rawMessage, response.status);
+    },
+    [normalizeTrendFailureMessage, readRouteError]
   );
 
   const enrichParentMessageResult = useCallback(async (params: {
@@ -421,15 +470,16 @@ export default function ParentAgentPage() {
       });
 
       if (!response.ok) {
-        throw new Error(await readRouteError(response, "趋势查询暂时不可用，请稍后再试。"));
+        throw new Error(await readTrendRouteError(response));
       }
 
       const data = (await response.json()) as ParentTrendQueryResponse;
       setLatestTrendResult(data);
       setQuestion("");
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "趋势查询暂时不可用，请稍后再试。";
+      const message = normalizeTrendFailureMessage(
+        error instanceof Error ? error.message : "趋势查询暂时不可用，请稍后再试。"
+      );
       setTrendError(message);
     } finally {
       setTrendLoading(false);
@@ -665,7 +715,7 @@ export default function ParentAgentPage() {
       actions={
         <>
           <InlineLinkButton href="/parent" label="返回家长首页" />
-          <InlineLinkButton href={`/parent/storybook?child=${selectedFeed.child.id}`} label="打开今日微绘本" variant="secondary" />
+          <InlineLinkButton href={storybookHref} label="打开今日微绘本" variant="secondary" />
           <InlineLinkButton href={`/parent/agent?child=${selectedFeed.child.id}`} label="刷新当前建议" variant="premium" />
         </>
       }

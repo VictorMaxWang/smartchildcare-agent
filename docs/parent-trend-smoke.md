@@ -9,7 +9,7 @@ It does not change the T10 backend contract. It does not claim that fallback dat
 ## Prerequisites
 
 1. Start Next.js on `http://localhost:3000`.
-2. Start FastAPI brain and make sure `BRAIN_API_BASE_URL` points to it.
+2. Start FastAPI brain. In local development, the Next proxy now defaults to `http://127.0.0.1:8000` when `BRAIN_API_BASE_URL` is not set.
 3. Use demo accounts only. Do not place real `VIVO_APP_ID` or `VIVO_APP_KEY` in code, docs, logs, or screenshots.
 4. Prefer `npm run dev` for browser recording. `next start` on plain localhost HTTP can make session-cookie behavior harder to diagnose during demo prep.
 
@@ -26,6 +26,8 @@ py -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 
 If your backend uses a different port, keep `BRAIN_API_BASE_URL` aligned with that port before opening the parent agent page or running the smoke script.
 
+If your backend runs on the default `8000`, you can also start Next.js without setting `BRAIN_API_BASE_URL`.
+
 ## Automatic Smoke
 
 ### Trend smoke
@@ -38,7 +40,9 @@ Parent-first defaults:
 
 - Demo account: `u-parent`
 - Success child: `c-1`
+- Success question: `最近一个月分离焦虑缓解了吗？`
 - Forced fallback child: `c-11`
+- Fallback question: `最近两周睡眠情况稳定吗？`
 
 What it verifies:
 
@@ -77,9 +81,9 @@ Use this path when backend is reachable and you want a live demo:
 3. Enter `/parent`
 4. Tap the trend or follow-up entry into `/parent/agent?child=c-1`
 5. On the parent agent page, tap these default trend quick questions:
-   - meal trend
-   - sleep trend
-   - separation-anxiety trend
+   - 最近一个月分离焦虑缓解了吗？
+   - 这周饮食情况有改善吗？
+   - 最近睡眠更稳定了吗？
 
 Expected on screen:
 
@@ -158,7 +162,7 @@ Use this path for deterministic page-level verification and for fallback recordi
 
 - `[session_failed|会话失败]`: demo login did not return JSON or the session cookie was not accepted.
 - `[login_redirect|被登录守卫重定向]`: the API returned `307/308` back to `/login`; re-check the demo login step and current origin or port.
-- `[brain_unavailable|FastAPI brain 未接通]`: Next route returned `503` with the T11 brain-disabled message; fix `BRAIN_API_BASE_URL` or boot the backend.
+- `[brain_unavailable|FastAPI brain 未接通]`: Next route returned `503` with the new Chinese “后端趋势服务未接通” message, or carried a `x-smartchildcare-fallback-reason=brain-*` header; start FastAPI brain, use the default `127.0.0.1:8000`, or set `BRAIN_API_BASE_URL` to the correct backend.
 - `[contract_regression|contract 回归]`: the API returned HTML, non-JSON, or JSON missing `series / trendLabel / explanation / dataQuality / warnings`.
 - If you must use `next start`, verify the same origin, cookie, and backend env again before recording.
 

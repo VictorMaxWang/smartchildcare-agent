@@ -15,6 +15,12 @@ const ERROR_TAGS = {
   brainUnavailable: "[brain_unavailable|FastAPI brain 未接通]",
   contractRegression: "[contract_regression|contract 回归]",
 };
+const BRAIN_UNAVAILABLE_TOKENS = [
+  "requires the fastapi brain",
+  "趋势服务暂时未接通",
+  "后端趋势服务未接通",
+  "brain-base-url-missing",
+];
 
 function assert(condition, message) {
   if (!condition) {
@@ -69,6 +75,7 @@ async function readResponseDetails(response) {
   return {
     status: response.status,
     ok: response.ok,
+    headers: response.headers,
     contentType: getContentType(response.headers),
     location: response.headers.get("location") || "",
     text,
@@ -85,6 +92,7 @@ function printResponseSummary(label, details) {
 function classifyApiFailure(label, details) {
   const preview = compactSnippet(details.text);
   const apiError = typeof details.json?.error === "string" ? details.json.error : preview;
+  const fallbackReason = String(details.headers?.get?.("x-smartchildcare-fallback-reason") || "").toLowerCase();
 
   if (details.status === 401) {
     throw new Error(`${label}: ${ERROR_TAGS.sessionFailed} (401). ${apiError}`);
@@ -97,7 +105,10 @@ function classifyApiFailure(label, details) {
   }
 
   if (details.status === 503) {
-    if (apiError.includes("requires the FastAPI brain")) {
+    if (
+      BRAIN_UNAVAILABLE_TOKENS.some((token) => apiError.toLowerCase().includes(token)) ||
+      fallbackReason.startsWith("brain-")
+    ) {
       throw new Error(`${label}: ${ERROR_TAGS.brainUnavailable} (503). ${apiError}`);
     }
     throw new Error(`${label}: ${ERROR_TAGS.contractRegression} or upstream failure (503). ${apiError}`);
@@ -208,106 +219,154 @@ function printTrendSummary(label, result) {
 
 function buildSuccessPayload() {
   return {
-    question: "Has meal intake improved this week?",
+    question: "最近一个月分离焦虑缓解了吗？",
     childId: successChildId,
     appSnapshot: {
       children: [
         {
           id: successChildId,
-          name: "AnAn",
-          nickname: "BaoBao",
+          name: "安安",
+          nickname: "安宝",
           institutionId: "inst-test",
-          className: "Small Class 1",
+          className: "小一班",
         },
       ],
       attendance: [],
-      meals: [
+      meals: [],
+      growth: [
         {
-          id: "meal-1",
+          id: "growth-1",
           childId: successChildId,
-          date: "2026-03-29",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "low",
-          preference: "dislike",
-          waterMl: 90,
-          nutritionScore: 56,
-          aiEvaluation: { summary: "Mostly staples, low acceptance of vegetables and protein." },
+          createdAt: "2026-03-06T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["分离焦虑", "哭闹", "安抚"],
+          selectedIndicators: ["daily-observation"],
+          description: "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+          needsAttention: true,
+          followUpAction: "continue observation",
         },
         {
-          id: "meal-2",
+          id: "growth-2",
           childId: successChildId,
-          date: "2026-03-30",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "low",
-          preference: "dislike",
-          waterMl: 100,
-          nutritionScore: 58,
-          aiEvaluation: { summary: "Meal structure is still limited." },
+          createdAt: "2026-03-09T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["分离焦虑", "哭闹", "安抚"],
+          selectedIndicators: ["daily-observation"],
+          description: "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+          needsAttention: true,
+          followUpAction: "continue observation",
         },
         {
-          id: "meal-3",
+          id: "growth-3",
           childId: successChildId,
-          date: "2026-03-31",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "medium",
-          preference: "neutral",
-          waterMl: 110,
-          nutritionScore: 60,
-          aiEvaluation: { summary: "Started accepting part of the vegetables." },
+          createdAt: "2026-03-12T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["分离焦虑", "哭闹", "安抚"],
+          selectedIndicators: ["daily-observation"],
+          description: "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+          needsAttention: true,
+          followUpAction: "continue observation",
         },
         {
-          id: "meal-4",
+          id: "growth-4",
           childId: successChildId,
-          date: "2026-04-01",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "medium",
-          preference: "neutral",
-          waterMl: 140,
-          nutritionScore: 74,
-          aiEvaluation: { summary: "More initiative during lunch." },
+          createdAt: "2026-03-15T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["分离焦虑", "哭闹", "安抚"],
+          selectedIndicators: ["daily-observation"],
+          description: "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+          needsAttention: true,
+          followUpAction: "continue observation",
         },
         {
-          id: "meal-5",
+          id: "growth-5",
           childId: successChildId,
-          date: "2026-04-02",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "good",
-          preference: "neutral",
-          waterMl: 150,
-          nutritionScore: 80,
-          aiEvaluation: { summary: "Vegetable acceptance continues to improve." },
+          createdAt: "2026-03-19T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["分离焦虑", "哭闹", "安抚"],
+          selectedIndicators: ["daily-observation"],
+          description: "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+          needsAttention: true,
+          followUpAction: "continue observation",
         },
         {
-          id: "meal-6",
+          id: "growth-6",
           childId: successChildId,
-          date: "2026-04-03",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "good",
-          preference: "accept",
-          waterMl: 170,
-          nutritionScore: 84,
-          aiEvaluation: { summary: "Lunch was almost fully finished." },
+          createdAt: "2026-03-22T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["分离焦虑", "哭闹", "安抚"],
+          selectedIndicators: ["daily-observation"],
+          description: "入园时明显哭闹，需要安抚，分离焦虑仍然比较明显。",
+          needsAttention: true,
+          followUpAction: "continue observation",
         },
         {
-          id: "meal-7",
+          id: "growth-7",
           childId: successChildId,
-          date: "2026-04-04",
-          meal: "lunch",
-          foods: ["rice", "vegetable", "protein"],
-          intakeLevel: "high",
-          preference: "accept",
-          waterMl: 180,
-          nutritionScore: 88,
-          aiEvaluation: { summary: "High completion and stable water intake." },
+          createdAt: "2026-03-25T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["平静", "稳定", "主动"],
+          selectedIndicators: ["daily-observation"],
+          description: "今天入园更平静，情绪稳定，能主动跟老师进班。",
+          needsAttention: false,
+          followUpAction: "continue observation",
+        },
+        {
+          id: "growth-8",
+          childId: successChildId,
+          createdAt: "2026-03-27T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["平静", "稳定", "主动"],
+          selectedIndicators: ["daily-observation"],
+          description: "今天入园更平静，情绪稳定，能主动跟老师进班。",
+          needsAttention: false,
+          followUpAction: "continue observation",
+        },
+        {
+          id: "growth-9",
+          childId: successChildId,
+          createdAt: "2026-03-29T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["平静", "稳定", "主动"],
+          selectedIndicators: ["daily-observation"],
+          description: "今天入园更平静，情绪稳定，能主动跟老师进班。",
+          needsAttention: false,
+          followUpAction: "continue observation",
+        },
+        {
+          id: "growth-10",
+          childId: successChildId,
+          createdAt: "2026-03-31T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["平静", "稳定", "主动"],
+          selectedIndicators: ["daily-observation"],
+          description: "今天入园更平静，情绪稳定，能主动跟老师进班。",
+          needsAttention: false,
+          followUpAction: "continue observation",
+        },
+        {
+          id: "growth-11",
+          childId: successChildId,
+          createdAt: "2026-04-02T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["平静", "稳定", "主动"],
+          selectedIndicators: ["daily-observation"],
+          description: "今天入园更平静，情绪稳定，能主动跟老师进班。",
+          needsAttention: false,
+          followUpAction: "continue observation",
+        },
+        {
+          id: "growth-12",
+          childId: successChildId,
+          createdAt: "2026-04-04T09:00:00+08:00",
+          category: "social-emotional",
+          tags: ["平静", "稳定", "主动"],
+          selectedIndicators: ["daily-observation"],
+          description: "今天入园更平静，情绪稳定，能主动跟老师进班。",
+          needsAttention: false,
+          followUpAction: "continue observation",
         },
       ],
-      growth: [],
       feedback: [],
       health: [],
       taskCheckIns: [],
@@ -322,7 +381,7 @@ function buildSuccessPayload() {
 
 function buildFallbackPayload() {
   return {
-    question: "Has sleep been stable over the past two weeks?",
+    question: "最近两周睡眠情况稳定吗？",
     childId: fallbackChildId,
   };
 }

@@ -50,6 +50,31 @@ function getSourceLabel(source: string) {
   return source;
 }
 
+function formatTrendErrorMessage(error: string | null) {
+  if (!error) return null;
+
+  const trimmed = error.trim();
+  if (!trimmed) {
+    return "趋势查询暂时不可用，请稍后再试。";
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (
+    trimmed.includes("FastAPI brain") ||
+    trimmed.includes("brain") ||
+    trimmed.includes("未接通") ||
+    trimmed.includes("后端趋势服务")
+  ) {
+    return "后端趋势服务暂时未接通，当前只能先显示失败态，请稍后再试。";
+  }
+
+  if (lower.includes("timeout") || trimmed.includes("超时")) {
+    return "后端趋势服务响应超时，请稍后再试。";
+  }
+
+  return trimmed;
+}
+
 export default function ParentTrendResponseCard({
   question,
   result,
@@ -65,6 +90,7 @@ export default function ParentTrendResponseCard({
   const warnings = result?.warnings ?? [];
   const supportingSignals = result?.supportingSignals.slice(0, 2) ?? [];
   const fallbackUsed = isTrendFallbackResult(result);
+  const displayError = formatTrendErrorMessage(error);
 
   return (
     <div
@@ -82,7 +108,7 @@ export default function ParentTrendResponseCard({
               <Badge variant={getTrendBadgeVariant(result.trendLabel)}>{result.trendLabel}</Badge>
               <Badge variant="secondary">{result.windowDays} 天</Badge>
               <Badge variant="secondary">{getSourceLabel(result.source)}</Badge>
-              {fallbackUsed ? <Badge variant="warning">演示 / 回退数据</Badge> : null}
+              {fallbackUsed ? <Badge variant="warning">演示快照</Badge> : null}
             </>
           ) : loading ? (
             <Badge variant="info">查询中</Badge>
@@ -91,6 +117,12 @@ export default function ParentTrendResponseCard({
           ) : null}
         </div>
       </div>
+
+      {displayError ? (
+        <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50/80 p-4 text-sm leading-7 text-rose-800">
+          {displayError}
+        </div>
+      ) : null}
 
       {result ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -126,6 +158,12 @@ export default function ParentTrendResponseCard({
 
       {result ? (
         <div className="mt-4 space-y-4">
+          {fallbackUsed ? (
+            <div className="rounded-[20px] border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm leading-6 text-emerald-900">
+              当前结果来自演示快照，已明确标记为非实时机构数据，适合演示趋势结构。
+            </div>
+          ) : null}
+
           <div className="rounded-2xl bg-indigo-50/70 p-4">
             <p className="text-sm font-semibold text-slate-900">解释与建议</p>
             <p className="mt-2 text-sm leading-7 text-slate-700">{result.explanation}</p>
@@ -167,7 +205,7 @@ export default function ParentTrendResponseCard({
                 ))}
               </ul>
             ) : (
-              <p className="mt-3 text-sm leading-6 text-slate-600">当前时间窗内没有额外 warning。</p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">当前时间窗内没有额外 warning。</p>
             )}
           </div>
         </div>

@@ -9,6 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PARENT_STORYBOOK_PRESETS, splitStoryBookCaptionSegments } from "@/lib/agent/parent-storybook-presets";
 import type { ParentStoryBookResponse, ParentStoryBookScene, ParentStoryBookStylePreset } from "@/lib/ai/types";
+import {
+  describeStoryBookMode,
+  formatStoryBookAudioDelivery,
+  formatStoryBookClientCache,
+  formatStoryBookHighlightSource,
+  formatStoryBookProviderLabel,
+  formatStoryBookResponseCache,
+  formatStoryBookSceneStatus,
+  formatStoryBookVoiceStyle,
+  getStoryBookPresetCopy,
+} from "@/lib/parent/storybook-viewer-copy";
 import { cn } from "@/lib/utils";
 
 type StoryBookViewerStatus = "loading" | "storybook" | "card" | "error";
@@ -63,10 +74,47 @@ function formatSeconds(value: number) {
   return `${minutes}:${seconds}`;
 }
 
-function presetLabel(id: ParentStoryBookStylePreset) {
-  if (id === "moonlit-cutout") return "Moonlit";
-  if (id === "forest-crayon") return "Forest";
-  return "Sunrise";
+function getCaptionStatusText(
+  scene: ParentStoryBookScene,
+  isPlaying: boolean,
+  playbackState: PlaybackState
+) {
+  if (scene.audioStatus === "ready") {
+    if (playbackState === "loading" && isPlaying) return "真实配音加载中";
+    if (playbackState === "paused" && isPlaying) return "真实配音已暂停";
+    if (isPlaying) return "真实配音播放中";
+    return "真实配音已就绪";
+  }
+
+  if (isPlaying) return "字幕预演播放中";
+  return "当前为字幕预演";
+}
+
+function getPlaybackActionText(
+  scene: ParentStoryBookScene,
+  isPlaying: boolean,
+  playbackState: PlaybackState
+) {
+  if (scene.audioStatus === "ready") {
+    if (playbackState === "paused" && isPlaying) return "继续播放";
+    if (isPlaying) return "暂停配音";
+    return "播放配音";
+  }
+
+  return isPlaying ? "停止预演" : "开始预演";
+}
+
+function getPlaybackTimeLabel(
+  scene: ParentStoryBookScene,
+  isSceneActive: boolean,
+  currentTime: number,
+  duration: number
+) {
+  if (isSceneActive && duration > 0) {
+    return `${formatSeconds(currentTime)} / ${formatSeconds(duration)}`;
+  }
+
+  return scene.audioStatus === "ready" ? "可播放" : "预演中";
 }
 
 export default function StoryBookViewer({
@@ -302,16 +350,26 @@ export default function StoryBookViewer({
     return <StateShell kind="error" parentHref={parentHref} pageClass={theme.page} panelClass={theme.panel} quietClass={theme.quiet} accentClass={theme.accent} errorMessage={errorMessage} onRetry={onRetry} />;
   }
 
+  const modeCopy = describeStoryBookMode(story.providerMeta.mode);
+  const responseCacheLabel = formatStoryBookResponseCache(
+    story.cacheMeta?.storyResponse
+  );
+  const audioDeliveryLabel = formatStoryBookAudioDelivery(
+    story.cacheMeta?.audioDelivery
+  );
+  const clientCacheLabel = formatStoryBookClientCache(cacheBadge);
+  const storyTypeLabel = isCard ? "成长故事卡" : "晚安微绘本";
+
   return (
     <div className={cn("min-h-[100svh] px-4 py-4 sm:px-6 sm:py-6", theme.page)}>
       <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-3xl flex-col gap-4">
         <div className="flex items-center justify-between gap-3">
           <Button asChild variant="outline" className={cn("rounded-full shadow-sm", theme.quiet)}>
-            <Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />Home</Link>
+            <Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />返回家长首页</Link>
           </Button>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge variant="info"><Sparkles className="mr-1.5 h-3.5 w-3.5" />{isCard ? "Story Card" : "Demo Storybook"}</Badge>
-            <Badge variant={story.providerMeta.mode === "live" ? "success" : story.providerMeta.mode === "mixed" ? "warning" : "secondary"}><Radio className="mr-1.5 h-3.5 w-3.5" />{story.providerMeta.mode}</Badge>
+            <Badge variant="info"><Sparkles className="mr-1.5 h-3.5 w-3.5" />{storyTypeLabel}</Badge>
+            <Badge variant={modeCopy.badgeVariant}><Radio className="mr-1.5 h-3.5 w-3.5" />{modeCopy.label}</Badge>
           </div>
         </div>
 
@@ -319,30 +377,45 @@ export default function StoryBookViewer({
           <CardHeader className="space-y-4 pb-4">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={story.cacheMeta?.storyResponse === "hit" ? "success" : "outline"}>cache {story.cacheMeta?.storyResponse ?? "bypass"}</Badge>
-                {story.providerMeta.cacheHitCount ? <Badge variant="success">provider cache {story.providerMeta.cacheHitCount}</Badge> : null}
-                <Badge variant="secondary">{story.providerMeta.imageProvider}</Badge>
-                <Badge variant="secondary">{story.providerMeta.audioProvider}</Badge>
+                <Badge variant={story.cacheMeta?.storyResponse === "hit" ? "success" : "outline"}>{responseCacheLabel}</Badge>
+                {story.providerMeta.cacheHitCount ? <Badge variant="success">素材缓存命中 {story.providerMeta.cacheHitCount}</Badge> : null}
+                <Badge variant="secondary">{formatStoryBookProviderLabel("image", story.providerMeta.imageProvider)}</Badge>
+                <Badge variant="secondary">{formatStoryBookProviderLabel("audio", story.providerMeta.audioProvider)}</Badge>
               </div>
               <CardTitle className="text-2xl tracking-tight text-slate-950">{story.title}</CardTitle>
               <CardDescription className="max-w-2xl text-sm leading-6 text-slate-600">{story.summary}</CardDescription>
             </div>
 
+            <div className="rounded-[28px] border border-white/70 bg-white/60 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={modeCopy.badgeVariant}>{modeCopy.label}</Badge>
+                <Badge variant={story.providerMeta.realProvider ? "success" : "secondary"}>
+                  {story.providerMeta.realProvider ? "含真实生成能力" : "当前为演示资源"}
+                </Badge>
+                <Badge variant="outline">分镜 {story.providerMeta.sceneCount}</Badge>
+                <Badge variant="outline">亮点 {story.providerMeta.highlightCount} 条</Badge>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-slate-700">{modeCopy.summary}</p>
+            </div>
+
             <div className="space-y-3 rounded-[28px] border border-white/60 bg-white/55 p-3">
               <div className="flex flex-wrap gap-2">
-                {PARENT_STORYBOOK_PRESETS.map((item) => (
-                  <button key={item.id} type="button" onClick={() => handlePresetSelect?.(item.id)} className={cn("rounded-2xl border px-3 py-2 text-left text-sm transition-all", item.id === presetId ? "border-slate-900 bg-white text-slate-950 shadow-sm" : "border-white/60 bg-white/55 text-slate-600")}>
-                    <div className="font-semibold">{presetLabel(item.id)}</div>
-                    <div className="mt-1 text-xs opacity-80">{item.id}</div>
-                  </button>
-                ))}
+                {PARENT_STORYBOOK_PRESETS.map((item) => {
+                  const presetCopy = getStoryBookPresetCopy(item.id);
+                  return (
+                    <button key={item.id} type="button" onClick={() => handlePresetSelect?.(item.id)} className={cn("rounded-2xl border px-3 py-2 text-left text-sm transition-all", item.id === presetId ? "border-slate-900 bg-white text-slate-950 shadow-sm" : "border-white/60 bg-white/55 text-slate-600")}>
+                      <div className="font-semibold">{presetCopy.shortLabel}</div>
+                      <div className="mt-1 text-xs opacity-80">{presetCopy.description}</div>
+                    </button>
+                  );
+                })}
               </div>
-              <p className="text-xs leading-6 text-slate-500">Switch preset for recording. Theme stays visible even when media falls back.</p>
+              <p className="text-xs leading-6 text-slate-500">可随时切换绘本风格；即使当前媒体走兜底，录屏画面和故事节奏也会保持完整。</p>
             </div>
 
             {refreshMessage ? <div className="rounded-3xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm leading-6 text-amber-900">{refreshMessage}</div> : null}
-            {isRefreshing ? <div className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" />Refreshing preset while keeping the previous story visible.</div> : null}
-            {cacheBadge !== "none" ? <div className="text-xs text-slate-500">client cache {cacheBadge}</div> : null}
+            {isRefreshing ? <div className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" />正在刷新风格与媒体，当前先保留上一版微绘本。</div> : null}
+            {cacheBadge !== "none" ? <div className="text-xs text-slate-500">{clientCacheLabel}</div> : null}
           </CardHeader>
 
           <CardContent className="pb-6">
@@ -355,18 +428,20 @@ export default function StoryBookViewer({
               {scenes.map((scene, index) => {
                 const isActive = index === activeIndex;
                 const isPlaying = playbackSceneIndex === index && playbackState !== "idle";
+                const isScenePlaybackTarget = playbackSceneIndex === index;
                 const segments = splitStoryBookCaptionSegments(scene.audioScript || scene.sceneText);
+                const playbackActionText = getPlaybackActionText(scene, isPlaying, playbackState);
                 return (
                   <article key={scene.sceneIndex} className={cn("min-w-full snap-center rounded-[30px] border border-white/60 p-4 transition-all duration-300 sm:p-5", isActive ? "translate-y-0 scale-100 bg-white/84 shadow-[0_22px_70px_rgba(15,23,42,0.12)]" : "translate-y-1 scale-[0.985] bg-white/68 shadow-[0_12px_40px_rgba(15,23,42,0.06)]")}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <Badge variant={isActive ? "success" : "secondary"}>Scene {index + 1}</Badge>
-                        <Badge variant="outline" className={theme.chip}>{scene.highlightSource}</Badge>
-                        {isPlaying ? <Badge variant="info"><AudioLines className="mr-1.5 h-3.5 w-3.5" />narration</Badge> : null}
+                        <Badge variant={isActive ? "success" : "secondary"}>第 {index + 1} 幕</Badge>
+                        <Badge variant="outline" className={theme.chip}>{formatStoryBookHighlightSource(scene.highlightSource)}</Badge>
+                        {isPlaying ? <Badge variant="info"><AudioLines className="mr-1.5 h-3.5 w-3.5" />{scene.audioStatus === "ready" ? "配音中" : "预演中"}</Badge> : null}
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge variant={scene.imageStatus === "ready" ? "success" : "warning"}>{scene.imageStatus}</Badge>
-                        <Badge variant={scene.audioStatus === "ready" ? "success" : "warning"}>{scene.audioStatus}</Badge>
+                        <Badge variant={scene.imageStatus === "ready" ? "success" : "warning"}>{formatStoryBookSceneStatus("image", scene.imageStatus)}</Badge>
+                        <Badge variant={scene.audioStatus === "ready" ? "success" : "warning"}>{formatStoryBookSceneStatus("audio", scene.audioStatus)}</Badge>
                       </div>
                     </div>
 
@@ -380,19 +455,19 @@ export default function StoryBookViewer({
                       <div className="rounded-[28px] border border-white/70 bg-white/72 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="text-sm font-semibold text-slate-950">Caption Follow</p>
+                            <p className="text-sm font-semibold text-slate-950">字幕跟读</p>
                             <p className="mt-1 text-xs text-slate-500">
-                              {scene.audioStatus === "ready" ? isPlaying ? playbackState === "paused" ? "Real audio paused" : "Real audio playing" : "Real audio ready" : isPlaying ? "Caption preview running" : "Preview mode"}
+                              {getCaptionStatusText(scene, isPlaying, playbackState)}
                             </p>
                           </div>
                           <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => handlePlay(scene, index)}>
                             {isPlaying && playbackState !== "paused" ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
-                            {scene.audioStatus === "ready" ? "Narration" : "Preview"}
+                            {playbackActionText}
                           </Button>
                         </div>
 
                         <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className={cn("h-full rounded-full transition-[width] duration-300", theme.progress)} style={{ width: `${Math.max(playbackSceneIndex === index ? progress * 100 : 0, isPlaying ? 8 : 0)}%` }} /></div>
-                        <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-slate-400"><span>{scene.voiceStyle}</span><span>{playbackSceneIndex === index && duration > 0 ? `${formatSeconds(currentTime)} / ${formatSeconds(duration)}` : "ready"}</span></div>
+                        <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-slate-400"><span>{formatStoryBookVoiceStyle(scene.voiceStyle)}</span><span>{getPlaybackTimeLabel(scene, isScenePlaybackTarget, currentTime, duration)}</span></div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {(segments.length > 0 ? segments : [scene.sceneText]).map((segment, segmentIndex) => (
                             <span key={`${scene.sceneIndex}-${segmentIndex}`} className={cn("rounded-2xl border px-3 py-2 text-sm leading-6 transition-all duration-300", isPlaying && segmentIndex === captionIndex ? theme.caption : "border-white/60 bg-white/70 text-slate-600")}>{segment}</span>
@@ -402,30 +477,30 @@ export default function StoryBookViewer({
                     </div>
 
                     <div className="mt-4 flex items-center justify-between gap-3">
-                      <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => scrollToScene(Math.max(0, index - 1))} disabled={index === 0}><ArrowLeft className="mr-2 h-4 w-4" />Prev</Button>
+                      <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => scrollToScene(Math.max(0, index - 1))} disabled={index === 0}><ArrowLeft className="mr-2 h-4 w-4" />上一幕</Button>
                       <Button type="button" className={cn("rounded-full shadow-sm", theme.accent)} onClick={() => handlePlay(scene, index)}>
                         {isPlaying && playbackState !== "paused" ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
-                        {scene.audioStatus === "ready" ? isPlaying && playbackState !== "paused" ? "Pause" : playbackState === "paused" && playbackSceneIndex === index ? "Resume" : "Play" : isPlaying ? "Stop Preview" : "Preview"}
+                        {playbackActionText}
                       </Button>
-                      <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => scrollToScene(Math.min(scenes.length - 1, index + 1))} disabled={index === scenes.length - 1}>Next<ArrowRight className="ml-2 h-4 w-4" /></Button>
+                      <Button type="button" variant="outline" className={cn("rounded-full", theme.quiet)} onClick={() => scrollToScene(Math.min(scenes.length - 1, index + 1))} disabled={index === scenes.length - 1}>下一幕<ArrowRight className="ml-2 h-4 w-4" /></Button>
                     </div>
                   </article>
                 );
               })}
             </div>
 
-            {!isCard ? <div className="mt-4 flex items-center justify-between gap-3"><div className="flex flex-wrap gap-2">{scenes.map((scene, index) => <button key={scene.sceneIndex} type="button" onClick={() => scrollToScene(index)} className={cn("h-2.5 rounded-full transition-all", index === activeIndex ? `w-10 ${theme.dot}` : `w-2.5 ${theme.dotIdle}`)} aria-label={`Go to scene ${index + 1}`} />)}</div><p className="text-xs text-slate-500">Swipe or tap buttons. Motion stays light for mobile.</p></div> : null}
+            {!isCard ? <div className="mt-4 flex items-center justify-between gap-3"><div className="flex flex-wrap gap-2">{scenes.map((scene, index) => <button key={scene.sceneIndex} type="button" onClick={() => scrollToScene(index)} className={cn("h-2.5 rounded-full transition-all", index === activeIndex ? `w-10 ${theme.dot}` : `w-2.5 ${theme.dotIdle}`)} aria-label={`跳转到第 ${index + 1} 幕`} />)}</div><p className="text-xs text-slate-500">左右滑动或点按钮切换，移动端动效保持轻量。</p></div> : null}
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <Card className={cn("border-white/70", theme.panel)}><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-2"><Badge variant={story.providerMeta.realProvider ? "success" : "warning"}>{story.providerMeta.realProvider ? "Real provider involved" : "Fallback ready"}</Badge><Badge variant="outline">scene {story.providerMeta.sceneCount}</Badge><Badge variant="outline">highlight {story.providerMeta.highlightCount}</Badge></div><p className="text-sm leading-7 text-slate-600">{story.providerMeta.mode === "live" ? "All scenes have real image and real narration." : story.providerMeta.mode === "mixed" ? "Some scenes hit real media, some stayed on fallback. This is the intended mixed demo state." : "The whole story is fallback, but the demo flow remains intact."}</p></CardContent></Card>
-              <Card className={cn("border-white/70", theme.panel)}><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-2"><Badge variant="outline">audio {story.cacheMeta?.audioDelivery ?? "preview-only"}</Badge><Badge variant="outline">response {story.cacheMeta?.storyResponse ?? "bypass"}</Badge><Badge variant="outline">TTL {Math.round((story.providerMeta.cacheWindowSeconds ?? 0) / 60)}m</Badge></div><p className="text-sm leading-7 text-slate-600">{story.cacheMeta?.audioDelivery === "stream-url" ? "Ready audio is delivered through a short media URL, not a large data URL." : "No ready audio is available, so the viewer falls back to subtitle preview."}</p></CardContent></Card>
+              <Card className={cn("border-white/70", theme.panel)}><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-2"><Badge variant={modeCopy.badgeVariant}>{modeCopy.label}</Badge><Badge variant="outline">分镜 {story.providerMeta.sceneCount}</Badge><Badge variant="outline">亮点 {story.providerMeta.highlightCount}</Badge></div><p className="text-sm leading-7 text-slate-600">{modeCopy.summary}</p><p className="text-sm leading-7 text-slate-600">故事收束：{story.moral}</p></CardContent></Card>
+              <Card className={cn("border-white/70", theme.panel)}><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-2"><Badge variant="outline">{audioDeliveryLabel}</Badge><Badge variant="outline">{responseCacheLabel}</Badge><Badge variant="outline">缓存窗 {Math.round((story.providerMeta.cacheWindowSeconds ?? 0) / 60)} 分钟</Badge></div><p className="text-sm leading-7 text-slate-600">{story.cacheMeta?.audioDelivery === "stream-url" ? "真实配音通过短链媒体地址下发，移动端加载更稳。" : story.cacheMeta?.audioDelivery === "inline-data-url" ? "真实配音以内联数据下发，适合纯前端预览。" : "当前没有可直接播放的真实配音，自动回落到字幕预演。"}</p><p className="text-sm leading-7 text-slate-600">今晚陪伴动作：{story.parentNote}</p></CardContent></Card>
             </div>
           </CardContent>
         </Card>
 
         <div className="flex items-center justify-between gap-3">
-          <Button asChild variant="outline" className={cn("rounded-full", theme.quiet)}><Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />Back</Link></Button>
-          {onRetry ? <Button type="button" className={cn("rounded-full shadow-sm", theme.accent)} onClick={onRetry}><RotateCcw className="mr-2 h-4 w-4" />Retry</Button> : null}
+          <Button asChild variant="outline" className={cn("rounded-full", theme.quiet)}><Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />返回</Link></Button>
+          {onRetry ? <Button type="button" className={cn("rounded-full shadow-sm", theme.accent)} onClick={onRetry}><RotateCcw className="mr-2 h-4 w-4" />重新生成</Button> : null}
         </div>
       </div>
     </div>
@@ -455,7 +530,7 @@ function StateShell({
     return (
       <div className={cn("min-h-[100svh] px-4 py-4 sm:px-6 sm:py-6", pageClass)}>
         <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-3xl flex-col justify-between gap-4">
-          <Button asChild variant="outline" className={cn("w-fit rounded-full", quietClass)}><Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />Home</Link></Button>
+          <Button asChild variant="outline" className={cn("w-fit rounded-full", quietClass)}><Link href={parentHref}><ArrowLeft className="mr-2 h-4 w-4" />返回家长首页</Link></Button>
           <Card className={cn("backdrop-blur-xl", panelClass)}><CardContent className="space-y-4 p-4 sm:p-6"><div className="h-6 w-40 animate-pulse rounded-full bg-slate-200" /><div className="h-4 w-full animate-pulse rounded-full bg-slate-200" /><div className="h-4 w-5/6 animate-pulse rounded-full bg-slate-200" /><div className="h-72 rounded-[28px] bg-slate-100" /><div className="grid gap-3 sm:grid-cols-3"><div className="h-14 animate-pulse rounded-2xl bg-slate-100" /><div className="h-14 animate-pulse rounded-2xl bg-slate-100" /><div className="h-14 animate-pulse rounded-2xl bg-slate-100" /></div></CardContent></Card>
         </div>
       </div>
@@ -466,10 +541,10 @@ function StateShell({
     <div className={cn("min-h-[100svh] px-4 py-4 sm:px-6 sm:py-6", pageClass)}>
       <div className="mx-auto flex min-h-[calc(100svh-2rem)] max-w-2xl flex-col justify-center gap-4">
         <Card className={cn("backdrop-blur-xl", panelClass)}>
-          <CardHeader><CardTitle className="text-2xl text-slate-950">Storybook unavailable</CardTitle><CardDescription className="text-sm leading-6 text-slate-600">{errorMessage ?? "Go back and try again."}</CardDescription></CardHeader>
+          <CardHeader><CardTitle className="text-2xl text-slate-950">微绘本暂时不可用</CardTitle><CardDescription className="text-sm leading-6 text-slate-600">{errorMessage ?? "请先返回上一页，再重新尝试。"}</CardDescription></CardHeader>
           <CardContent className="flex flex-wrap gap-3">
-            <Button asChild variant="outline" className={cn("rounded-full", quietClass)}><Link href={parentHref}>Back home</Link></Button>
-            {onRetry ? <Button type="button" className={cn("rounded-full shadow-sm", accentClass)} onClick={onRetry}><RotateCcw className="mr-2 h-4 w-4" />Retry</Button> : null}
+            <Button asChild variant="outline" className={cn("rounded-full", quietClass)}><Link href={parentHref}>返回家长首页</Link></Button>
+            {onRetry ? <Button type="button" className={cn("rounded-full shadow-sm", accentClass)} onClick={onRetry}><RotateCcw className="mr-2 h-4 w-4" />重新生成</Button> : null}
           </CardContent>
         </Card>
       </div>

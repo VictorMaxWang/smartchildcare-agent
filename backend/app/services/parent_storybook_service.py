@@ -188,7 +188,7 @@ def _build_parent_note(
     latest_consultation: dict[str, Any],
 ) -> str:
     if mode == "card":
-        return f"今晚先读一张轻量成长故事卡，帮 {child_name} 把今天最值得记住的小进步收好。"
+        return f"今晚先读一张轻量成长故事卡，再把 {child_name} 今天最值得继续陪伴的一幕轻轻说给孩子听。"
 
     action = (
         _normalize_text(latest_intervention_card.get("tonightHomeAction"))
@@ -197,13 +197,13 @@ def _build_parent_note(
         or (highlights[1]["detail"] if len(highlights) > 1 else "")
     )
     if action:
-        return f"听完故事后，今晚只做一件小事：{action}"
-    return f"听完故事后，和 {child_name} 一起回顾今天最亮的一幕，再轻轻把一天收尾。"
+        return f"听完故事后，今晚只做一件小事：{action} 不用催快，也不追求一次做到，只要陪着孩子把这一小步走稳。"
+    return f"听完故事后，和 {child_name} 一起回顾今天最亮的一幕，让情绪轻一点收尾。"
 
 
 def _build_moral(child_name: str, highlights: list[dict[str, Any]]) -> str:
     primary = highlights[0]["detail"] if highlights else f"{child_name} 又向前走了一小步"
-    return f"成长不需要一下子完成，只要有人看见 {primary}，孩子就会更愿意继续往前。"
+    return f"孩子真正会记住的，不是被要求快一点，而是有人看见了 {primary}，也愿意陪他把这一小步走稳。"
 
 
 def _build_scene_script(
@@ -217,16 +217,16 @@ def _build_scene_script(
     next_detail = highlights[index + 1]["detail"] if index + 1 < len(highlights) else memory_hint
 
     if index == 0:
-        title = "今天的小亮点"
-        text = f"{child_name}{f' 在 {class_name}' if class_name else ''} 今天最值得被看见的是：{primary}。这像一颗轻轻亮起来的小星星。"
+        title = "今天被看见的小进步"
+        text = f"{child_name}{f' 在 {class_name}' if class_name else ''} 今天被看见的一幕，是：{primary}。老师先把这份小进步轻轻收好，让它不只停在白天，也能陪孩子一起回家。"
     elif index == 1:
-        title = "有人陪着慢慢来"
+        title = "老师和家长陪着慢慢来"
         support = next_detail or "老师和家人的稳定陪伴，让这份努力更容易发生。"
-        text = f"故事来到第二幕，大人没有催促，只是轻轻陪着 {child_name} 再试一次。{support}"
+        text = f"第二幕里，大人没有催快，只是顺着 {child_name} 今天的节奏继续陪着走。{support} 当孩子被稳稳接住时，原来有点难的事，也会慢慢变得愿意再试一次。"
     else:
-        title = "晚安继续长大"
+        title = "今晚只做一件小事"
         closing = next_detail or "明天再回头看，会发现成长就是这样一点点长出来的。"
-        text = f"到了晚上，这份小进步慢慢变成一则可以带回家的晚安故事。{closing}"
+        text = f"到了晚上，这份小进步慢慢变成一则可以带回家的晚安故事。今晚先只做一件小事，再把观察点留给明天。{closing}"
 
     return title, text
 
@@ -450,7 +450,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             {
                 "kind": "weeklyTrend",
                 "title": "成长故事卡",
-                "detail": "今天先用一张轻量故事卡，把值得记住的小变化收好。",
+                "detail": "今天先用一张轻量故事卡，把最值得继续陪伴的小变化收好。",
                 "priority": 1,
                 "source": "rule",
             }
@@ -552,9 +552,9 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
 
     primary_detail = highlights[0]["detail"] if highlights else "今天多了一点值得被看见的进步"
     summary = (
-        f"{child_name} 的今天，可以用“{primary_detail}”来概括。"
+        f"{child_name} 的今天，可以用“{primary_detail}”来概括；这本微绘本会继续把当日亮点、今晚动作和明天观察点串成一个睡前小闭环。"
         if mode == "storybook"
-        else f"{child_name} 的今天适合先用一张轻量成长故事卡轻轻收尾。"
+        else f"{child_name} 的今天适合先用一张轻量成长故事卡轻轻收尾，把今晚陪伴动作和明天观察点先收进故事里。"
     )
 
     provider_mode = _provider_mode_from_scenes(scenes)

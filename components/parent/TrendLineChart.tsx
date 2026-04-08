@@ -66,6 +66,31 @@ function buildSupportMetricSummary(series: ParentTrendSeries[]) {
   });
 }
 
+function formatTrendChartErrorMessage(error: string | null) {
+  if (!error) return null;
+
+  const trimmed = error.trim();
+  if (!trimmed) {
+    return "趋势图暂时无法显示，请稍后再试。";
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (
+    trimmed.includes("FastAPI brain") ||
+    trimmed.includes("brain") ||
+    trimmed.includes("未接通") ||
+    trimmed.includes("后端趋势服务")
+  ) {
+    return "后端趋势服务暂时未接通，趋势图先不展示实时数据。";
+  }
+
+  if (lower.includes("timeout") || trimmed.includes("超时")) {
+    return "后端趋势服务响应超时，趋势图暂时无法刷新。";
+  }
+
+  return trimmed;
+}
+
 function TrendTooltip({
   active,
   payload,
@@ -159,6 +184,7 @@ export default function TrendLineChart({
     () => primarySeries?.data.filter((point) => typeof point.value === "number").length ?? 0,
     [primarySeries]
   );
+  const displayError = formatTrendChartErrorMessage(error);
   const visibleTickStep = chartRows.length > 14 ? 4 : chartRows.length > 7 ? 2 : 1;
 
   if (loading) {
@@ -174,14 +200,14 @@ export default function TrendLineChart({
     );
   }
 
-  if (error) {
+  if (displayError) {
     return (
       <div className="rounded-3xl border border-rose-100 bg-rose-50/80 p-4" data-testid="trend-chart-error">
         <p className="text-sm font-semibold text-rose-700">趋势图暂时不可用</p>
-        <p className="mt-2 text-sm leading-6 text-rose-700/90">{error}</p>
+        <p className="mt-2 text-sm leading-6 text-rose-700/90">{displayError}</p>
         {onRetry ? (
           <Button type="button" variant="outline" className="mt-3 rounded-xl" onClick={onRetry}>
-            重试趋势查询
+            重新查询趋势
           </Button>
         ) : null}
       </div>
@@ -196,7 +222,7 @@ export default function TrendLineChart({
       >
         <BarChart3 className="h-5 w-5 text-slate-400" />
         <p className="mt-3 text-sm font-semibold text-slate-700">当前时间窗内没有可展示的数据</p>
-        <p className="mt-1 text-sm text-slate-500">可以换一个趋势问题，或等待更多记录后再看。</p>
+        <p className="mt-1 text-sm text-slate-500">可以换一个趋势问题，或等更多记录积累后再看。</p>
       </div>
     );
   }
