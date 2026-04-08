@@ -33,6 +33,14 @@ function isParentStoryBookRequest(payload: unknown): payload is ParentStoryBookR
   ) {
     return false;
   }
+  if (
+    "styleMode" in payload &&
+    payload.styleMode !== undefined &&
+    payload.styleMode !== "preset" &&
+    payload.styleMode !== "custom"
+  ) {
+    return false;
+  }
   return Array.isArray(payload.highlightCandidates);
 }
 

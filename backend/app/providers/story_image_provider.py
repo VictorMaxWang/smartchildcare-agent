@@ -109,7 +109,6 @@ class MockStoryImageProvider:
         image_prompt: str | None = None,
     ) -> ProviderResult[dict[str, Any]]:
         del child_id, story_id
-        asset_ref = "/storybook/card.svg" if story_mode == "card" else f"/storybook/scene-{min(scene_index + 1, 3)}.svg"
         prompt = image_prompt or _build_default_prompt(
             child_name=child_name,
             class_name=class_name,
@@ -119,8 +118,8 @@ class MockStoryImageProvider:
         return ProviderResult(
             output={
                 "imagePrompt": prompt,
-                "imageUrl": asset_ref,
-                "assetRef": asset_ref,
+                "imageUrl": None,
+                "assetRef": None,
                 "imageStatus": "fallback" if story_mode == "storybook" else "mock",
                 "cacheHit": False,
             },

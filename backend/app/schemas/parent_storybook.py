@@ -18,6 +18,7 @@ ParentStoryBookMediaStatus = Literal["ready", "mock", "fallback", "empty"]
 ParentStoryBookGenerationMode = Literal["child-personalized", "manual-theme", "hybrid"]
 ParentStoryBookPageCount = Literal[4, 6, 8]
 ParentStoryBookStylePreset = Literal["sunrise-watercolor", "moonlit-cutout", "forest-crayon"]
+ParentStoryBookStyleMode = Literal["preset", "custom"]
 ParentStoryBookHighlightKind = Literal[
     "todayGrowth",
     "warningSuggestion",
@@ -49,6 +50,7 @@ class ParentStoryBookProviderMeta(ParentStoryBookModel):
     transport: str | None = None
     image_provider: str
     audio_provider: str
+    audio_delivery: Literal["real", "mixed", "preview-only"] | None = None
     style_preset: ParentStoryBookStylePreset | None = None
     request_source: str | None = None
     fallback_reason: str | None = None
@@ -114,6 +116,18 @@ class ParentStoryBookRequest(ParentStoryBookModel):
     style_preset: ParentStoryBookStylePreset | None = Field(
         default=None,
         validation_alias=AliasChoices("stylePreset", "style_preset"),
+    )
+    style_mode: ParentStoryBookStyleMode | None = Field(
+        default=None,
+        validation_alias=AliasChoices("styleMode", "style_mode"),
+    )
+    custom_style_prompt: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("customStylePrompt", "custom_style_prompt"),
+    )
+    custom_style_negative_prompt: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("customStyleNegativePrompt", "custom_style_negative_prompt"),
     )
     style_prompt: str | None = Field(
         default=None,

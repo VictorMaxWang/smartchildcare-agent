@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
+from time import time
 from typing import Any, Literal
 
 from app.core.config import get_settings
@@ -11,6 +12,7 @@ from app.providers.story_image_provider import MockStoryImageProvider, resolve_s
 from app.services.storybook_media_cache import get_storybook_media_cache
 
 DEFAULT_STYLE_PRESET = "sunrise-watercolor"
+DEFAULT_STYLE_MODE = "preset"
 DEFAULT_GENERATION_MODE = "child-personalized"
 DEFAULT_PAGE_COUNT = 6
 STORYBOOK_FOCUS_FALLBACK = "慢慢长大的力量"
@@ -45,6 +47,32 @@ STORYBOOK_BASE_DATE = datetime(2026, 4, 7, 12, 0, 0, tzinfo=UTC)
 
 StoryMode = Literal["storybook", "card"]
 GenerationMode = Literal["child-personalized", "manual-theme", "hybrid"]
+StyleMode = Literal["preset", "custom"]
+
+DEFAULT_STYLE_NEGATIVE_PROMPT = "不要照片感、不要写实人脸、不要复杂背景、不要成人化、不要杂乱文字"
+STYLE_PALETTES: dict[str, dict[str, str]] = {
+    "sunrise-watercolor": {
+        "backgroundStart": "#fff3cf",
+        "backgroundEnd": "#fde5ea",
+        "accent": "#f59e0b",
+        "text": "#7c3a0f",
+        "chip": "#fff8e6",
+    },
+    "moonlit-cutout": {
+        "backgroundStart": "#dbeafe",
+        "backgroundEnd": "#e0e7ff",
+        "accent": "#2563eb",
+        "text": "#1d4ed8",
+        "chip": "#eff6ff",
+    },
+    "forest-crayon": {
+        "backgroundStart": "#dcfce7",
+        "backgroundEnd": "#fef3c7",
+        "accent": "#059669",
+        "text": "#166534",
+        "chip": "#f0fdf4",
+    },
+}
 
 
 def _payload_get(payload: dict[str, Any], *keys: str) -> Any:
@@ -94,11 +122,75 @@ def _resolve_style_preset(payload: dict[str, Any]) -> str:
     return DEFAULT_STYLE_PRESET
 
 
-def _resolve_style_prompt(payload: dict[str, Any], style_preset: str) -> str:
+def _resolve_style_mode(payload: dict[str, Any]) -> StyleMode:
+    requested = _normalize_text(_payload_get(payload, "styleMode", "style_mode"))
+    return "custom" if requested == "custom" else DEFAULT_STYLE_MODE  # type: ignore[return-value]
+
+
+def _resolve_style_palette(style_mode: StyleMode, style_preset: str, custom_prompt: str) -> dict[str, str]:
+    if style_mode != "custom":
+        return STYLE_PALETTES.get(style_preset, STYLE_PALETTES[DEFAULT_STYLE_PRESET]).copy()
+
+    lowered = custom_prompt.lower()
+    if any(token in lowered for token in ["night", "moon", "蓝", "夜", "星"]):
+        return {
+            "backgroundStart": "#dbeafe",
+            "backgroundEnd": "#e0e7ff",
+            "accent": "#2563eb",
+            "text": "#1e3a8a",
+            "chip": "#eff6ff",
+        }
+    if any(token in lowered for token in ["forest", "green", "森", "草", "自然"]):
+        return {
+            "backgroundStart": "#dcfce7",
+            "backgroundEnd": "#fef3c7",
+            "accent": "#059669",
+            "text": "#166534",
+            "chip": "#f0fdf4",
+        }
+    return {
+        "backgroundStart": "#fff7ed",
+        "backgroundEnd": "#fce7f3",
+        "accent": "#ea580c",
+        "text": "#7c2d12",
+        "chip": "#fff7ed",
+    }
+
+
+def _resolve_style_recipe(payload: dict[str, Any]) -> dict[str, Any]:
+    style_preset = _resolve_style_preset(payload)
+    style_mode = _resolve_style_mode(payload)
     explicit = _normalize_text(_payload_get(payload, "stylePrompt", "style_prompt"))
-    if explicit:
-        return explicit
-    return STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET])
+    custom_prompt = _normalize_text(_payload_get(payload, "customStylePrompt", "custom_style_prompt"))
+    custom_negative = _normalize_text(
+        _payload_get(payload, "customStyleNegativePrompt", "custom_style_negative_prompt")
+    )
+
+    if style_mode == "custom":
+        resolved_prompt = (
+            custom_prompt
+            or explicit
+            or "梦幻儿童绘本，柔焦，浅景深，温柔光影，移动端纵向大画幅"
+        )
+        resolved_negative = custom_negative or DEFAULT_STYLE_NEGATIVE_PROMPT
+        prompt = f"儿童绘本风格方向：{resolved_prompt}。负面约束：{resolved_negative}。"
+        return {
+            "mode": style_mode,
+            "preset": style_preset,
+            "prompt": prompt,
+            "custom_prompt": resolved_prompt,
+            "custom_negative_prompt": resolved_negative,
+            "palette": _resolve_style_palette(style_mode, style_preset, resolved_prompt),
+        }
+
+    return {
+        "mode": style_mode,
+        "preset": style_preset,
+        "prompt": explicit or STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET]),
+        "custom_prompt": "",
+        "custom_negative_prompt": "",
+        "palette": _resolve_style_palette(style_mode, style_preset, ""),
+    }
 
 
 def _resolve_generation_mode(payload: dict[str, Any]) -> GenerationMode:
@@ -467,12 +559,15 @@ def _build_story_ingredients(payload: dict[str, Any], snapshot: dict[str, Any], 
         tomorrow_observation=tomorrow_observation,
         generation_mode=generation_mode,
     )
+    style_recipe = _resolve_style_recipe(payload)
     return {
         "child_name": child_name,
         "class_name": class_name,
         "focus_theme": focus_theme,
         "goal_keywords": _normalize_keywords(_payload_get(payload, "goalKeywords", "goal_keywords")),
         "protagonist": protagonist,
+        "protagonist_name": protagonist["label"],
+        "protagonist_archetype": protagonist["archetype"],
         "generation_mode": generation_mode,
         "page_count": _resolve_page_count(payload),
         "highlights": highlights,
@@ -486,7 +581,8 @@ def _build_story_ingredients(payload: dict[str, Any], snapshot: dict[str, Any], 
         "tomorrow_observation": tomorrow_observation,
         "prompt_hint": _normalize_text(_payload_get(payload, "manualPrompt", "manual_prompt")),
         "parent_note": parent_note,
-        "style_prompt": _resolve_style_prompt(payload, _resolve_style_preset(payload)),
+        "style_prompt": style_recipe["prompt"],
+        "style_recipe": style_recipe,
         "story_mode": story_mode,
     }
 
@@ -613,6 +709,255 @@ def _build_story_scenes(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
     return scenes
 
 
+def _build_scene_title_v2(stage: str) -> str:
+    return {
+        "opening": "月光翻开第一页",
+        "setup": "小脚步在路上",
+        "challenge": "遇到一点点难",
+        "support": "有人轻轻托住它",
+        "attempt": "它决定再试一下",
+        "wobble": "风吹来时先停一停",
+        "small-success": "小小光亮出现了",
+        "landing": "把温柔带回今晚",
+    }[stage]
+
+
+def _build_stage_goal_v2(stage: str) -> str:
+    return {
+        "opening": "建立温柔开场，让孩子先感到被看见",
+        "setup": "把节奏放慢，让故事进入可尝试的状态",
+        "challenge": "呈现眼前的小挑战，但不责备",
+        "support": "让支持先出现，稳定情绪",
+        "attempt": "把行动拆成最小的一步",
+        "wobble": "承认波动正常，让孩子可以停一停",
+        "small-success": "让孩子看见已经发生的小成功",
+        "landing": "落到今晚行动和明天观察，形成成长闭环",
+    }[stage]
+
+
+def _build_scene_environment_v2(stage: str, ingredients: dict[str, Any]) -> str:
+    class_name = _normalize_text(ingredients.get("class_name"))
+    class_hint = f"{class_name}旁的故事角" if class_name else "柔软安静的故事角"
+    return {
+        "opening": f"{class_hint}和暖暖窗边",
+        "setup": "铺着浅色地毯的小路口",
+        "challenge": "要迈出一步的小门前",
+        "support": "有抱抱和轻声提醒的陪伴角",
+        "attempt": "留着一束小光的练习地毯",
+        "wobble": "可以先停下来深呼吸的安静角落",
+        "small-success": "冒出一点点光亮的林间小路",
+        "landing": "睡前灯光柔柔的小房间",
+    }[stage]
+
+
+def _build_scene_emotion_v2(stage: str) -> str:
+    return {
+        "opening": "安心又期待",
+        "setup": "慢慢稳下来",
+        "challenge": "有点犹豫，但还想试试",
+        "support": "被接住、被陪伴",
+        "attempt": "鼓起一点点勇气",
+        "wobble": "轻轻摇晃，但没有放弃",
+        "small-success": "惊喜、亮起来",
+        "landing": "安定、适合睡前",
+    }[stage]
+
+
+def _build_scene_visible_action_v2(stage: str, ingredients: dict[str, Any]) -> str:
+    protagonist_label = ingredients["protagonist"]["label"]
+    return {
+        "opening": f"{protagonist_label}抱着今天的小亮点，轻轻看向前方",
+        "setup": f"{protagonist_label}先停一停，再把脚步放轻",
+        "challenge": f"{protagonist_label}站在小挑战前，耳朵和尾巴都慢下来",
+        "support": f"一只温柔的大手递来陪伴，{protagonist_label}慢慢靠近",
+        "attempt": f"{protagonist_label}先做一个最小的动作",
+        "wobble": f"{protagonist_label}先抱抱自己，再重新出发",
+        "small-success": f"{protagonist_label}抬起头，发现自己已经往前走了一小步",
+        "landing": f"{protagonist_label}把今晚的小动作收进睡前仪式",
+    }[stage]
+
+
+def _select_highlight_v2(ingredients: dict[str, Any], index: int, stage: str) -> dict[str, Any]:
+    highlights = ingredients["highlights"]
+    fallback_detail = ingredients["tonight_action"] if stage == "landing" else ingredients["summary_highlight"]
+    if index < len(highlights):
+        return highlights[index]
+    if highlights:
+        return highlights[-1]
+    return {
+        "kind": "weeklyTrend",
+        "title": _build_scene_title_v2(stage),
+        "detail": fallback_detail,
+        "priority": 99,
+        "source": "rule",
+    }
+
+
+def _build_scene_narrative_anchor_v2(stage: str, ingredients: dict[str, Any], highlight: dict[str, Any]) -> str:
+    bound_detail = _normalize_text(highlight.get("detail")) or (
+        ingredients["tonight_action"] if stage == "landing" else ingredients["summary_highlight"]
+    )
+    theme_anchor = (
+        f"主题“{ingredients['focus_theme']}”，今晚行动“{ingredients['tonight_action']}”，明天观察“{ingredients['tomorrow_observation']}”"
+        if stage == "landing"
+        else f"主题“{ingredients['focus_theme']}”，本页绑定“{bound_detail}”"
+    )
+    if ingredients["generation_mode"] == "hybrid" and stage != "landing":
+        return f"{theme_anchor}，孩子线索“{bound_detail}”"
+    return theme_anchor
+
+
+def _build_scene_blueprint_v2(stage: str, index: int, ingredients: dict[str, Any]) -> dict[str, Any]:
+    highlight = _select_highlight_v2(ingredients, index, stage)
+    return {
+        "pageIndex": index + 1,
+        "stage": stage,
+        "sceneTitle": _build_scene_title_v2(stage),
+        "sceneGoal": _build_stage_goal_v2(stage),
+        "protagonist": ingredients["protagonist"],
+        "environment": _build_scene_environment_v2(stage, ingredients),
+        "visibleAction": _build_scene_visible_action_v2(stage, ingredients),
+        "emotion": _build_scene_emotion_v2(stage),
+        "mustInclude": [
+            ingredients["focus_theme"],
+            _normalize_text(highlight.get("title")),
+            _normalize_text(highlight.get("detail")),
+            ingredients["tonight_action"] if stage == "landing" else ingredients["summary_highlight"],
+        ],
+        "avoid": [
+            "真实孩子正脸",
+            "照片感",
+            "复杂背景",
+            "成人化",
+            "杂乱文字",
+            ingredients["style_recipe"].get("custom_negative_prompt") or DEFAULT_STYLE_NEGATIVE_PROMPT,
+        ],
+        "narrativeAnchor": _build_scene_narrative_anchor_v2(stage, ingredients, highlight),
+        "highlightSource": _normalize_text(highlight.get("source")) or _normalize_text(highlight.get("kind")) or "rule",
+        "voiceStyle": _build_scene_voice_style(stage),
+    }
+
+
+def _build_scene_text_v2(blueprint: dict[str, Any], ingredients: dict[str, Any]) -> str:
+    protagonist_name = blueprint["protagonist"]["label"]
+    if blueprint["stage"] == "opening":
+        return f"{protagonist_name}来到{blueprint['environment']}。今天，它想练习“{ingredients['focus_theme']}”。{ingredients['summary_highlight']}。"
+    if blueprint["stage"] == "setup":
+        return f"{protagonist_name}没有急着往前跑，而是先看一看、停一停。慢一点，也是在认真长大。"
+    if blueprint["stage"] == "challenge":
+        return f"当新的小难题出现时，{protagonist_name}有一点紧张。{ingredients['challenge_detail']}。"
+    if blueprint["stage"] == "support":
+        return f"这时，大人没有催它，只是轻轻陪着它。{ingredients['support_detail']}。"
+    if blueprint["stage"] == "attempt":
+        return f"{protagonist_name}决定先做一个最小的动作。{ingredients['attempt_detail']}。"
+    if blueprint["stage"] == "wobble":
+        return f"中间有一点摇晃也没关系。{ingredients['wobble_detail']}。"
+    if blueprint["stage"] == "small-success":
+        return f"{protagonist_name}慢慢发现，自己真的做到了。{ingredients['success_detail']}。"
+    return f"今晚先做一件小事：{ingredients['tonight_action']}。明天继续看看{ingredients['tomorrow_observation']}。"
+
+
+def _build_scene_audio_script_v2(blueprint: dict[str, Any], scene_text: str) -> str:
+    if blueprint["stage"] == "landing":
+        return f"{blueprint['sceneTitle']}。{scene_text}"
+    return f"{blueprint['sceneTitle']}。{scene_text}。这一页想记住的是：{blueprint['narrativeAnchor']}。"
+
+
+def _build_scene_image_prompt_v2(blueprint: dict[str, Any], ingredients: dict[str, Any]) -> str:
+    return "；".join(
+        [
+            ingredients["style_recipe"]["prompt"],
+            "儿童成长绘本插画，纵向大画幅，适合移动端整页展示",
+            f"主角：拟人{blueprint['protagonist']['archetype']}小动物“{blueprint['protagonist']['label']}”，视觉特征{blueprint['protagonist']['visual_cue']}",
+            f"场景地点：{blueprint['environment']}",
+            f"动作：{blueprint['visibleAction']}",
+            f"情绪与表情：{blueprint['emotion']}",
+            f"本页画面目标：{blueprint['sceneGoal']}",
+            f"叙事锚点：{blueprint['narrativeAnchor']}",
+            f"必须出现：{'、'.join([item for item in blueprint['mustInclude'] if item])}",
+            "构图：纵向大画幅，主角明确，前景简洁，适合绘本单页观看",
+            f"禁止项：{'、'.join(dict.fromkeys([item for item in blueprint['avoid'] if item]))}",
+        ]
+    )
+
+
+def _escape_svg_text_v2(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+def _build_scene_fallback_svg_v2(blueprint: dict[str, Any], scene_text: str, ingredients: dict[str, Any]) -> str:
+    palette = ingredients["style_recipe"]["palette"]
+    return f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" fill="none">
+  <defs>
+    <linearGradient id="storybook-bg-{blueprint['pageIndex']}" x1="120" y1="80" x2="780" y2="1120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="{palette['backgroundStart']}" />
+      <stop offset="1" stop-color="{palette['backgroundEnd']}" />
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1200" rx="56" fill="url(#storybook-bg-{blueprint['pageIndex']})" />
+  <circle cx="150" cy="165" r="82" fill="{palette['chip']}" opacity="0.88" />
+  <circle cx="738" cy="220" r="56" fill="{palette['chip']}" opacity="0.62" />
+  <rect x="84" y="92" width="732" height="92" rx="30" fill="white" fill-opacity="0.68" />
+  <text x="120" y="148" fill="{palette['text']}" font-size="38" font-family="'Noto Sans SC', 'PingFang SC', sans-serif" font-weight="700">{_escape_svg_text_v2(blueprint['sceneTitle'])}</text>
+  <rect x="84" y="222" width="732" height="520" rx="44" fill="white" fill-opacity="0.52" stroke="white" stroke-opacity="0.7" />
+  <text x="120" y="320" fill="{palette['text']}" font-size="42" font-family="'Noto Sans SC', 'PingFang SC', sans-serif" font-weight="700">{_escape_svg_text_v2(blueprint['protagonist']['label'])}</text>
+  <text x="120" y="378" fill="{palette['text']}" font-size="28" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">主题：{_escape_svg_text_v2(ingredients['focus_theme'])}</text>
+  <text x="120" y="440" fill="{palette['text']}" font-size="28" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">动作：{_escape_svg_text_v2(blueprint['visibleAction'])}</text>
+  <text x="120" y="502" fill="{palette['text']}" font-size="28" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">情绪：{_escape_svg_text_v2(blueprint['emotion'])}</text>
+  <rect x="120" y="560" width="224" height="18" rx="9" fill="{palette['accent']}" fill-opacity="0.9" />
+  <rect x="120" y="604" width="296" height="14" rx="7" fill="{palette['accent']}" fill-opacity="0.45" />
+  <rect x="84" y="782" width="732" height="276" rx="40" fill="white" fill-opacity="0.76" />
+  <text x="120" y="860" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">本页剧情</text>
+  <text x="120" y="918" fill="{palette['text']}" font-size="30" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">{_escape_svg_text_v2(scene_text)}</text>
+  <rect x="84" y="1088" width="320" height="58" rx="29" fill="{palette['chip']}" />
+  <text x="120" y="1126" fill="{palette['text']}" font-size="24" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">Page {blueprint['pageIndex']}</text>
+</svg>
+""".strip()
+
+
+def _build_story_scenes_v2(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
+    stages = ["landing"] if ingredients["story_mode"] == "card" else PAGE_STRUCTURES[ingredients["page_count"]]
+    scenes: list[dict[str, Any]] = []
+    for index, stage in enumerate(stages):
+        blueprint = _build_scene_blueprint_v2(stage, index, ingredients)
+        scene_text = (
+            f"{ingredients['protagonist']['label']}把今天那一点点亮光抱进怀里。今晚先做一件小事：{ingredients['tonight_action']}。"
+            if ingredients["story_mode"] == "card"
+            else _build_scene_text_v2(blueprint, ingredients)
+        )
+        scenes.append(
+            {
+                "sceneIndex": blueprint["pageIndex"],
+                "sceneTitle": blueprint["sceneTitle"],
+                "sceneText": scene_text,
+                "imagePrompt": _build_scene_image_prompt_v2(blueprint, ingredients),
+                "imageUrl": None,
+                "assetRef": None,
+                "fallbackSvg": _build_scene_fallback_svg_v2(blueprint, scene_text, ingredients),
+                "imageStatus": "fallback",
+                "audioUrl": None,
+                "audioRef": "storybook-audio-card"
+                if ingredients["story_mode"] == "card"
+                else f"storybook-audio-{blueprint['pageIndex']}",
+                "audioScript": _build_scene_audio_script_v2(blueprint, scene_text),
+                "audioStatus": "fallback",
+                "voiceStyle": blueprint["voiceStyle"],
+                "highlightSource": blueprint["highlightSource"],
+                "imageCacheHit": False,
+                "audioCacheHit": False,
+                "sceneBlueprint": blueprint,
+            }
+        )
+    return scenes
+
+
 def _build_story_title(generation_mode: GenerationMode, *, child_name: str, focus_theme: str) -> str:
     if generation_mode == "manual-theme":
         return f"关于{focus_theme}的成长绘本"
@@ -637,7 +982,12 @@ def _build_story_seed(payload: dict[str, Any], ingredients: dict[str, Any], chil
             ingredients["story_mode"],
             ingredients["generation_mode"],
             str(ingredients["page_count"]),
+            _resolve_style_mode(payload),
             _resolve_style_preset(payload),
+            _normalize_text(_payload_get(payload, "customStylePrompt", "custom_style_prompt")),
+            _normalize_text(
+                _payload_get(payload, "customStyleNegativePrompt", "custom_style_negative_prompt")
+            ),
             ingredients["focus_theme"],
             ingredients["protagonist"]["archetype"],
             "|".join(ingredients["goal_keywords"]),
@@ -682,6 +1032,11 @@ def _build_media_key(*, story_id: str, scene_index: int, audio_script: str) -> s
     return f"storybook-media-{_stable_hash(seed, length=16)}"
 
 
+def _build_image_media_key(*, story_id: str, scene_index: int, scene_title: str) -> str:
+    seed = "::".join([story_id, str(scene_index), scene_title[:96], "image"])
+    return f"storybook-media-{_stable_hash(seed, length=16)}"
+
+
 def _maybe_store_audio_asset(*, story_id: str, scene_index: int, audio_script: str, voice_style: str, audio_status: str, audio_result: Any) -> tuple[str | None, str | None]:
     audio_url = audio_result.output.get("audioUrl")
     audio_ref = _normalize_text(audio_result.output.get("audioRef")) or None
@@ -710,6 +1065,45 @@ def _maybe_store_audio_asset(*, story_id: str, scene_index: int, audio_script: s
     return f"/api/ai/parent-storybook/media/{media_key}", media_key
 
 
+def _maybe_store_fallback_image_asset(*, story_id: str, scene_blueprint: dict[str, Any], image_status: str, image_result: Any) -> tuple[str | None, str | None]:
+    image_url = image_result.output.get("imageUrl")
+    asset_ref = image_result.output.get("assetRef")
+    if image_status == "ready" and image_url:
+        return image_url, asset_ref or image_url
+
+    fallback_svg = scene_blueprint.get("fallbackSvg")
+    if not isinstance(fallback_svg, str) or not fallback_svg.strip():
+        return image_url, asset_ref
+
+    media_key = _build_image_media_key(
+        story_id=story_id,
+        scene_index=scene_blueprint["sceneIndex"] - 1,
+        scene_title=scene_blueprint["sceneTitle"],
+    )
+    get_storybook_media_cache().put_image(
+        media_key,
+        payload={
+            "storyId": story_id,
+            "sceneIndex": scene_blueprint["sceneIndex"],
+            "sceneTitle": scene_blueprint["sceneTitle"],
+            "contentType": "image/svg+xml",
+            "svg": fallback_svg,
+            "expiresAt": time() + float(get_storybook_media_cache().cache_window_seconds),
+        },
+    )
+    asset_url = f"/api/ai/parent-storybook/media/{media_key}"
+    return asset_url, asset_url
+
+
+def _resolve_audio_delivery(scenes: list[dict[str, Any]]) -> Literal["real", "mixed", "preview-only"]:
+    ready_count = sum(1 for scene in scenes if scene["audioStatus"] == "ready" and scene.get("audioUrl"))
+    if ready_count == 0:
+        return "preview-only"
+    if ready_count == len(scenes):
+        return "real"
+    return "mixed"
+
+
 async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = _payload_get(payload, "snapshot")
     if not isinstance(snapshot, dict):
@@ -734,8 +1128,8 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         ]
 
     ingredients = _build_story_ingredients(payload, snapshot, child, highlights)
-    scenes_blueprint = _build_story_scenes(ingredients)
-    style_preset = _resolve_style_preset(payload)
+    scenes_blueprint = _build_story_scenes_v2(ingredients)
+    style_preset = ingredients["style_recipe"]["preset"]
     story_seed = _build_story_seed(payload, ingredients, child_id)
     story_id = f"storybook-{_stable_hash(story_seed)}"
     generated_at = _stable_timestamp(story_seed)
@@ -794,6 +1188,12 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         cache_hit_count += int(image_cache_hit) + int(audio_cache_hit)
         image_status = image_result.output.get("imageStatus", "fallback")
         audio_status = audio_result.output.get("audioStatus", "fallback")
+        image_url, asset_ref = _maybe_store_fallback_image_asset(
+            story_id=story_id,
+            scene_blueprint=scene_blueprint,
+            image_status=image_status,
+            image_result=image_result,
+        )
         audio_url, cached_audio_ref = _maybe_store_audio_asset(
             story_id=story_id,
             scene_index=scene_blueprint["sceneIndex"] - 1,
@@ -808,8 +1208,8 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 "sceneTitle": scene_blueprint["sceneTitle"],
                 "sceneText": scene_blueprint["sceneText"],
                 "imagePrompt": image_result.output.get("imagePrompt") or scene_blueprint["imagePrompt"],
-                "imageUrl": image_result.output.get("imageUrl"),
-                "assetRef": image_result.output.get("assetRef"),
+                "imageUrl": image_url,
+                "assetRef": asset_ref,
                 "imageStatus": image_status,
                 "audioUrl": audio_url,
                 "audioRef": cached_audio_ref or audio_result.output.get("audioRef"),
@@ -875,6 +1275,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 scenes=scenes,
                 status_key="audioStatus",
             ),
+            "audioDelivery": _resolve_audio_delivery(scenes),
             "stylePreset": style_preset,
             "requestSource": _normalize_text(_payload_get(payload, "requestSource", "request_source"))
             or "parent-storybook",

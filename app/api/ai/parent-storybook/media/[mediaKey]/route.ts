@@ -1,4 +1,4 @@
-import { readCachedParentStoryBookAudio } from "@/lib/server/parent-storybook-cache";
+import { readCachedParentStoryBookMedia } from "@/lib/server/parent-storybook-cache";
 import {
   createBrainTransportHeaders,
   forwardBrainRequest,
@@ -11,16 +11,18 @@ export async function GET(
   context: { params: Promise<{ mediaKey: string }> }
 ) {
   const { mediaKey } = await context.params;
-  const cachedAudio = readCachedParentStoryBookAudio(mediaKey);
+  const cachedMedia = readCachedParentStoryBookMedia(mediaKey);
 
-  if (cachedAudio) {
-    const body = new Uint8Array(cachedAudio.bytes);
+  if (cachedMedia) {
+    const body = new Uint8Array(cachedMedia.bytes);
     return new Response(body, {
       status: 200,
       headers: {
-        "content-type": cachedAudio.contentType,
+        "content-type": cachedMedia.contentType,
         "cache-control": "private, max-age=900, immutable",
-        "accept-ranges": "bytes",
+        ...(cachedMedia.contentType.startsWith("audio/")
+          ? { "accept-ranges": "bytes" }
+          : {}),
       },
     });
   }

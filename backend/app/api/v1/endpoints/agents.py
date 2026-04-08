@@ -68,14 +68,27 @@ async def parent_storybook(
 
 @router.get("/agents/parent/storybook/media/{media_key}")
 async def parent_storybook_media(media_key: str):
-    cached_asset = get_storybook_media_cache().get_audio_asset(media_key)
-    if not cached_asset:
+    media_cache = get_storybook_media_cache()
+    cached_audio = media_cache.get_audio_asset(media_key)
+    if cached_audio:
+        remaining_seconds = max(int(cached_audio.expires_at - time()), 0)
+        return Response(
+            content=cached_audio.audio_bytes,
+            media_type=cached_audio.content_type,
+            headers={
+                "Cache-Control": f"private, max-age={remaining_seconds}",
+            },
+        )
+
+    cached_image = media_cache.get_image(media_key)
+    if not cached_image:
         raise HTTPException(status_code=404, detail="storybook media expired")
 
-    remaining_seconds = max(int(cached_asset.expires_at - time()), 0)
+    remaining_seconds = max(int(cached_image.get("expiresAt", 0) - time()), 0)
+    svg_content = cached_image.get("svg") or ""
     return Response(
-        content=cached_asset.audio_bytes,
-        media_type=cached_asset.content_type,
+        content=svg_content,
+        media_type=str(cached_image.get("contentType") or "image/svg+xml"),
         headers={
             "Cache-Control": f"private, max-age={remaining_seconds}",
         },

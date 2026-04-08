@@ -8,6 +8,7 @@ import {
   DEFAULT_PARENT_STORYBOOK_GENERATION_MODE,
   DEFAULT_PARENT_STORYBOOK_PAGE_COUNT,
   DEFAULT_PARENT_STORYBOOK_STYLE_PRESET,
+  DEFAULT_PARENT_STORYBOOK_STYLE_MODE,
   PARENT_STORYBOOK_THEME_CHIPS,
   resolveParentStoryBookStylePreset,
 } from "@/lib/agent/parent-storybook";
@@ -23,6 +24,7 @@ import type {
   ParentStoryBookRequest,
   ParentStoryBookResponse,
   ParentStoryBookStylePreset,
+  ParentStoryBookStyleMode,
 } from "@/lib/ai/types";
 import {
   buildParentStoryBookCacheKey,
@@ -40,6 +42,9 @@ type StoryBookControls = {
   pageCount: ParentStoryBookPageCount;
   goalKeywords: string[];
   preset: ParentStoryBookStylePreset;
+  styleMode: ParentStoryBookStyleMode;
+  customStylePrompt: string;
+  customStyleNegativePrompt: string;
 };
 
 const PAGE_COUNT_OPTIONS = [4, 6, 8] as const satisfies readonly ParentStoryBookPageCount[];
@@ -56,6 +61,9 @@ function buildInitialControls(input: {
     pageCount: DEFAULT_PARENT_STORYBOOK_PAGE_COUNT,
     goalKeywords: [],
     preset: input.preset,
+    styleMode: DEFAULT_PARENT_STORYBOOK_STYLE_MODE,
+    customStylePrompt: "",
+    customStyleNegativePrompt: "",
   };
 }
 
@@ -220,6 +228,9 @@ export default function ParentStoryBookPage() {
       pageCount: appliedControls.pageCount,
       goalKeywords: appliedControls.goalKeywords,
       stylePreset: appliedControls.preset,
+      styleMode: appliedControls.styleMode,
+      customStylePrompt: appliedControls.customStylePrompt,
+      customStyleNegativePrompt: appliedControls.customStyleNegativePrompt,
     });
     return applyParentStoryBookDemoSeed(baseRequest, resolvedDemoSeedId);
   }, [
@@ -380,6 +391,9 @@ export default function ParentStoryBookPage() {
       manualTheme={draftControls.manualTheme}
       pageCount={draftControls.pageCount}
       selectedPresetId={draftControls.preset}
+      styleMode={draftControls.styleMode}
+      customStylePrompt={draftControls.customStylePrompt}
+      customStyleNegativePrompt={draftControls.customStyleNegativePrompt}
       themeChips={[...PARENT_STORYBOOK_THEME_CHIPS]}
       pageCountOptions={[...PAGE_COUNT_OPTIONS]}
       generationHint={themeHint}
@@ -409,6 +423,15 @@ export default function ParentStoryBookPage() {
       }
       onPageCountChange={(pageCount) =>
         setDraftControls((current) => ({ ...current, pageCount }))
+      }
+      onStyleModeChange={(styleMode) =>
+        setDraftControls((current) => ({ ...current, styleMode }))
+      }
+      onCustomStylePromptChange={(customStylePrompt) =>
+        setDraftControls((current) => ({ ...current, customStylePrompt }))
+      }
+      onCustomStyleNegativePromptChange={(customStyleNegativePrompt) =>
+        setDraftControls((current) => ({ ...current, customStyleNegativePrompt }))
       }
       onGenerate={() => {
         if (!canGenerate) return;

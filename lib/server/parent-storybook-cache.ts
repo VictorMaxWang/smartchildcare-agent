@@ -4,6 +4,7 @@ import type {
 } from "@/lib/server/brain-client";
 import type {
   ParentStoryBookCacheMeta,
+  ParentStoryBookProviderMeta,
   ParentStoryBookResponse,
 } from "@/lib/ai/types";
 
@@ -21,14 +22,14 @@ type StoryBookResponseCacheEntry = {
   };
 };
 
-type StoryBookAudioCacheEntry = {
+type StoryBookMediaCacheEntry = {
   expiresAt: number;
   contentType: string;
   bytes: Buffer;
 };
 
 const storyResponseCache = new Map<string, StoryBookResponseCacheEntry>();
-const audioAssetCache = new Map<string, StoryBookAudioCacheEntry>();
+const mediaAssetCache = new Map<string, StoryBookMediaCacheEntry>();
 
 function now() {
   return Date.now();
@@ -43,9 +44,9 @@ function cleanupExpired() {
     }
   }
 
-  for (const [key, entry] of audioAssetCache.entries()) {
+  for (const [key, entry] of mediaAssetCache.entries()) {
     if (entry.expiresAt <= current) {
-      audioAssetCache.delete(key);
+      mediaAssetCache.delete(key);
     }
   }
 }
@@ -87,6 +88,18 @@ function resolveAudioDelivery(story: ParentStoryBookResponse): ParentStoryBookCa
   return "stream-url";
 }
 
+function resolveProviderAudioDelivery(
+  story: ParentStoryBookResponse
+): ParentStoryBookProviderMeta["audioDelivery"] {
+  const readySceneCount = story.scenes.filter(
+    (scene) => scene.audioStatus === "ready" && Boolean(scene.audioUrl)
+  ).length;
+
+  if (readySceneCount === 0) return "preview-only";
+  if (readySceneCount === story.scenes.length) return "real";
+  return "mixed";
+}
+
 export function buildParentStoryBookRequestCacheKey(payload: unknown) {
   return crypto.createHash("sha1").update(JSON.stringify(payload)).digest("hex");
 }
@@ -121,7 +134,7 @@ export function setCachedParentStoryBookResponse(
   });
 }
 
-export function cacheParentStoryBookAudioDataUrl(dataUrl: string, seed: string) {
+export function cacheParentStoryBookMediaDataUrl(dataUrl: string, seed: string) {
   cleanupExpired();
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) return null;
@@ -131,7 +144,7 @@ export function cacheParentStoryBookAudioDataUrl(dataUrl: string, seed: string) 
     .update(`${seed}:${dataUrl.slice(0, 128)}:${parsed.bytes.length}`)
     .digest("hex");
 
-  audioAssetCache.set(mediaId, {
+  mediaAssetCache.set(mediaId, {
     expiresAt: now() + STORYBOOK_MEDIA_TTL_SECONDS * 1000,
     contentType: parsed.contentType,
     bytes: parsed.bytes,
@@ -140,15 +153,31 @@ export function cacheParentStoryBookAudioDataUrl(dataUrl: string, seed: string) 
   return `/api/ai/parent-storybook/media/${mediaId}`;
 }
 
-export function readCachedParentStoryBookAudio(mediaId: string) {
+export function cacheParentStoryBookAudioDataUrl(dataUrl: string, seed: string) {
+  return cacheParentStoryBookMediaDataUrl(dataUrl, seed);
+}
+
+export function cacheParentStoryBookSvgContent(svg: string, seed: string) {
+  const encoded = Buffer.from(svg, "utf8").toString("base64");
+  return cacheParentStoryBookMediaDataUrl(
+    `data:image/svg+xml;base64,${encoded}`,
+    seed
+  );
+}
+
+export function readCachedParentStoryBookMedia(mediaId: string) {
   cleanupExpired();
-  const entry = audioAssetCache.get(mediaId);
+  const entry = mediaAssetCache.get(mediaId);
   if (!entry) return null;
 
   return {
     contentType: entry.contentType,
     bytes: entry.bytes,
   };
+}
+
+export function readCachedParentStoryBookAudio(mediaId: string) {
+  return readCachedParentStoryBookMedia(mediaId);
 }
 
 export function prepareParentStoryBookResponseForDelivery(
@@ -168,7 +197,7 @@ export function prepareParentStoryBookResponseForDelivery(
       typeof scene.audioUrl === "string" &&
       scene.audioUrl.startsWith("data:audio/")
     ) {
-      const cachedUrl = cacheParentStoryBookAudioDataUrl(
+      const cachedUrl = cacheParentStoryBookMediaDataUrl(
         scene.audioUrl,
         `${nextStory.storyId}:${scene.sceneIndex}`
       );
@@ -181,8 +210,32 @@ export function prepareParentStoryBookResponseForDelivery(
       }
     }
 
+    if (
+      typeof scene.imageUrl === "string" &&
+      scene.imageUrl.startsWith("data:image/svg+xml")
+    ) {
+      const cachedImageUrl = cacheParentStoryBookMediaDataUrl(
+        scene.imageUrl,
+        `${nextStory.storyId}:image:${scene.sceneIndex}`
+      );
+      if (cachedImageUrl) {
+        return {
+          ...scene,
+          imageUrl: cachedImageUrl,
+          assetRef: cachedImageUrl,
+        };
+      }
+    }
+
     return scene;
   });
+
+  nextStory.providerMeta = {
+    ...nextStory.providerMeta,
+    audioDelivery:
+      nextStory.providerMeta.audioDelivery ??
+      resolveProviderAudioDelivery(nextStory),
+  };
 
   nextStory.cacheMeta = {
     storyResponse: options.cacheState,
@@ -196,5 +249,5 @@ export function prepareParentStoryBookResponseForDelivery(
 
 export const parentStoryBookCacheInternals = {
   storyResponseCache,
-  audioAssetCache,
+  mediaAssetCache,
 };

@@ -538,6 +538,7 @@ export type ParentStoryBookStylePreset =
   | "sunrise-watercolor"
   | "moonlit-cutout"
   | "forest-crayon";
+export type ParentStoryBookStyleMode = "preset" | "custom";
 export type ParentStoryBookHighlightKind =
   | "todayGrowth"
   | "warningSuggestion"
@@ -563,6 +564,7 @@ export interface ParentStoryBookProviderMeta {
   transport?: string;
   imageProvider: string;
   audioProvider: string;
+  audioDelivery?: "real" | "mixed" | "preview-only";
   stylePreset?: ParentStoryBookStylePreset;
   requestSource?: string;
   fallbackReason?: string | null;
@@ -609,6 +611,9 @@ export interface ParentStoryBookRequest {
   protagonistArchetype?: string;
   requestSource?: string;
   stylePreset?: ParentStoryBookStylePreset;
+  styleMode?: ParentStoryBookStyleMode;
+  customStylePrompt?: string;
+  customStyleNegativePrompt?: string;
   stylePrompt?: string;
   snapshot: ChildSuggestionSnapshot;
   highlightCandidates: ParentStoryBookHighlightCandidate[];

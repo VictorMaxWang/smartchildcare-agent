@@ -30,6 +30,7 @@ import type {
   ParentStoryBookResponse,
   ParentStoryBookScene,
   ParentStoryBookStylePreset,
+  ParentStoryBookStyleMode,
 } from "@/lib/ai/types";
 import {
   describeStoryBookMode,
@@ -121,7 +122,7 @@ function getPlaybackActionText(
   isPlaying: boolean,
   playbackState: PlaybackState
 ) {
-  if (scene.audioStatus === "ready") {
+  if (scene.audioStatus === "ready" && scene.audioUrl) {
     if (playbackState === "paused" && isPlaying) return "继续朗读";
     if (isPlaying) return "暂停朗读";
     return "播放朗读";
@@ -134,7 +135,7 @@ function getCaptionStatusText(
   isPlaying: boolean,
   playbackState: PlaybackState
 ) {
-  if (scene.audioStatus === "ready") {
+  if (scene.audioStatus === "ready" && scene.audioUrl) {
     if (playbackState === "loading" && isPlaying) return "正在加载真实配音";
     if (playbackState === "paused" && isPlaying) return "朗读已暂停";
     if (isPlaying) return "真实朗读播放中";
@@ -153,6 +154,55 @@ function getPlaybackTimeLabel(
     return `${formatSeconds(currentTime)} / ${formatSeconds(duration)}`;
   }
   return scene.audioStatus === "ready" ? "可播放" : "预演中";
+}
+
+function getPlaybackActionTextV2(
+  scene: ParentStoryBookScene,
+  isPlaying: boolean,
+  playbackState: PlaybackState
+) {
+  if (scene.audioStatus === "ready" && scene.audioUrl) {
+    if (playbackState === "paused" && isPlaying) return "继续朗读";
+    if (isPlaying) return "暂停朗读";
+    return "播放朗读";
+  }
+  return isPlaying ? "停止预演" : "字幕预演";
+}
+
+function getCaptionStatusTextV2(
+  scene: ParentStoryBookScene,
+  isPlaying: boolean,
+  playbackState: PlaybackState
+) {
+  if (scene.audioStatus === "ready" && scene.audioUrl) {
+    if (playbackState === "loading" && isPlaying) return "正在加载真实朗读";
+    if (playbackState === "paused" && isPlaying) return "真实朗读已暂停";
+    if (isPlaying) return "真实朗读播放中";
+    return "真实朗读已就绪";
+  }
+  return isPlaying ? "当前仅在进行字幕预演" : "当前仅字幕预演，未生成真实音频";
+}
+
+function getPlaybackTimeLabelV2(
+  scene: ParentStoryBookScene,
+  isSceneActive: boolean,
+  currentTime: number,
+  duration: number
+) {
+  if (isSceneActive && duration > 0) {
+    return `${formatSeconds(currentTime)} / ${formatSeconds(duration)}`;
+  }
+  return scene.audioStatus === "ready" && scene.audioUrl ? "可播放" : "仅字幕预演";
+}
+
+function getBookPlaybackLabel(
+  audioDelivery?: ParentStoryBookResponse["providerMeta"]["audioDelivery"],
+  isBookPlaying?: boolean
+) {
+  if (isBookPlaying) return "停止全书";
+  if (audioDelivery === "real") return "播放全书";
+  if (audioDelivery === "mixed") return "播放全书（含字幕预演页）";
+  return "全书字幕预演";
 }
 
 export default function StoryBookViewer({

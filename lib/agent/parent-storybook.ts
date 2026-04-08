@@ -11,6 +11,7 @@ import type {
   ParentStoryBookResponse,
   ParentStoryBookScene,
   ParentStoryBookStylePreset,
+  ParentStoryBookStyleMode,
 } from "@/lib/ai/types";
 import {
   buildParentAgentChildContext,
@@ -45,6 +46,9 @@ export interface ParentStoryBookPayloadInput {
   goalKeywords?: string[];
   protagonistArchetype?: string;
   stylePreset?: ParentStoryBookStylePreset;
+  styleMode?: ParentStoryBookStyleMode;
+  customStylePrompt?: string;
+  customStyleNegativePrompt?: string;
   stylePrompt?: string;
   traceId?: string;
   debugMemory?: boolean;
@@ -88,6 +92,7 @@ type StoryIngredients = {
   className?: string;
   focusTheme: string;
   goalKeywords: string[];
+  protagonist: ProtagonistDefinition;
   protagonistArchetype: string;
   protagonistName: string;
   generationMode: ParentStoryBookGenerationMode;
@@ -103,6 +108,7 @@ type StoryIngredients = {
   tomorrowObservation: string;
   promptHint: string;
   parentNote: string;
+  styleRecipe: StyleRecipe;
   stylePrompt: string;
   storyMode: ParentStoryBookMode;
 };
@@ -111,6 +117,37 @@ type ProtagonistDefinition = {
   archetype: string;
   label: string;
   visualCue: string;
+};
+
+type StyleRecipe = {
+  mode: ParentStoryBookStyleMode;
+  preset: ParentStoryBookStylePreset;
+  prompt: string;
+  customPrompt?: string;
+  customNegativePrompt?: string;
+  palette: {
+    backgroundStart: string;
+    backgroundEnd: string;
+    accent: string;
+    text: string;
+    chip: string;
+  };
+};
+
+type SceneBlueprint = {
+  pageIndex: number;
+  stage: StoryStage;
+  sceneTitle: string;
+  sceneGoal: string;
+  protagonist: ProtagonistDefinition;
+  environment: string;
+  visibleAction: string;
+  emotion: string;
+  mustInclude: string[];
+  avoid: string[];
+  narrativeAnchor: string;
+  highlightSource: string;
+  voiceStyle: string;
 };
 
 type SyntheticSnapshotInput = {
@@ -127,6 +164,7 @@ const STORYBOOK_FOCUS_FALLBACK = "慢慢长大的力量";
 
 export const DEFAULT_PARENT_STORYBOOK_STYLE_PRESET: ParentStoryBookStylePreset =
   "sunrise-watercolor";
+export const DEFAULT_PARENT_STORYBOOK_STYLE_MODE: ParentStoryBookStyleMode = "preset";
 export const DEFAULT_PARENT_STORYBOOK_GENERATION_MODE: ParentStoryBookGenerationMode =
   "child-personalized";
 export const DEFAULT_PARENT_STORYBOOK_PAGE_COUNT: ParentStoryBookPageCount = 6;
@@ -190,6 +228,36 @@ export const PARENT_STORYBOOK_STYLE_PRESETS: ParentStoryBookStylePresetDefinitio
   },
 ];
 
+const DEFAULT_STYLE_NEGATIVE_PROMPT =
+  "不要照片感、不要写实人脸、不要复杂背景、不要成人化、不要杂乱文字";
+
+const STYLE_PALETTES: Record<
+  ParentStoryBookStylePreset,
+  StyleRecipe["palette"]
+> = {
+  "sunrise-watercolor": {
+    backgroundStart: "#fff3cf",
+    backgroundEnd: "#fde5ea",
+    accent: "#f59e0b",
+    text: "#7c3a0f",
+    chip: "#fff8e6",
+  },
+  "moonlit-cutout": {
+    backgroundStart: "#dbeafe",
+    backgroundEnd: "#e0e7ff",
+    accent: "#2563eb",
+    text: "#1d4ed8",
+    chip: "#eff6ff",
+  },
+  "forest-crayon": {
+    backgroundStart: "#dcfce7",
+    backgroundEnd: "#fef3c7",
+    accent: "#059669",
+    text: "#166534",
+    chip: "#f0fdf4",
+  },
+};
+
 function stableHash(value: string) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -238,6 +306,90 @@ export function getParentStoryBookStylePresetDefinition(value?: string | null) {
     PARENT_STORYBOOK_STYLE_PRESETS.find((item) => item.id === preset) ??
     PARENT_STORYBOOK_STYLE_PRESETS[0]
   );
+}
+
+export function resolveParentStoryBookStyleMode(
+  value?: string | null
+): ParentStoryBookStyleMode {
+  return normalizeText(value) === "custom" ? "custom" : DEFAULT_PARENT_STORYBOOK_STYLE_MODE;
+}
+
+function resolveStylePalette(
+  styleMode: ParentStoryBookStyleMode,
+  stylePreset: ParentStoryBookStylePreset,
+  customPrompt?: string
+): StyleRecipe["palette"] {
+  if (styleMode !== "custom") {
+    return STYLE_PALETTES[stylePreset];
+  }
+
+  const prompt = normalizeText(customPrompt).toLowerCase();
+  if (/(night|moon|蓝|夜|星)/.test(prompt)) {
+    return {
+      backgroundStart: "#dbeafe",
+      backgroundEnd: "#e0e7ff",
+      accent: "#2563eb",
+      text: "#1e3a8a",
+      chip: "#eff6ff",
+    };
+  }
+  if (/(forest|green|森|草|自然)/.test(prompt)) {
+    return {
+      backgroundStart: "#dcfce7",
+      backgroundEnd: "#fef3c7",
+      accent: "#059669",
+      text: "#166534",
+      chip: "#f0fdf4",
+    };
+  }
+  return {
+    backgroundStart: "#fff7ed",
+    backgroundEnd: "#fce7f3",
+    accent: "#ea580c",
+    text: "#7c2d12",
+    chip: "#fff7ed",
+  };
+}
+
+function buildCanonicalStylePrompt(input: {
+  styleMode?: ParentStoryBookStyleMode;
+  stylePreset?: ParentStoryBookStylePreset;
+  customStylePrompt?: string;
+  customStyleNegativePrompt?: string;
+  stylePrompt?: string;
+}) {
+  const styleMode = resolveParentStoryBookStyleMode(input.styleMode);
+  const stylePreset = resolveParentStoryBookStylePreset(input.stylePreset);
+  const presetPrompt = getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
+  const customPrompt = normalizeText(input.customStylePrompt);
+  const customNegativePrompt = normalizeText(input.customStyleNegativePrompt);
+  const explicitStylePrompt = normalizeText(input.stylePrompt);
+
+  if (styleMode === "custom") {
+    const prompt =
+      customPrompt ||
+      explicitStylePrompt ||
+      "梦幻儿童绘本，柔焦，浅景深，温柔光影，移动端纵向大画幅";
+    return {
+      mode: styleMode,
+      preset: stylePreset,
+      prompt: `儿童绘本风格方向：${prompt}。负面约束：${
+        customNegativePrompt || DEFAULT_STYLE_NEGATIVE_PROMPT
+      }。`,
+      customPrompt: prompt,
+      customNegativePrompt: customNegativePrompt || DEFAULT_STYLE_NEGATIVE_PROMPT,
+      palette: resolveStylePalette(styleMode, stylePreset, prompt),
+    } satisfies StyleRecipe;
+  }
+
+  return {
+    mode: styleMode,
+    preset: stylePreset,
+    prompt: explicitStylePrompt || presetPrompt,
+    customPrompt: undefined,
+    customNegativePrompt: undefined,
+    palette: resolveStylePalette(styleMode, stylePreset),
+  } satisfies StyleRecipe;
 }
 
 function resolveGenerationMode(input: {
@@ -602,9 +754,14 @@ export function buildParentStoryBookRequestFromFeed(
     manualTheme: input.manualTheme,
   });
   const stylePreset = resolveParentStoryBookStylePreset(input.stylePreset);
-  const stylePrompt =
-    normalizeText(input.stylePrompt) ||
-    getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
+  const styleMode = resolveParentStoryBookStyleMode(input.styleMode);
+  const styleRecipe = buildCanonicalStylePrompt({
+    styleMode,
+    stylePreset,
+    customStylePrompt: input.customStylePrompt,
+    customStyleNegativePrompt: input.customStyleNegativePrompt,
+    stylePrompt: input.stylePrompt,
+  });
   const pageCount = resolveParentStoryBookPageCount(input.pageCount);
   const goalKeywords = normalizeKeywords(input.goalKeywords);
   const manualTheme = normalizeText(input.manualTheme);
@@ -670,7 +827,10 @@ export function buildParentStoryBookRequestFromFeed(
     protagonistArchetype: normalizeText(input.protagonistArchetype) || undefined,
     requestSource: input.requestSource ?? "parent-storybook-page",
     stylePreset,
-    stylePrompt,
+    styleMode,
+    customStylePrompt: styleRecipe.customPrompt,
+    customStyleNegativePrompt: styleRecipe.customNegativePrompt,
+    stylePrompt: styleRecipe.prompt,
     snapshot,
     highlightCandidates,
     latestInterventionCard: input.latestInterventionCard ? { ...input.latestInterventionCard } : null,
@@ -840,6 +1000,13 @@ function buildStoryIngredients(request: ParentStoryBookRequest) {
     childName,
     childHints,
   });
+  const styleRecipe = buildCanonicalStylePrompt({
+    styleMode: request.styleMode,
+    stylePreset: request.stylePreset,
+    customStylePrompt: request.customStylePrompt,
+    customStyleNegativePrompt: request.customStyleNegativePrompt,
+    stylePrompt: request.stylePrompt,
+  });
   const storyMode = resolveStoryMode({
     requestStoryMode: request.storyMode,
     generationMode,
@@ -859,6 +1026,7 @@ function buildStoryIngredients(request: ParentStoryBookRequest) {
     className,
     focusTheme,
     goalKeywords: normalizeKeywords(request.goalKeywords),
+    protagonist,
     protagonistArchetype: protagonist.archetype,
     protagonistName: protagonist.label,
     generationMode,
@@ -874,9 +1042,8 @@ function buildStoryIngredients(request: ParentStoryBookRequest) {
     tomorrowObservation,
     promptHint: normalizeText(request.manualPrompt),
     parentNote,
-    stylePrompt:
-      normalizeText(request.stylePrompt) ||
-      getParentStoryBookStylePresetDefinition(request.stylePreset).stylePrompt,
+    styleRecipe,
+    stylePrompt: styleRecipe.prompt,
     storyMode,
   } satisfies StoryIngredients;
 }
@@ -1045,6 +1212,313 @@ function buildStoryScenes(ingredients: StoryIngredients) {
   });
 }
 
+function buildSceneTitleV2(stage: StoryStage) {
+  switch (stage) {
+    case "opening":
+      return "月光翻开第一页";
+    case "setup":
+      return "小脚步在路上";
+    case "challenge":
+      return "遇到一点点难";
+    case "support":
+      return "有人轻轻托住它";
+    case "attempt":
+      return "它决定再试一下";
+    case "wobble":
+      return "风吹来时先停一停";
+    case "small-success":
+      return "小小光亮出现了";
+    case "landing":
+      return "把温柔带回今晚";
+  }
+}
+
+function buildStageGoalV2(stage: StoryStage) {
+  switch (stage) {
+    case "opening":
+      return "建立温柔开场，让孩子先感到被看见";
+    case "setup":
+      return "把节奏放慢，让故事进入可尝试的状态";
+    case "challenge":
+      return "呈现眼前的小挑战，但不责备";
+    case "support":
+      return "让支持先出现，稳定情绪";
+    case "attempt":
+      return "把行动拆成最小的一步";
+    case "wobble":
+      return "承认波动正常，让孩子可以停一停";
+    case "small-success":
+      return "让孩子看见已经发生的小成功";
+    case "landing":
+      return "落到今晚行动和明天观察，形成成长闭环";
+  }
+}
+
+function buildSceneEnvironmentV2(stage: StoryStage, ingredients: StoryIngredients) {
+  const classHint = ingredients.className
+    ? `${ingredients.className}旁的故事角`
+    : "柔软安静的故事角";
+
+  switch (stage) {
+    case "opening":
+      return `${classHint}和暖暖窗边`;
+    case "setup":
+      return "铺着浅色地毯的小路口";
+    case "challenge":
+      return "要迈出一步的小门前";
+    case "support":
+      return "有抱抱和轻声提醒的陪伴角";
+    case "attempt":
+      return "留着一束小光的练习地毯";
+    case "wobble":
+      return "可以先停下来深呼吸的安静角落";
+    case "small-success":
+      return "冒出一点点光亮的林间小路";
+    case "landing":
+      return "睡前灯光柔柔的小房间";
+  }
+}
+
+function buildSceneEmotionV2(stage: StoryStage) {
+  switch (stage) {
+    case "opening":
+      return "安心又期待";
+    case "setup":
+      return "慢慢稳下来";
+    case "challenge":
+      return "有点犹豫，但还想试试";
+    case "support":
+      return "被接住、被陪伴";
+    case "attempt":
+      return "鼓起一点点勇气";
+    case "wobble":
+      return "轻轻摇晃，但没有放弃";
+    case "small-success":
+      return "惊喜、亮起来";
+    case "landing":
+      return "安定、适合睡前";
+  }
+}
+
+function buildSceneVisibleActionV2(stage: StoryStage, ingredients: StoryIngredients) {
+  switch (stage) {
+    case "opening":
+      return `${ingredients.protagonist.label}抱着今天的小亮点，轻轻看向前方`;
+    case "setup":
+      return `${ingredients.protagonist.label}先停一停，再把脚步放轻`;
+    case "challenge":
+      return `${ingredients.protagonist.label}站在小挑战前，耳朵和尾巴都慢下来`;
+    case "support":
+      return `一只温柔的大手递来陪伴，${ingredients.protagonist.label}慢慢靠近`;
+    case "attempt":
+      return `${ingredients.protagonist.label}先做一个最小的动作`;
+    case "wobble":
+      return `${ingredients.protagonist.label}先抱抱自己，再重新出发`;
+    case "small-success":
+      return `${ingredients.protagonist.label}抬起头，发现自己已经往前走了一小步`;
+    case "landing":
+      return `${ingredients.protagonist.label}把今晚的小动作收进睡前仪式`;
+  }
+}
+
+function buildSceneNarrativeAnchorV2(
+  stage: StoryStage,
+  ingredients: StoryIngredients,
+  highlight: ParentStoryBookHighlightCandidate
+) {
+  const boundDetail =
+    normalizeText(highlight.detail) ||
+    (stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight);
+  const themeAnchor =
+    stage === "landing"
+      ? `主题“${ingredients.focusTheme}”，今晚行动“${ingredients.tonightAction}”，明天观察“${ingredients.tomorrowObservation}”`
+      : `主题“${ingredients.focusTheme}”，本页绑定“${boundDetail}”`;
+
+  if (ingredients.generationMode === "hybrid" && stage !== "landing") {
+    return `${themeAnchor}，孩子线索“${boundDetail}”`;
+  }
+
+  return themeAnchor;
+}
+
+function buildSceneBlueprintV2(
+  stage: StoryStage,
+  index: number,
+  ingredients: StoryIngredients
+): SceneBlueprint {
+  const fallbackDetail =
+    stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight;
+  const highlight = selectHighlight(
+    ingredients.highlightCandidates,
+    index,
+    buildSceneTitleV2(stage),
+    fallbackDetail
+  );
+
+  return {
+    pageIndex: index + 1,
+    stage,
+    sceneTitle: buildSceneTitleV2(stage),
+    sceneGoal: buildStageGoalV2(stage),
+    protagonist: ingredients.protagonist,
+    environment: buildSceneEnvironmentV2(stage, ingredients),
+    visibleAction: buildSceneVisibleActionV2(stage, ingredients),
+    emotion: buildSceneEmotionV2(stage),
+    mustInclude: [
+      ingredients.focusTheme,
+      normalizeText(highlight.title),
+      normalizeText(highlight.detail),
+      stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight,
+    ].filter(Boolean),
+    avoid: [
+      "真实孩子正脸",
+      "照片感",
+      "复杂背景",
+      "成人化",
+      "杂乱文字",
+      ingredients.styleRecipe.customNegativePrompt || DEFAULT_STYLE_NEGATIVE_PROMPT,
+    ],
+    narrativeAnchor: buildSceneNarrativeAnchorV2(stage, ingredients, highlight),
+    highlightSource: normalizeText(highlight.source) || highlight.kind,
+    voiceStyle: buildSceneVoiceStyle(stage),
+  };
+}
+
+function buildSceneTextV2(blueprint: SceneBlueprint, ingredients: StoryIngredients) {
+  const protagonistName = blueprint.protagonist.label;
+  switch (blueprint.stage) {
+    case "opening":
+      return `${protagonistName}来到${blueprint.environment}。今天，它想练习“${ingredients.focusTheme}”。${ingredients.summaryHighlight}。`;
+    case "setup":
+      return `${protagonistName}没有急着往前跑，而是先看一看、停一停。慢一点，也是在认真长大。`;
+    case "challenge":
+      return `当新的小难题出现时，${protagonistName}有一点紧张。${ingredients.challengeDetail}。`;
+    case "support":
+      return `这时，大人没有催它，只是轻轻陪着它。${ingredients.supportDetail}。`;
+    case "attempt":
+      return `${protagonistName}决定先做一个最小的动作。${ingredients.attemptDetail}。`;
+    case "wobble":
+      return `中间有一点摇晃也没关系。${ingredients.wobbleDetail}。`;
+    case "small-success":
+      return `${protagonistName}慢慢发现，自己真的做到了。${ingredients.successDetail}。`;
+    case "landing":
+      return `今晚先做一件小事：${ingredients.tonightAction}。明天继续看看${ingredients.tomorrowObservation}。`;
+  }
+}
+
+function buildSceneAudioScriptV2(blueprint: SceneBlueprint, sceneText: string) {
+  if (blueprint.stage === "landing") {
+    return `${blueprint.sceneTitle}。${sceneText}`;
+  }
+  return `${blueprint.sceneTitle}。${sceneText}。这一页想记住的是：${blueprint.narrativeAnchor}。`;
+}
+
+function buildSceneImagePromptV2(
+  blueprint: SceneBlueprint,
+  ingredients: StoryIngredients
+) {
+  return [
+    ingredients.styleRecipe.prompt,
+    "儿童成长绘本插画，纵向大画幅，适合移动端整页展示",
+    `主角：拟人${blueprint.protagonist.archetype}小动物“${blueprint.protagonist.label}”，视觉特征${blueprint.protagonist.visualCue}`,
+    `场景地点：${blueprint.environment}`,
+    `动作：${blueprint.visibleAction}`,
+    `情绪与表情：${blueprint.emotion}`,
+    `本页画面目标：${blueprint.sceneGoal}`,
+    `叙事锚点：${blueprint.narrativeAnchor}`,
+    `必须出现：${blueprint.mustInclude.join("、")}`,
+    "构图：纵向大画幅，主角明确，前景简洁，适合绘本单页观看",
+    `禁止项：${Array.from(new Set(blueprint.avoid)).join("、")}`,
+  ].join("；");
+}
+
+function escapeSvgTextV2(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function buildFallbackSceneSvgV2(
+  blueprint: SceneBlueprint,
+  sceneText: string,
+  ingredients: StoryIngredients
+) {
+  const palette = ingredients.styleRecipe.palette;
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" fill="none">
+  <defs>
+    <linearGradient id="storybook-bg-${blueprint.pageIndex}" x1="120" y1="80" x2="780" y2="1120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="${palette.backgroundStart}" />
+      <stop offset="1" stop-color="${palette.backgroundEnd}" />
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1200" rx="56" fill="url(#storybook-bg-${blueprint.pageIndex})" />
+  <circle cx="150" cy="165" r="82" fill="${palette.chip}" opacity="0.88" />
+  <circle cx="738" cy="220" r="56" fill="${palette.chip}" opacity="0.62" />
+  <rect x="84" y="92" width="732" height="92" rx="30" fill="white" fill-opacity="0.68" />
+  <text x="120" y="148" fill="${palette.text}" font-size="38" font-family="'Noto Sans SC', 'PingFang SC', sans-serif" font-weight="700">${escapeSvgTextV2(blueprint.sceneTitle)}</text>
+  <rect x="84" y="222" width="732" height="520" rx="44" fill="white" fill-opacity="0.52" stroke="white" stroke-opacity="0.7" />
+  <text x="120" y="320" fill="${palette.text}" font-size="42" font-family="'Noto Sans SC', 'PingFang SC', sans-serif" font-weight="700">${escapeSvgTextV2(blueprint.protagonist.label)}</text>
+  <text x="120" y="378" fill="${palette.text}" font-size="28" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">主题：${escapeSvgTextV2(ingredients.focusTheme)}</text>
+  <text x="120" y="440" fill="${palette.text}" font-size="28" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">动作：${escapeSvgTextV2(blueprint.visibleAction)}</text>
+  <text x="120" y="502" fill="${palette.text}" font-size="28" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">情绪：${escapeSvgTextV2(blueprint.emotion)}</text>
+  <rect x="120" y="560" width="224" height="18" rx="9" fill="${palette.accent}" fill-opacity="0.9" />
+  <rect x="120" y="604" width="296" height="14" rx="7" fill="${palette.accent}" fill-opacity="0.45" />
+  <rect x="84" y="782" width="732" height="276" rx="40" fill="white" fill-opacity="0.76" />
+  <text x="120" y="860" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">本页剧情</text>
+  <text x="120" y="918" fill="${palette.text}" font-size="30" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">${escapeSvgTextV2(sceneText)}</text>
+  <rect x="84" y="1088" width="320" height="58" rx="29" fill="${palette.chip}" />
+  <text x="120" y="1126" fill="${palette.text}" font-size="24" font-family="'Noto Sans SC', 'PingFang SC', sans-serif">Page ${blueprint.pageIndex}</text>
+</svg>`.trim();
+}
+
+function buildSceneFallbackDataUrlV2(svg: string) {
+  return `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
+}
+
+function buildStoryScenesV2(ingredients: StoryIngredients) {
+  const stages =
+    ingredients.storyMode === "card"
+      ? (["landing"] as StoryStage[])
+      : PAGE_STRUCTURES[ingredients.pageCount];
+
+  return stages.map((stage, index) => {
+    const blueprint = buildSceneBlueprintV2(stage, index, ingredients);
+    const sceneText =
+      ingredients.storyMode === "card"
+        ? `${ingredients.protagonist.label}把今天那一点点亮光抱进怀里。今晚先做一件小事：${ingredients.tonightAction}。`
+        : buildSceneTextV2(blueprint, ingredients);
+    const fallbackImage = buildSceneFallbackDataUrlV2(
+      buildFallbackSceneSvgV2(blueprint, sceneText, ingredients)
+    );
+
+    return {
+      sceneIndex: blueprint.pageIndex,
+      sceneTitle: blueprint.sceneTitle,
+      sceneText,
+      imagePrompt: buildSceneImagePromptV2(blueprint, ingredients),
+      imageUrl: fallbackImage,
+      assetRef: fallbackImage,
+      imageStatus: "fallback",
+      audioUrl: null,
+      audioRef:
+        ingredients.storyMode === "card"
+          ? "storybook-audio-card"
+          : `storybook-audio-${blueprint.pageIndex}`,
+      audioScript: buildSceneAudioScriptV2(blueprint, sceneText),
+      audioStatus: "fallback",
+      voiceStyle: blueprint.voiceStyle,
+      highlightSource: blueprint.highlightSource,
+      imageCacheHit: false,
+      audioCacheHit: false,
+    } satisfies ParentStoryBookScene;
+  });
+}
+
 function buildStoryTitle(request: ParentStoryBookRequest, ingredients: StoryIngredients) {
   if (ingredients.generationMode === "manual-theme") {
     return `关于${ingredients.focusTheme}的成长绘本`;
@@ -1072,7 +1546,10 @@ function buildRequestSeed(request: ParentStoryBookRequest, ingredients: StoryIng
     ingredients.storyMode,
     ingredients.generationMode,
     ingredients.pageCount,
+    request.styleMode ?? DEFAULT_PARENT_STORYBOOK_STYLE_MODE,
     request.stylePreset ?? DEFAULT_PARENT_STORYBOOK_STYLE_PRESET,
+    request.customStylePrompt ?? "",
+    request.customStyleNegativePrompt ?? "",
     ingredients.focusTheme,
     ingredients.protagonistArchetype,
     request.goalKeywords?.join("|") ?? "",
@@ -1081,6 +1558,17 @@ function buildRequestSeed(request: ParentStoryBookRequest, ingredients: StoryIng
       .join("|"),
     request.requestSource ?? "",
   ].join("::");
+}
+
+function resolveProviderAudioDeliveryFromScenes(
+  scenes: ParentStoryBookScene[]
+): "real" | "mixed" | "preview-only" {
+  const readyCount = scenes.filter(
+    (scene) => scene.audioStatus === "ready" && Boolean(scene.audioUrl)
+  ).length;
+  if (readyCount === 0) return "preview-only";
+  if (readyCount === scenes.length) return "real";
+  return "mixed";
 }
 
 export function buildParentStoryBookResponse(
@@ -1097,7 +1585,7 @@ export function buildParentStoryBookResponse(
     ...request,
     stylePreset,
   });
-  const scenes = buildStoryScenes(ingredients);
+  const scenes = buildStoryScenesV2(ingredients);
   const storySeed = buildRequestSeed(request, ingredients);
   const storyId = `storybook-${stableHash(storySeed)}`;
   const generatedAt = buildStableTimestamp(storySeed);
@@ -1130,6 +1618,7 @@ export function buildParentStoryBookResponse(
       transport: options?.transport ?? "next-json-fallback",
       imageProvider: "storybook-asset",
       audioProvider: "storybook-mock-preview",
+      audioDelivery: resolveProviderAudioDeliveryFromScenes(scenes),
       stylePreset,
       requestSource: request.requestSource ?? "parent-storybook-page",
       fallbackReason,
