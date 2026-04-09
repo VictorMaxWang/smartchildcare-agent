@@ -408,7 +408,7 @@ function buildWeeklyPreview(
   payload: AdminAgentRequestPayload,
   context: AdminAgentContext
 ) {
-  return buildFallbackWeeklyReport(buildAdminWeeklyReportSnapshot(payload, context));
+  return buildFallbackWeeklyReport(buildAdminWeeklyReportSnapshot(payload, context), "admin");
 }
 
 export function buildAdminAgentContext(payload: AdminAgentRequestPayload): AdminAgentContext {

@@ -6,9 +6,11 @@ import type {
   ChildSuggestionSnapshot,
   InstitutionSuggestionSnapshot,
   PromptMemoryContext,
+  WeeklyReportRole,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { buildActionizedWeeklyReportResponse } from "@/lib/ai/weekly-report";
 
 const DASHSCOPE_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const REQUEST_TIMEOUT_MS = 12000;
@@ -141,7 +143,11 @@ function normalizeAiOutput(raw: unknown): Omit<AiSuggestionResponse, "source"> |
   };
 }
 
-function normalizeWeeklyReportOutput(raw: unknown): Omit<WeeklyReportResponse, "source"> | null {
+function normalizeWeeklyReportOutput(
+  raw: unknown,
+  snapshot: WeeklyReportSnapshot,
+  role: WeeklyReportRole
+): Omit<WeeklyReportResponse, "source"> | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
   const summary = String(obj.summary ?? "").trim();
@@ -155,7 +161,9 @@ function normalizeWeeklyReportOutput(raw: unknown): Omit<WeeklyReportResponse, "
     return null;
   }
 
-  return {
+  return buildActionizedWeeklyReportResponse({
+    role,
+    snapshot,
     summary:
       summary ||
       "本周整体数据已形成可复盘闭环，建议继续围绕重点幼儿、关键风险和家园协同执行情况做持续跟踪。",
@@ -169,7 +177,8 @@ function normalizeWeeklyReportOutput(raw: unknown): Omit<WeeklyReportResponse, "
     disclaimer:
       disclaimer ||
       "本建议仅用于托育观察与家园沟通参考，不构成医疗诊断；如出现持续发热或明显异常，请及时就医。",
-  };
+    source: "ai",
+  });
 }
 
 function normalizeFollowUpOutput(raw: unknown): Omit<AiFollowUpResponse, "source"> | null {
@@ -259,8 +268,9 @@ function buildInstitutionPrompt(snapshot: InstitutionSuggestionSnapshot): string
   ].join("\n");
 }
 
-function buildWeeklyReportPrompt(snapshot: WeeklyReportSnapshot): string {
+function buildWeeklyReportPrompt(snapshot: WeeklyReportSnapshot, role: WeeklyReportRole): string {
   return [
+    `role=${role}`,
     "你是托育机构周报分析助手。",
     "你只能做托育运营分析和下周行动建议，不做医疗诊断，不输出任何额外文本。",
     "请基于输入的周度运营摘要输出严格JSON。",
@@ -593,11 +603,12 @@ export async function requestDashscopeSuggestion(
 }
 
 export async function requestDashscopeWeeklyReport(
-  snapshot: WeeklyReportSnapshot
+  snapshot: WeeklyReportSnapshot,
+  role: WeeklyReportRole
 ): Promise<Omit<WeeklyReportResponse, "source"> | null> {
   try {
-    const parsed = await requestDashscopeJson(buildWeeklyReportPrompt(snapshot));
-    const normalized = normalizeWeeklyReportOutput(parsed);
+    const parsed = await requestDashscopeJson(buildWeeklyReportPrompt(snapshot, role));
+    const normalized = normalizeWeeklyReportOutput(parsed, snapshot, role);
     if (!normalized) {
       console.error("[AI] DashScope returned weekly report content that could not be normalized.");
     }

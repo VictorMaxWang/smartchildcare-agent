@@ -1,69 +1,97 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
+
+from app.core.config import get_settings
+from app.providers.vivo_ocr import VivoOcrProvider
 
 
 DISCLAIMER = (
-    "T7 skeleton: this bridge turns external health file context into daycare actions only. "
-    "It does not perform verified OCR, diagnosis, writeback, or escalation dispatch."
+    "T8 extraction only: this bridge returns structured facts from file metadata and text hints. "
+    "It does not perform verified binary OCR, medical diagnosis, daycare action mapping, writeback, or escalation dispatch."
 )
 
-RuleBucket = Literal[
-    "fever_or_temperature",
-    "allergy_or_medication",
-    "recheck_or_follow_up",
-    "generic_unknown",
-]
-
-BUCKET_PRIORITY: tuple[RuleBucket, ...] = (
-    "allergy_or_medication",
-    "fever_or_temperature",
-    "recheck_or_follow_up",
-    "generic_unknown",
+FILE_TYPE_PRIORITY: tuple[str, ...] = (
+    "recheck-slip",
+    "checklist",
+    "pdf",
+    "report-screenshot",
+    "unknown",
 )
 
-FEVER_KEYWORDS = (
-    "fever",
-    "temperature",
-    "temp",
-    "38.",
-    "37.",
-    "\u53d1\u70ed",
-    "\u53d1\u70e7",
-    "\u4f53\u6e29",
-    "\u9000\u70ed",
+REPORT_KEYWORDS = (
+    "report",
+    "lab",
+    "result",
+    "检验",
+    "检查",
+    "报告",
 )
-
-ALLERGY_OR_MEDICATION_KEYWORDS = (
+CHECKLIST_KEYWORDS = (
+    "checklist",
+    "form",
+    "sheet",
+    "单",
+    "表",
+)
+RECHECK_KEYWORDS = (
+    "recheck",
+    "follow-up",
+    "follow up",
+    "复查",
+    "复诊",
+    "复测",
+    "复检",
+)
+ALLERGY_KEYWORDS = (
     "allergy",
+    "allergic",
+    "过敏",
+)
+MEDICATION_KEYWORDS = (
     "medication",
     "medicine",
     "prescription",
     "antibiotic",
     "nebulizer",
-    "\u8fc7\u654f",
-    "\u7528\u836f",
-    "\u836f\u7269",
-    "\u5904\u65b9",
-    "\u6297\u751f\u7d20",
-    "\u96fe\u5316",
+    "用药",
+    "药",
+    "处方",
+    "抗生素",
+    "雾化",
 )
-
-FOLLOW_UP_KEYWORDS = (
-    "follow-up",
-    "follow up",
-    "followup",
-    "recheck",
+FEVER_KEYWORDS = (
+    "fever",
+    "temperature",
+    "temp",
+    "发热",
+    "发烧",
+    "体温",
+)
+ABNORMAL_KEYWORDS = (
+    "abnormal",
+    "positive",
+    "elevated",
+    "high",
+    "low",
+    "异常",
+    "偏高",
+    "偏低",
+    "阳性",
+)
+FOLLOW_UP_HINT_KEYWORDS = (
+    *RECHECK_KEYWORDS,
     "review",
-    "revisit",
-    "\u590d\u67e5",
-    "\u590d\u8bca",
-    "\u590d\u6d4b",
-    "\u968f\u8bbf",
-    "\u89c2\u5bdf",
-    "\u8ffd\u8e2a",
+    "复查",
+    "随访",
+    "明天",
+    "tomorrow",
+    "48h",
+    "48小时",
 )
+TEMPERATURE_PATTERN = re.compile(r"(?<!\d)(3[5-9](?:\.\d)?)(?:\s*(?:°?\s*[cC]|℃))?")
 
 
 def _iso_now() -> str:
@@ -85,7 +113,7 @@ def _file_value(item: dict[str, Any], camel: str, snake: str) -> Any:
     return item.get(camel) if camel in item else item.get(snake)
 
 
-def _collect_signals(payload: dict[str, Any]) -> dict[str, Any]:
+def _collect_signals(payload: dict[str, Any], provider_result: dict[str, Any]) -> dict[str, Any]:
     files = payload.get("files") if isinstance(payload.get("files"), list) else []
     file_names = [_coerce_string(_file_value(item, "name", "name")) for item in files if isinstance(item, dict)]
     preview_texts = [
@@ -98,24 +126,36 @@ def _collect_signals(payload: dict[str, Any]) -> dict[str, Any]:
         for item in files
         if isinstance(item, dict)
     ]
+    file_urls = [
+        _coerce_string(_file_value(item, "fileUrl", "file_url"))
+        for item in files
+        if isinstance(item, dict)
+    ]
     notes = _coerce_string(payload.get("optionalNotes") or payload.get("optional_notes")) or ""
+    provider_text = _coerce_string(provider_result.get("text")) or ""
 
     haystack = _normalize_text(
         " ".join(
             [
                 _coerce_string(payload.get("fileKind") or payload.get("file_kind")) or "",
                 *[item for item in file_names if item],
-                *[item for item in preview_texts if item],
                 *[item for item in mime_types if item],
+                *[item for item in preview_texts if item],
+                *[item for item in file_urls if item],
                 notes,
+                provider_text,
             ]
         )
     )
 
     return {
+        "files": files,
         "file_names": [item for item in file_names if item],
         "preview_texts": [item for item in preview_texts if item],
+        "mime_types": [item for item in mime_types if item],
+        "file_urls": [item for item in file_urls if item],
         "notes": notes,
+        "provider_text": provider_text,
         "haystack": haystack,
     }
 
@@ -124,210 +164,233 @@ def _has_keyword(haystack: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword.lower() in haystack for keyword in keywords)
 
 
-def _detect_buckets(haystack: str) -> list[RuleBucket]:
-    buckets: set[RuleBucket] = set()
+def _detect_file_type(payload: dict[str, Any], signals: dict[str, Any]) -> str:
+    explicit_kind = _normalize_text(payload.get("fileKind") or payload.get("file_kind"))
+    haystack = signals["haystack"]
+    files = signals["files"]
+    types: set[str] = set()
 
-    if _has_keyword(haystack, FEVER_KEYWORDS):
-        buckets.add("fever_or_temperature")
-    if _has_keyword(haystack, ALLERGY_OR_MEDICATION_KEYWORDS):
-        buckets.add("allergy_or_medication")
-    if _has_keyword(haystack, FOLLOW_UP_KEYWORDS):
-        buckets.add("recheck_or_follow_up")
-    if not buckets:
-        buckets.add("generic_unknown")
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        mime_type = _normalize_text(_file_value(item, "mimeType", "mime_type"))
+        name = _normalize_text(_file_value(item, "name", "name"))
+        if "pdf" in mime_type or name.endswith(".pdf"):
+            types.add("pdf")
+        elif mime_type.startswith("image/"):
+            types.add("report-screenshot")
 
-    return [bucket for bucket in BUCKET_PRIORITY if bucket in buckets]
+    if explicit_kind in {"lab-report", "health-note"} or _has_keyword(haystack, REPORT_KEYWORDS):
+        types.add("report-screenshot" if "report-screenshot" in types else "pdf" if "pdf" in types else "report-screenshot")
+    if explicit_kind in {"discharge-note"} or _has_keyword(haystack, RECHECK_KEYWORDS):
+        types.add("recheck-slip")
+    if explicit_kind in {"prescription"} or _has_keyword(haystack, CHECKLIST_KEYWORDS):
+        types.add("checklist")
+
+    types.discard("unknown")
+    if not types:
+        return "unknown"
+    if len(types) == 1:
+        return next(iter(types))
+    ordered = [item for item in FILE_TYPE_PRIORITY if item in types]
+    return ordered[0] if len(ordered) == 1 else "mixed"
 
 
-def _base_facts(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _extract_temperature_text(haystack: str) -> str | None:
+    match = TEMPERATURE_PATTERN.search(haystack)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _base_facts(payload: dict[str, Any], signals: dict[str, Any], file_type: str) -> list[dict[str, str]]:
     file_count = len(payload.get("files") or [])
-    return [
+    source_role = payload.get("sourceRole") or payload.get("source_role")
+    facts = [
         {
-            "label": "Bridge mode",
-            "detail": f"T7 skeleton received {file_count} external health file(s) for daycare action bridging.",
-            "source": "request-meta",
+            "label": "File type",
+            "detail": f"Detected fileType={file_type} from the uploaded file metadata and text hints.",
+            "source": "derived:file-type",
         },
         {
             "label": "Source role",
-            "detail": f"Current request came from {payload.get('sourceRole') or payload.get('source_role')}.",
+            "detail": f"Current request came from {source_role}.",
             "source": "request-meta",
         },
         {
-            "label": "Binary processing",
-            "detail": "This run uses file metadata and optional text hints only. Real OCR/PDF parsing is not executed in T7.",
-            "source": "request-meta",
-        },
-    ]
-
-
-def _bucket_facts(bucket: RuleBucket, signals: dict[str, Any]) -> list[dict[str, str]]:
-    if bucket == "fever_or_temperature":
-        return [
-            {
-                "label": "Temperature signal",
-                "detail": "The external file context mentions fever or temperature-related information that should be rechecked in daycare.",
-                "source": "rule:fever_or_temperature",
-            }
-        ]
-    if bucket == "allergy_or_medication":
-        return [
-            {
-                "label": "Allergy or medication signal",
-                "detail": "The external file context appears to include allergy or medication-related information that staff should review before routine care.",
-                "source": "rule:allergy_or_medication",
-            }
-        ]
-    if bucket == "recheck_or_follow_up":
-        return [
-            {
-                "label": "Follow-up signal",
-                "detail": "The external file context mentions recheck or follow-up instructions that should be bridged into daycare reminders.",
-                "source": "rule:recheck_or_follow_up",
-            }
-        ]
-    return [
-        {
-            "label": "Manual bridge needed",
+            "label": "Extraction mode",
             "detail": (
-                "A teacher should manually extract the key actionable points from the provided notes before using them inside daycare."
-                if signals.get("notes") or signals.get("preview_texts")
-                else "Only file metadata is currently available, so a teacher should manually confirm the key actionable points from the original file."
+                f"T8 processed {file_count} file(s) using request-supplied preview text, notes, file names, and mime hints only."
             ),
-            "source": "rule:generic_unknown",
-        }
+            "source": "request-meta",
+        },
     ]
+    if signals["provider_text"]:
+        facts.append(
+            {
+                "label": "Text evidence",
+                "detail": "A text hint was available for structured extraction.",
+                "source": "ocr:text-fallback",
+            }
+        )
+    return facts
 
 
-def _bucket_risk(bucket: RuleBucket) -> dict[str, str]:
-    if bucket == "fever_or_temperature":
-        return {
-            "title": "Need same-day health recheck in daycare",
-            "severity": "medium",
-            "detail": "This is a bridge reminder only. Teachers should recheck the child status in daycare instead of treating the external file as a diagnosis.",
-            "source": "rule:fever_or_temperature",
-        }
-    if bucket == "allergy_or_medication":
-        return {
-            "title": "Need teacher review before routine care",
-            "severity": "high",
-            "detail": "Potential allergy or medication instructions should be confirmed by staff before meals, activity, or nap routines.",
-            "source": "rule:allergy_or_medication",
-        }
-    if bucket == "recheck_or_follow_up":
-        return {
-            "title": "Need follow-up reminder alignment",
-            "severity": "medium",
-            "detail": "The external file suggests a follow-up timeline that should be bridged into daycare reminders and parent handoff.",
-            "source": "rule:recheck_or_follow_up",
-        }
-    return {
-        "title": "Need manual interpretation by teacher",
-        "severity": "low",
-        "detail": "The current T7 skeleton cannot interpret the original file content automatically, so a teacher should confirm the actionable points first.",
-        "source": "rule:generic_unknown",
-    }
+def _signal_facts(haystack: str) -> list[dict[str, str]]:
+    facts: list[dict[str, str]] = []
+    temperature = _extract_temperature_text(haystack)
+    if temperature:
+        facts.append(
+            {
+                "label": "Temperature mention",
+                "detail": f"Detected a temperature-like value: {temperature}.",
+                "source": "pattern:temperature",
+            }
+        )
+    if _has_keyword(haystack, ALLERGY_KEYWORDS):
+        facts.append(
+            {
+                "label": "Allergy mention",
+                "detail": "Detected allergy-related wording in the provided text hints.",
+                "source": "pattern:allergy",
+            }
+        )
+    if _has_keyword(haystack, MEDICATION_KEYWORDS):
+        facts.append(
+            {
+                "label": "Medication mention",
+                "detail": "Detected medication or prescription-related wording in the provided text hints.",
+                "source": "pattern:medication",
+            }
+        )
+    if _has_keyword(haystack, ABNORMAL_KEYWORDS):
+        facts.append(
+            {
+                "label": "Abnormal result wording",
+                "detail": "Detected wording that usually appears around abnormal or flagged findings.",
+                "source": "pattern:abnormal",
+            }
+        )
+    if _has_keyword(haystack, FOLLOW_UP_HINT_KEYWORDS):
+        facts.append(
+            {
+                "label": "Follow-up wording",
+                "detail": "Detected recheck, review, or follow-up wording in the available text hints.",
+                "source": "pattern:follow-up",
+            }
+        )
+    return facts
 
 
-def _bucket_school_action(bucket: RuleBucket) -> dict[str, str]:
-    if bucket == "fever_or_temperature":
-        return {
-            "title": "Recheck temperature and energy level after arrival",
-            "detail": "Record the same-day observation in a teacher note and keep the activity plan conservative until the child status looks stable.",
-            "ownerRole": "teacher",
-            "timing": "today at arrival",
-            "source": "rule:fever_or_temperature",
-        }
-    if bucket == "allergy_or_medication":
-        return {
-            "title": "Review allergy or medication instructions with the care team",
-            "detail": "Confirm meal, medication, and classroom precautions before daily routines continue.",
-            "ownerRole": "teacher",
-            "timing": "before meals and routine care",
-            "source": "rule:allergy_or_medication",
-        }
-    if bucket == "recheck_or_follow_up":
-        return {
-            "title": "Create a same-day reminder for the follow-up point",
-            "detail": "Bridge the external recheck note into a daycare reminder so teachers know what to observe today.",
-            "ownerRole": "teacher",
-            "timing": "today before pickup",
-            "source": "rule:recheck_or_follow_up",
-        }
-    return {
-        "title": "Teacher manually summarizes the external file into a daycare note",
-        "detail": "Capture only observable and actionable items; do not copy the file as a diagnosis conclusion.",
-        "ownerRole": "teacher",
-        "timing": "today before action planning",
-        "source": "rule:generic_unknown",
-    }
+def _risk_items(haystack: str) -> list[dict[str, str]]:
+    risks: list[dict[str, str]] = []
+    temperature = _extract_temperature_text(haystack)
+    if temperature:
+        severity = "high" if float(temperature) >= 38 else "medium"
+        risks.append(
+            {
+                "title": "Temperature-related signal needs manual confirmation",
+                "severity": severity,
+                "detail": "A temperature mention was detected in the uploaded material. Staff should verify the original document and the child's current status before operational use.",
+                "source": "pattern:temperature",
+            }
+        )
+    if _has_keyword(haystack, ALLERGY_KEYWORDS):
+        risks.append(
+            {
+                "title": "Potential allergy-related instruction detected",
+                "severity": "high",
+                "detail": "Allergy wording was detected, but the exact allergen and scope were not independently verified from binary OCR.",
+                "source": "pattern:allergy",
+            }
+        )
+    if _has_keyword(haystack, MEDICATION_KEYWORDS):
+        risks.append(
+            {
+                "title": "Medication wording should not be treated as verified administration guidance",
+                "severity": "medium",
+                "detail": "Prescription or medication wording was detected, but T8 only extracts structure and does not verify dosage, authorization, or daycare execution rules.",
+                "source": "pattern:medication",
+            }
+        )
+    if _has_keyword(haystack, ABNORMAL_KEYWORDS):
+        risks.append(
+            {
+                "title": "Abnormal or flagged result wording detected",
+                "severity": "medium",
+                "detail": "The text hints contain abnormal-result wording that may require review against the original document.",
+                "source": "pattern:abnormal",
+            }
+        )
+    if not risks:
+        risks.append(
+            {
+                "title": "Low-confidence extraction from limited text hints",
+                "severity": "low",
+                "detail": "The current request does not include enough verified text to infer more specific medical facts safely.",
+                "source": "fallback:text-hints",
+            }
+        )
+    return risks
 
 
-def _bucket_family_action(bucket: RuleBucket) -> dict[str, str]:
-    if bucket == "fever_or_temperature":
-        return {
-            "title": "Keep one short evening status update for pickup handoff",
-            "detail": "Parents should record temperature or visible status changes tonight so the daycare team can compare next-day observations.",
-            "ownerRole": "family",
-            "timing": "tonight",
-            "source": "rule:fever_or_temperature",
-        }
-    if bucket == "allergy_or_medication":
-        return {
-            "title": "Prepare the exact medication or allergy wording for tomorrow handoff",
-            "detail": "Parents should bring or restate the relevant instruction so teachers do not rely on memory alone.",
-            "ownerRole": "family",
-            "timing": "tonight",
-            "source": "rule:allergy_or_medication",
-        }
-    if bucket == "recheck_or_follow_up":
-        return {
-            "title": "Keep the follow-up timing visible for tomorrow handoff",
-            "detail": "Parents should note what needs to be rechecked and when, so the daycare plan matches the external advice.",
-            "ownerRole": "family",
-            "timing": "tonight",
-            "source": "rule:recheck_or_follow_up",
-        }
-    return {
-        "title": "Add one manual summary sentence for the daycare team",
-        "detail": "Parents should write the single most actionable point from the external file instead of sending only the file itself.",
-        "ownerRole": "family",
-        "timing": "tonight",
-        "source": "rule:generic_unknown",
-    }
+def _contraindications(haystack: str) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    if _has_keyword(haystack, ALLERGY_KEYWORDS):
+        items.append(
+            {
+                "title": "Do not assume allergen exposure is acceptable",
+                "detail": "Allergy-related wording was detected, so meals, activity materials, or medication exposure should not be inferred as safe from this file alone.",
+                "source": "pattern:allergy",
+            }
+        )
+    if _has_keyword(haystack, MEDICATION_KEYWORDS):
+        items.append(
+            {
+                "title": "Do not infer a daycare medication plan from the file alone",
+                "detail": "Medication wording was detected, but dosage and administration authority were not verified by binary OCR or writeback flows.",
+                "source": "pattern:medication",
+            }
+        )
+    temperature = _extract_temperature_text(haystack)
+    if temperature and float(temperature) >= 38:
+        items.append(
+            {
+                "title": "Avoid treating the file as a diagnosis clearance",
+                "detail": "A fever-range value was detected. The upload should not be used as proof that normal activity is already cleared.",
+                "source": "pattern:temperature",
+            }
+        )
+    return items
 
 
-def _bucket_follow_up(bucket: RuleBucket) -> dict[str, str]:
-    if bucket == "fever_or_temperature":
-        return {
-            "title": "Compare tonight status with next-day daycare observation",
-            "detail": "Use the next handoff to confirm whether the temperature-related concern still needs closer monitoring.",
-            "ownerRole": "teacher",
-            "due": "next morning handoff",
-            "source": "rule:fever_or_temperature",
-        }
-    if bucket == "allergy_or_medication":
-        return {
-            "title": "Confirm classroom precautions were followed",
-            "detail": "Review whether the care team and family used the same allergy or medication instruction wording.",
-            "ownerRole": "teacher",
-            "due": "next care cycle",
-            "source": "rule:allergy_or_medication",
-        }
-    if bucket == "recheck_or_follow_up":
-        return {
-            "title": "Check that the follow-up milestone was not missed",
-            "detail": "Bridge the external recheck date into the next daycare review point.",
-            "ownerRole": "teacher",
-            "due": "next scheduled review",
-            "source": "rule:recheck_or_follow_up",
-        }
-    return {
-        "title": "Confirm the core actionable point with the family",
-        "detail": "Before using the external file in a daycare plan, verify the one action that teachers should actually take.",
-        "ownerRole": "teacher",
-        "due": "next family handoff",
-        "source": "rule:generic_unknown",
-    }
+def _follow_up_hints(haystack: str, file_type: str) -> list[dict[str, str]]:
+    hints: list[dict[str, str]] = []
+    if file_type == "recheck-slip" or _has_keyword(haystack, FOLLOW_UP_HINT_KEYWORDS):
+        hints.append(
+            {
+                "title": "Keep the original follow-up timing visible",
+                "detail": "The upload appears to contain recheck or follow-up wording. Preserve the original timeline from the source document for later T9/T10 mapping.",
+                "source": "pattern:follow-up",
+            }
+        )
+    if _has_keyword(haystack, MEDICATION_KEYWORDS):
+        hints.append(
+            {
+                "title": "Capture the exact medication wording for later review",
+                "detail": "If this file is reused downstream, keep the original medication phrasing rather than paraphrasing it into an action prematurely.",
+                "source": "pattern:medication",
+            }
+        )
+    if not hints:
+        hints.append(
+            {
+                "title": "Preserve the original file for manual walkthrough",
+                "detail": "T8 extracted only structured hints. A later walkthrough should compare these hints against the original screenshot or PDF before mapping actions.",
+                "source": "fallback:text-hints",
+            }
+        )
+    return hints
 
 
 def _dedupe(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
@@ -342,53 +405,20 @@ def _dedupe(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     return result
 
 
-def _build_escalation_suggestion(buckets: list[RuleBucket]) -> dict[str, Any]:
-    if "allergy_or_medication" in buckets:
-        return {
-            "shouldEscalate": True,
-            "level": "school-health-review",
-            "reason": "Potential allergy or medication instructions usually need a same-day staff review before routine care.",
-            "nextStep": "Ask the responsible teacher or school health contact to confirm the actionable precautions.",
-            "source": "rule:allergy_or_medication",
-        }
-    if "fever_or_temperature" in buckets or "recheck_or_follow_up" in buckets:
-        return {
-            "shouldEscalate": True,
-            "level": "teacher-review",
-            "reason": "The external file adds same-day monitoring or follow-up information that should be acknowledged by the teacher team.",
-            "nextStep": "Bridge the note into a teacher review item instead of assuming the external file has already been acted on.",
-            "source": "rule:fever_or_temperature" if "fever_or_temperature" in buckets else "rule:recheck_or_follow_up",
-        }
-    return {
-        "shouldEscalate": False,
-        "level": "none",
-        "reason": "The current input does not justify escalation beyond a teacher-side manual review in T7.",
-        "nextStep": "Keep this as a bridge note and confirm the actionable point with the family.",
-        "source": "rule:generic_unknown",
-    }
-
-
-def _build_writeback_suggestion(
-    payload: dict[str, Any],
-    facts: list[dict[str, Any]],
-    risks: list[dict[str, Any]],
-) -> dict[str, Any]:
-    files = payload.get("files") if isinstance(payload.get("files"), list) else []
-    return {
-        "shouldWriteback": True,
-        "destination": "teacher-health-note-draft",
-        "summary": "Create a draft daycare note with the external-file facts, bridge risks, and same-day actions. Do not auto-write it in T7.",
-        "payload": {
-            "childId": payload.get("childId") or payload.get("child_id"),
-            "sourceRole": payload.get("sourceRole") or payload.get("source_role"),
-            "fileKind": payload.get("fileKind") or payload.get("file_kind"),
-            "fileNames": [_file_value(item, "name", "name") for item in files if isinstance(item, dict)],
-            "extractedFactLabels": [item.get("label") for item in facts],
-            "riskTitles": [item.get("title") for item in risks],
-        },
-        "source": "rule:writeback-draft",
-        "status": "placeholder",
-    }
+def _confidence(signals: dict[str, Any], facts: list[dict[str, Any]], file_type: str) -> float:
+    score = 0.18
+    if signals["preview_texts"]:
+        score += 0.34
+    if signals["notes"]:
+        score += 0.14
+    if signals["file_urls"]:
+        score += 0.08
+    if file_type != "unknown":
+        score += 0.12
+    score += min(len(facts), 5) * 0.04
+    if not signals["provider_text"]:
+        score -= 0.06
+    return round(max(0.1, min(score, 0.92)), 2)
 
 
 async def run_health_file_bridge(payload: dict[str, Any]) -> dict[str, Any]:
@@ -404,41 +434,39 @@ async def run_health_file_bridge(payload: dict[str, Any]) -> dict[str, Any]:
     if not request_source:
         raise ValueError("requestSource cannot be empty")
 
-    signals = _collect_signals(payload)
-    buckets = _detect_buckets(signals["haystack"])
-
+    provider = VivoOcrProvider(get_settings())
+    provider_result = provider.extract(
+        files=files,
+        optional_notes=_coerce_string(payload.get("optionalNotes") or payload.get("optional_notes")),
+    )
+    signals = _collect_signals(payload, provider_result)
+    file_type = _detect_file_type(payload, signals)
     facts = _dedupe(
-        [*_base_facts(payload), *[fact for bucket in buckets for fact in _bucket_facts(bucket, signals)]],
+        [*_base_facts(payload, signals, file_type), *_signal_facts(signals["haystack"])],
         "label",
     )
-    risks = _dedupe([_bucket_risk(bucket) for bucket in buckets], "title")
-    school_actions = _dedupe([_bucket_school_action(bucket) for bucket in buckets], "title")
-    family_actions = _dedupe([_bucket_family_action(bucket) for bucket in buckets], "title")
-    follow_up_plan = _dedupe([_bucket_follow_up(bucket) for bucket in buckets], "title")
-    escalation_suggestion = _build_escalation_suggestion(buckets)
-    writeback_suggestion = _build_writeback_suggestion(payload, facts, risks)
+    risks = _dedupe(_risk_items(signals["haystack"]), "title")
+    contraindications = _dedupe(_contraindications(signals["haystack"]), "title")
+    follow_up_hints = _dedupe(_follow_up_hints(signals["haystack"], file_type), "title")
+    confidence = _confidence(signals, facts, file_type)
 
     return {
         "childId": payload.get("childId") or payload.get("child_id"),
         "sourceRole": source_role,
         "fileKind": payload.get("fileKind") or payload.get("file_kind"),
-        "summary": (
-            "T7 skeleton bridged external health file context into daycare actions. "
-            "Teachers still need to manually review the original file before using the suggestions operationally."
-        ),
+        "fileType": file_type,
+        "summary": "T8 extracted structured health-file hints only. Daycare action mapping remains out of scope for this step.",
         "extractedFacts": facts,
         "riskItems": risks,
-        "schoolTodayActions": school_actions,
-        "familyTonightActions": family_actions,
-        "followUpPlan": follow_up_plan,
-        "escalationSuggestion": escalation_suggestion,
-        "writebackSuggestion": writeback_suggestion,
+        "contraindications": contraindications,
+        "followUpHints": follow_up_hints,
+        "confidence": confidence,
         "disclaimer": DISCLAIMER,
-        "source": "backend-rule",
-        "fallback": False,
+        "source": "backend-text-fallback",
+        "fallback": True,
         "mock": True,
-        "liveReadyButNotVerified": True,
+        "liveReadyButNotVerified": bool(provider_result.get("liveReadyButNotVerified")),
         "generatedAt": _iso_now(),
-        "provider": "health-file-bridge-rule",
-        "model": "t7-health-file-bridge-skeleton",
+        "provider": str(provider_result.get("provider") or provider.provider_name),
+        "model": str(provider_result.get("model") or provider.model_name),
     }

@@ -16,6 +16,7 @@ from app.agents.high_risk_consultation import (
 )
 from app.agents.parent_agent import run_parent_follow_up, run_parent_suggestions
 from app.agents.teacher_agent import run_teacher_agent
+from app.agents.weekly_report import run_weekly_report
 from app.core.config import get_settings
 from app.db.repositories import (
     RepositoryBundle,
@@ -34,6 +35,7 @@ from app.services.high_risk_consultation_contract import (
     build_high_risk_done_event,
     normalize_high_risk_consultation_result,
 )
+from app.services.intent_router import route_intent
 from app.services.parent_storybook_service import run_parent_storybook
 from app.services.parent_trend_service import run_parent_trend_query
 from app.services.react_runner import ReactRunner
@@ -502,12 +504,14 @@ class Orchestrator:
             snapshot_type="admin-agent-result",
         )
 
+    async def intent_router(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return route_intent(payload)
+
     async def weekly_report(self, payload: dict[str, Any]) -> dict[str, Any]:
-        weekly_payload = {**payload, "workflow": "weekly-ops-report"}
         return await self._run_with_trace(
             task="weekly-report",
-            payload=weekly_payload,
-            runner=run_admin_agent,
+            payload=payload,
+            runner=run_weekly_report,
             node_name="weekly-report",
             snapshot_type="weekly-report-result",
         )

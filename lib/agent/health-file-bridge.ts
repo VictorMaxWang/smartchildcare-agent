@@ -1,71 +1,37 @@
 import type {
-  HealthFileBridgeActionItem,
-  HealthFileBridgeEscalationSuggestion,
+  HealthFileBridgeContraindication,
   HealthFileBridgeFact,
   HealthFileBridgeFile,
-  HealthFileBridgeFollowUpItem,
+  HealthFileBridgeFileType,
+  HealthFileBridgeFollowUpHint,
   HealthFileBridgeRequest,
   HealthFileBridgeResponse,
   HealthFileBridgeRiskItem,
   HealthFileBridgeSource,
-  HealthFileBridgeWritebackSuggestion,
 } from "../ai/types";
 
 const HEALTH_FILE_BRIDGE_DISCLAIMER =
-  "T7 skeleton: this bridge turns external health file context into daycare actions only. It does not perform verified OCR, diagnosis, writeback, or escalation dispatch.";
+  "T8 extraction only: this bridge returns structured facts from file metadata and text hints. It does not perform verified binary OCR, medical diagnosis, daycare action mapping, writeback, or escalation dispatch.";
 
-type RuleBucket =
-  | "fever_or_temperature"
-  | "allergy_or_medication"
-  | "recheck_or_follow_up"
-  | "generic_unknown";
-
-const BUCKET_PRIORITY: RuleBucket[] = [
-  "allergy_or_medication",
-  "fever_or_temperature",
-  "recheck_or_follow_up",
-  "generic_unknown",
-];
-
-const FEVER_KEYWORDS = [
-  "发热",
-  "发烧",
-  "体温",
-  "temperature",
-  "fever",
-  "temp",
-  "38.",
-  "37.",
-];
-
-const ALLERGY_OR_MEDICATION_KEYWORDS = [
-  "过敏",
-  "allergy",
-  "药",
-  "用药",
-  "处方",
-  "prescription",
-  "抗生素",
-  "喷剂",
-  "雾化",
+const REPORT_KEYWORDS = ["report", "lab", "result", "检验", "检查", "报告"];
+const CHECKLIST_KEYWORDS = ["checklist", "form", "sheet", "单", "表"];
+const RECHECK_KEYWORDS = ["recheck", "follow-up", "follow up", "复查", "复诊", "复测", "复检"];
+const ALLERGY_KEYWORDS = ["allergy", "allergic", "过敏"];
+const MEDICATION_KEYWORDS = [
   "medication",
   "medicine",
+  "prescription",
   "antibiotic",
   "nebulizer",
+  "用药",
+  "药",
+  "处方",
+  "抗生素",
+  "雾化",
 ];
-
-const FOLLOW_UP_KEYWORDS = [
-  "复查",
-  "复诊",
-  "复测",
-  "follow-up",
-  "follow up",
-  "recheck",
-  "随访",
-  "观察",
-  "review",
-  "revisit",
-];
+const ABNORMAL_KEYWORDS = ["abnormal", "positive", "elevated", "high", "low", "异常", "偏高", "偏低", "阳性"];
+const FOLLOW_UP_HINT_KEYWORDS = [...RECHECK_KEYWORDS, "review", "随访", "明天", "tomorrow", "48h", "48小时"];
+const TEMPERATURE_PATTERN = /(?<!\d)(3[5-9](?:\.\d)?)(?:\s*(?:°?\s*[cC]|℃))?/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
@@ -98,15 +64,20 @@ function collectSignals(request: HealthFileBridgeRequest) {
   const fileNames = request.files.map((file) => safeText(file.name)).filter(Boolean);
   const mimeTypes = request.files.map((file) => safeText(file.mimeType)).filter(Boolean);
   const previewTexts = request.files.map((file) => safeText(file.previewText)).filter(Boolean);
+  const fileUrls = request.files.map((file) => safeText(file.fileUrl)).filter(Boolean);
   const notes = safeText(request.optionalNotes);
+  const providerText = [...previewTexts, notes].filter(Boolean).join("\n");
   const haystack = normalizeText(
-    [request.fileKind ?? "", ...fileNames, ...mimeTypes, ...previewTexts, notes].join(" ")
+    [request.fileKind ?? "", ...fileNames, ...mimeTypes, ...previewTexts, ...fileUrls, notes, providerText].join(" ")
   );
 
   return {
     fileNames,
+    mimeTypes,
     previewTexts,
+    fileUrls,
     notes,
+    providerText,
     haystack,
   };
 }
@@ -115,31 +86,48 @@ function hasKeyword(haystack: string, keywords: string[]) {
   return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
 }
 
-function detectBuckets(haystack: string): RuleBucket[] {
-  const buckets = new Set<RuleBucket>();
-
-  if (hasKeyword(haystack, FEVER_KEYWORDS)) {
-    buckets.add("fever_or_temperature");
-  }
-  if (hasKeyword(haystack, ALLERGY_OR_MEDICATION_KEYWORDS)) {
-    buckets.add("allergy_or_medication");
-  }
-  if (hasKeyword(haystack, FOLLOW_UP_KEYWORDS)) {
-    buckets.add("recheck_or_follow_up");
-  }
-  if (buckets.size === 0) {
-    buckets.add("generic_unknown");
+function detectFileType(request: HealthFileBridgeRequest, signals: ReturnType<typeof collectSignals>): HealthFileBridgeFileType {
+  const fileTypes = new Set<HealthFileBridgeFileType>();
+  for (const file of request.files) {
+    const mimeType = normalizeText(file.mimeType);
+    const name = normalizeText(file.name);
+    if (mimeType.includes("pdf") || name.endsWith(".pdf")) {
+      fileTypes.add("pdf");
+    } else if (mimeType.startsWith("image/")) {
+      fileTypes.add("report-screenshot");
+    }
   }
 
-  return BUCKET_PRIORITY.filter((bucket) => buckets.has(bucket));
+  const fileKind = normalizeText(request.fileKind);
+  if (fileKind === "lab-report" || fileKind === "health-note" || hasKeyword(signals.haystack, REPORT_KEYWORDS)) {
+    fileTypes.add(fileTypes.has("pdf") ? "pdf" : "report-screenshot");
+  }
+  if (fileKind === "discharge-note" || hasKeyword(signals.haystack, RECHECK_KEYWORDS)) {
+    fileTypes.add("recheck-slip");
+  }
+  if (fileKind === "prescription" || hasKeyword(signals.haystack, CHECKLIST_KEYWORDS)) {
+    fileTypes.add("checklist");
+  }
+
+  if (fileTypes.size === 0) return "unknown";
+  if (fileTypes.size === 1) return Array.from(fileTypes)[0]!;
+  return "mixed";
 }
 
-function baseFacts(request: HealthFileBridgeRequest): HealthFileBridgeFact[] {
-  return [
+function extractTemperature(haystack: string) {
+  return haystack.match(TEMPERATURE_PATTERN)?.[1] ?? null;
+}
+
+function baseFacts(
+  request: HealthFileBridgeRequest,
+  signals: ReturnType<typeof collectSignals>,
+  fileType: HealthFileBridgeFileType
+): HealthFileBridgeFact[] {
+  const facts: HealthFileBridgeFact[] = [
     {
-      label: "Bridge mode",
-      detail: `T7 skeleton received ${request.files.length} external health file(s) for daycare action bridging.`,
-      source: "request-meta",
+      label: "File type",
+      detail: `Detected fileType=${fileType} from the uploaded file metadata and text hints.`,
+      source: "derived:file-type",
     },
     {
       label: "Source role",
@@ -147,272 +135,171 @@ function baseFacts(request: HealthFileBridgeRequest): HealthFileBridgeFact[] {
       source: "request-meta",
     },
     {
-      label: "Binary processing",
-      detail:
-        "This run uses file metadata and optional text hints only. Real OCR/PDF parsing is not executed in T7.",
+      label: "Extraction mode",
+      detail: `T8 processed ${request.files.length} file(s) using request-supplied preview text, notes, file names, and mime hints only.`,
       source: "request-meta",
     },
   ];
+
+  if (signals.providerText) {
+    facts.push({
+      label: "Text evidence",
+      detail: "A text hint was available for structured extraction.",
+      source: "ocr:text-fallback",
+    });
+  }
+
+  return facts;
 }
 
-function bucketFacts(bucket: RuleBucket, signals: ReturnType<typeof collectSignals>): HealthFileBridgeFact[] {
-  switch (bucket) {
-    case "fever_or_temperature":
-      return [
-        {
-          label: "Temperature signal",
-          detail:
-            "The external file context mentions fever or temperature-related information that should be rechecked in daycare.",
-          source: "rule:fever_or_temperature",
-        },
-      ];
-    case "allergy_or_medication":
-      return [
-        {
-          label: "Allergy or medication signal",
-          detail:
-            "The external file context appears to include allergy or medication-related information that staff should review before routine care.",
-          source: "rule:allergy_or_medication",
-        },
-      ];
-    case "recheck_or_follow_up":
-      return [
-        {
-          label: "Follow-up signal",
-          detail:
-            "The external file context mentions recheck or follow-up instructions that should be bridged into daycare reminders.",
-          source: "rule:recheck_or_follow_up",
-        },
-      ];
-    case "generic_unknown":
-    default:
-      return [
-        {
-          label: "Manual bridge needed",
-          detail:
-            signals.notes.length > 0 || signals.previewTexts.length > 0
-              ? "A teacher should manually extract the key actionable points from the provided notes before using them inside daycare."
-              : "Only file metadata is currently available, so a teacher should manually confirm the key actionable points from the original file.",
-          source: "rule:generic_unknown",
-        },
-      ];
+function signalFacts(haystack: string): HealthFileBridgeFact[] {
+  const facts: HealthFileBridgeFact[] = [];
+  const temperature = extractTemperature(haystack);
+  if (temperature) {
+    facts.push({
+      label: "Temperature mention",
+      detail: `Detected a temperature-like value: ${temperature}.`,
+      source: "pattern:temperature",
+    });
   }
+  if (hasKeyword(haystack, ALLERGY_KEYWORDS)) {
+    facts.push({
+      label: "Allergy mention",
+      detail: "Detected allergy-related wording in the provided text hints.",
+      source: "pattern:allergy",
+    });
+  }
+  if (hasKeyword(haystack, MEDICATION_KEYWORDS)) {
+    facts.push({
+      label: "Medication mention",
+      detail: "Detected medication or prescription-related wording in the provided text hints.",
+      source: "pattern:medication",
+    });
+  }
+  if (hasKeyword(haystack, ABNORMAL_KEYWORDS)) {
+    facts.push({
+      label: "Abnormal result wording",
+      detail: "Detected wording that usually appears around abnormal or flagged findings.",
+      source: "pattern:abnormal",
+    });
+  }
+  if (hasKeyword(haystack, FOLLOW_UP_HINT_KEYWORDS)) {
+    facts.push({
+      label: "Follow-up wording",
+      detail: "Detected recheck, review, or follow-up wording in the available text hints.",
+      source: "pattern:follow-up",
+    });
+  }
+  return facts;
 }
 
-function bucketRisk(bucket: RuleBucket): HealthFileBridgeRiskItem {
-  switch (bucket) {
-    case "fever_or_temperature":
-      return {
-        title: "Need same-day health recheck in daycare",
-        severity: "medium",
-        detail:
-          "This is a bridge reminder only. Teachers should recheck the child status in daycare instead of treating the external file as a diagnosis.",
-        source: "rule:fever_or_temperature",
-      };
-    case "allergy_or_medication":
-      return {
-        title: "Need teacher review before routine care",
-        severity: "high",
-        detail:
-          "Potential allergy or medication instructions should be confirmed by staff before meals, activity, or nap routines.",
-        source: "rule:allergy_or_medication",
-      };
-    case "recheck_or_follow_up":
-      return {
-        title: "Need follow-up reminder alignment",
-        severity: "medium",
-        detail:
-          "The external file suggests a follow-up timeline that should be bridged into daycare reminders and parent handoff.",
-        source: "rule:recheck_or_follow_up",
-      };
-    case "generic_unknown":
-    default:
-      return {
-        title: "Need manual interpretation by teacher",
-        severity: "low",
-        detail:
-          "The current T7 skeleton cannot interpret the original file content automatically, so a teacher should confirm the actionable points first.",
-        source: "rule:generic_unknown",
-      };
+function riskItems(haystack: string): HealthFileBridgeRiskItem[] {
+  const risks: HealthFileBridgeRiskItem[] = [];
+  const temperature = extractTemperature(haystack);
+  if (temperature) {
+    risks.push({
+      title: "Temperature-related signal needs manual confirmation",
+      severity: Number(temperature) >= 38 ? "high" : "medium",
+      detail:
+        "A temperature mention was detected in the uploaded material. Staff should verify the original document and the child's current status before operational use.",
+      source: "pattern:temperature",
+    });
   }
+  if (hasKeyword(haystack, ALLERGY_KEYWORDS)) {
+    risks.push({
+      title: "Potential allergy-related instruction detected",
+      severity: "high",
+      detail:
+        "Allergy wording was detected, but the exact allergen and scope were not independently verified from binary OCR.",
+      source: "pattern:allergy",
+    });
+  }
+  if (hasKeyword(haystack, MEDICATION_KEYWORDS)) {
+    risks.push({
+      title: "Medication wording should not be treated as verified administration guidance",
+      severity: "medium",
+      detail:
+        "Prescription or medication wording was detected, but T8 only extracts structure and does not verify dosage, authorization, or daycare execution rules.",
+      source: "pattern:medication",
+    });
+  }
+  if (hasKeyword(haystack, ABNORMAL_KEYWORDS)) {
+    risks.push({
+      title: "Abnormal or flagged result wording detected",
+      severity: "medium",
+      detail: "The text hints contain abnormal-result wording that may require review against the original document.",
+      source: "pattern:abnormal",
+    });
+  }
+  if (risks.length === 0) {
+    risks.push({
+      title: "Low-confidence extraction from limited text hints",
+      severity: "low",
+      detail:
+        "The current request does not include enough verified text to infer more specific medical facts safely.",
+      source: "fallback:text-hints",
+    });
+  }
+  return dedupeByTitle(risks);
 }
 
-function bucketSchoolAction(bucket: RuleBucket): HealthFileBridgeActionItem {
-  switch (bucket) {
-    case "fever_or_temperature":
-      return {
-        title: "Recheck temperature and energy level after arrival",
-        detail:
-          "Record the same-day observation in a teacher note and keep the activity plan conservative until the child status looks stable.",
-        ownerRole: "teacher",
-        timing: "today at arrival",
-        source: "rule:fever_or_temperature",
-      };
-    case "allergy_or_medication":
-      return {
-        title: "Review allergy or medication instructions with the care team",
-        detail: "Confirm meal, medication, and classroom precautions before daily routines continue.",
-        ownerRole: "teacher",
-        timing: "before meals and routine care",
-        source: "rule:allergy_or_medication",
-      };
-    case "recheck_or_follow_up":
-      return {
-        title: "Create a same-day reminder for the follow-up point",
-        detail:
-          "Bridge the external recheck note into a daycare reminder so teachers know what to observe today.",
-        ownerRole: "teacher",
-        timing: "today before pickup",
-        source: "rule:recheck_or_follow_up",
-      };
-    case "generic_unknown":
-    default:
-      return {
-        title: "Teacher manually summarizes the external file into a daycare note",
-        detail: "Capture only observable and actionable items; do not copy the file as a diagnosis conclusion.",
-        ownerRole: "teacher",
-        timing: "today before action planning",
-        source: "rule:generic_unknown",
-      };
+function contraindications(haystack: string): HealthFileBridgeContraindication[] {
+  const items: HealthFileBridgeContraindication[] = [];
+  if (hasKeyword(haystack, ALLERGY_KEYWORDS)) {
+    items.push({
+      title: "Do not assume allergen exposure is acceptable",
+      detail:
+        "Allergy-related wording was detected, so meals, activity materials, or medication exposure should not be inferred as safe from this file alone.",
+      source: "pattern:allergy",
+    });
   }
+  if (hasKeyword(haystack, MEDICATION_KEYWORDS)) {
+    items.push({
+      title: "Do not infer a daycare medication plan from the file alone",
+      detail:
+        "Medication wording was detected, but dosage and administration authority were not verified by binary OCR or writeback flows.",
+      source: "pattern:medication",
+    });
+  }
+  const temperature = extractTemperature(haystack);
+  if (temperature && Number(temperature) >= 38) {
+    items.push({
+      title: "Avoid treating the file as a diagnosis clearance",
+      detail:
+        "A fever-range value was detected. The upload should not be used as proof that normal activity is already cleared.",
+      source: "pattern:temperature",
+    });
+  }
+  return dedupeByTitle(items);
 }
 
-function bucketFamilyAction(bucket: RuleBucket): HealthFileBridgeActionItem {
-  switch (bucket) {
-    case "fever_or_temperature":
-      return {
-        title: "Keep one short evening status update for pickup handoff",
-        detail:
-          "Parents should record temperature or visible status changes tonight so the daycare team can compare next-day observations.",
-        ownerRole: "family",
-        timing: "tonight",
-        source: "rule:fever_or_temperature",
-      };
-    case "allergy_or_medication":
-      return {
-        title: "Prepare the exact medication or allergy wording for tomorrow handoff",
-        detail: "Parents should bring or restate the relevant instruction so teachers do not rely on memory alone.",
-        ownerRole: "family",
-        timing: "tonight",
-        source: "rule:allergy_or_medication",
-      };
-    case "recheck_or_follow_up":
-      return {
-        title: "Keep the follow-up timing visible for tomorrow handoff",
-        detail:
-          "Parents should note what needs to be rechecked and when, so the daycare plan matches the external advice.",
-        ownerRole: "family",
-        timing: "tonight",
-        source: "rule:recheck_or_follow_up",
-      };
-    case "generic_unknown":
-    default:
-      return {
-        title: "Add one manual summary sentence for the daycare team",
-        detail:
-          "Parents should write the single most actionable point from the external file instead of sending only the file itself.",
-        ownerRole: "family",
-        timing: "tonight",
-        source: "rule:generic_unknown",
-      };
+function followUpHints(haystack: string, fileType: HealthFileBridgeFileType): HealthFileBridgeFollowUpHint[] {
+  const hints: HealthFileBridgeFollowUpHint[] = [];
+  if (fileType === "recheck-slip" || hasKeyword(haystack, FOLLOW_UP_HINT_KEYWORDS)) {
+    hints.push({
+      title: "Keep the original follow-up timing visible",
+      detail:
+        "The upload appears to contain recheck or follow-up wording. Preserve the original timeline from the source document for later T9/T10 mapping.",
+      source: "pattern:follow-up",
+    });
   }
-}
-
-function bucketFollowUp(bucket: RuleBucket): HealthFileBridgeFollowUpItem {
-  switch (bucket) {
-    case "fever_or_temperature":
-      return {
-        title: "Compare tonight status with next-day daycare observation",
-        detail:
-          "Use the next handoff to confirm whether the temperature-related concern still needs closer monitoring.",
-        ownerRole: "teacher",
-        due: "next morning handoff",
-        source: "rule:fever_or_temperature",
-      };
-    case "allergy_or_medication":
-      return {
-        title: "Confirm classroom precautions were followed",
-        detail:
-          "Review whether the care team and family used the same allergy or medication instruction wording.",
-        ownerRole: "teacher",
-        due: "next care cycle",
-        source: "rule:allergy_or_medication",
-      };
-    case "recheck_or_follow_up":
-      return {
-        title: "Check that the follow-up milestone was not missed",
-        detail: "Bridge the external recheck date into the next daycare review point.",
-        ownerRole: "teacher",
-        due: "next scheduled review",
-        source: "rule:recheck_or_follow_up",
-      };
-    case "generic_unknown":
-    default:
-      return {
-        title: "Confirm the core actionable point with the family",
-        detail:
-          "Before using the external file in a daycare plan, verify the one action that teachers should actually take.",
-        ownerRole: "teacher",
-        due: "next family handoff",
-        source: "rule:generic_unknown",
-      };
+  if (hasKeyword(haystack, MEDICATION_KEYWORDS)) {
+    hints.push({
+      title: "Capture the exact medication wording for later review",
+      detail:
+        "If this file is reused downstream, keep the original medication phrasing rather than paraphrasing it into an action prematurely.",
+      source: "pattern:medication",
+    });
   }
-}
-
-function buildEscalationSuggestion(buckets: RuleBucket[]): HealthFileBridgeEscalationSuggestion {
-  if (buckets.includes("allergy_or_medication")) {
-    return {
-      shouldEscalate: true,
-      level: "school-health-review",
-      reason:
-        "Potential allergy or medication instructions usually need a same-day staff review before routine care.",
-      nextStep: "Ask the responsible teacher or school health contact to confirm the actionable precautions.",
-      source: "rule:allergy_or_medication",
-    };
+  if (hints.length === 0) {
+    hints.push({
+      title: "Preserve the original file for manual walkthrough",
+      detail:
+        "T8 extracted only structured hints. A later walkthrough should compare these hints against the original screenshot or PDF before mapping actions.",
+      source: "fallback:text-hints",
+    });
   }
-  if (buckets.includes("fever_or_temperature") || buckets.includes("recheck_or_follow_up")) {
-    return {
-      shouldEscalate: true,
-      level: "teacher-review",
-      reason:
-        "The external file adds same-day monitoring or follow-up information that should be acknowledged by the teacher team.",
-      nextStep:
-        "Bridge the note into a teacher review item instead of assuming the external file has already been acted on.",
-      source: buckets.includes("fever_or_temperature")
-        ? "rule:fever_or_temperature"
-        : "rule:recheck_or_follow_up",
-    };
-  }
-  return {
-    shouldEscalate: false,
-    level: "none",
-    reason: "The current input does not justify escalation beyond a teacher-side manual review in T7.",
-    nextStep: "Keep this as a bridge note and confirm the actionable point with the family.",
-    source: "rule:generic_unknown",
-  };
-}
-
-function buildWritebackSuggestion(
-  request: HealthFileBridgeRequest,
-  facts: HealthFileBridgeFact[],
-  risks: HealthFileBridgeRiskItem[]
-): HealthFileBridgeWritebackSuggestion {
-  return {
-    shouldWriteback: true,
-    destination: "teacher-health-note-draft",
-    summary:
-      "Create a draft daycare note with the external-file facts, bridge risks, and same-day actions. Do not auto-write it in T7.",
-    payload: {
-      childId: request.childId ?? null,
-      sourceRole: request.sourceRole,
-      fileKind: request.fileKind ?? null,
-      fileNames: request.files.map((file) => file.name),
-      extractedFactLabels: facts.map((item) => item.label),
-      riskTitles: risks.map((item) => item.title),
-    },
-    source: "rule:writeback-draft",
-    status: "placeholder",
-  };
+  return dedupeByTitle(hints);
 }
 
 function dedupeByTitle<T extends { title: string }>(items: T[]) {
@@ -433,6 +320,21 @@ function dedupeByLabel<T extends { label: string }>(items: T[]) {
   });
 }
 
+function computeConfidence(
+  signals: ReturnType<typeof collectSignals>,
+  facts: HealthFileBridgeFact[],
+  fileType: HealthFileBridgeFileType
+) {
+  let score = 0.18;
+  if (signals.previewTexts.length > 0) score += 0.34;
+  if (signals.notes) score += 0.14;
+  if (signals.fileUrls.length > 0) score += 0.08;
+  if (fileType !== "unknown") score += 0.12;
+  score += Math.min(facts.length, 5) * 0.04;
+  if (!signals.providerText) score -= 0.06;
+  return Math.max(0.1, Math.min(Number(score.toFixed(2)), 0.92));
+}
+
 export function buildHealthFileBridgeResponse(
   request: HealthFileBridgeRequest,
   options: {
@@ -443,39 +345,27 @@ export function buildHealthFileBridgeResponse(
   }
 ): HealthFileBridgeResponse {
   const signals = collectSignals(request);
-  const buckets = detectBuckets(signals.haystack);
-
-  const extractedFacts = dedupeByLabel([
-    ...baseFacts(request),
-    ...buckets.flatMap((bucket) => bucketFacts(bucket, signals)),
-  ]);
-  const riskItems = dedupeByTitle(buckets.map((bucket) => bucketRisk(bucket)));
-  const schoolTodayActions = dedupeByTitle(buckets.map((bucket) => bucketSchoolAction(bucket)));
-  const familyTonightActions = dedupeByTitle(buckets.map((bucket) => bucketFamilyAction(bucket)));
-  const followUpPlan = dedupeByTitle(buckets.map((bucket) => bucketFollowUp(bucket)));
-  const escalationSuggestion = buildEscalationSuggestion(buckets);
-  const writebackSuggestion = buildWritebackSuggestion(request, extractedFacts, riskItems);
-
+  const fileType = detectFileType(request, signals);
+  const extractedFacts = dedupeByLabel([...baseFacts(request, signals, fileType), ...signalFacts(signals.haystack)]);
   return {
     childId: request.childId,
     sourceRole: request.sourceRole,
     fileKind: request.fileKind,
+    fileType,
     summary:
-      "T7 skeleton bridged external health file context into daycare actions. Teachers still need to manually review the original file before using the suggestions operationally.",
+      "T8 extracted structured health-file hints only. Daycare action mapping remains out of scope for this step.",
     extractedFacts,
-    riskItems,
-    schoolTodayActions,
-    familyTonightActions,
-    followUpPlan,
-    escalationSuggestion,
-    writebackSuggestion,
+    riskItems: riskItems(signals.haystack),
+    contraindications: contraindications(signals.haystack),
+    followUpHints: followUpHints(signals.haystack, fileType),
+    confidence: computeConfidence(signals, extractedFacts, fileType),
     disclaimer: HEALTH_FILE_BRIDGE_DISCLAIMER,
     source: options.source,
     fallback: options.fallback,
     mock: options.mock,
     liveReadyButNotVerified: options.liveReadyButNotVerified,
     generatedAt: new Date().toISOString(),
-    provider: "health-file-bridge-rule",
-    model: "t7-health-file-bridge-skeleton",
+    provider: "next-local-health-file-extractor",
+    model: "t8-health-file-bridge-local",
   };
 }

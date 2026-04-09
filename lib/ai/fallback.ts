@@ -4,9 +4,11 @@ import type {
   AiSuggestionResponse,
   InstitutionSuggestionSnapshot,
   RuleFallbackItem,
+  WeeklyReportRole,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { buildActionizedWeeklyReportResponse, normalizeWeeklyReportRole } from "@/lib/ai/weekly-report";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 const DEFAULT_DISCLAIMER =
@@ -205,7 +207,11 @@ export function buildFallbackInstitutionFollowUp(
   };
 }
 
-export function buildFallbackWeeklyReport(snapshot: WeeklyReportSnapshot): WeeklyReportResponse {
+export function buildFallbackWeeklyReport(
+  snapshot: WeeklyReportSnapshot,
+  role?: WeeklyReportRole
+): WeeklyReportResponse {
+  const resolvedRole = role ?? normalizeWeeklyReportRole(snapshot.role) ?? "admin";
   const trendPrediction =
     snapshot.overview.healthAbnormalCount > 0 || snapshot.overview.pendingReviewCount > 2
       ? "up"
@@ -213,7 +219,9 @@ export function buildFallbackWeeklyReport(snapshot: WeeklyReportSnapshot): Weekl
       ? "down"
       : "stable";
 
-  return {
+  return buildActionizedWeeklyReportResponse({
+    role: resolvedRole,
+    snapshot,
     summary:
       `${snapshot.periodLabel}内共覆盖${snapshot.overview.visibleChildren}名幼儿，出勤率约${snapshot.overview.attendanceRate}%，` +
       `${snapshot.diet.balancedRate >= 70 ? "膳食结构总体较稳，" : "膳食均衡度仍需提升，"}` +
@@ -235,5 +243,5 @@ export function buildFallbackWeeklyReport(snapshot: WeeklyReportSnapshot): Weekl
     trendPrediction,
     disclaimer: DEFAULT_DISCLAIMER,
     source: "fallback",
-  };
+  });
 }

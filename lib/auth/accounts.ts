@@ -101,7 +101,7 @@ export function getDefaultLandingPath(role: AccountRole) {
 }
 
 export function getRoleHomePath(role: AccountRole) {
-  if (role === "教师") return "/teacher";
+  if (role === "教师") return "/teacher/home";
   if (role === "家长") return "/parent";
   return "/admin";
 }

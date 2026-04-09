@@ -2,12 +2,27 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Baby, BookHeart, BrainCircuit, House, Monitor, Salad, ShieldCheck, Users } from "lucide-react";
-import { getRoleAgentPath, getRoleHomePath } from "@/lib/auth/accounts";
+import { Baby, BookHeart, House, Monitor, Salad, ShieldCheck, Users } from "lucide-react";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import MobileNav from "@/components/MobileNav";
 import { Button } from "@/components/ui/button";
+import {
+  buildPrimaryNavItems,
+  isPrimaryNavItemActive,
+  type PrimaryNavIconKey,
+} from "@/lib/navigation/primary-nav";
+
+const ICON_MAP: Record<PrimaryNavIconKey, typeof House> = {
+  overview: House,
+  "role-home": House,
+  children: Users,
+  health: ShieldCheck,
+  growth: BookHeart,
+  diet: Salad,
+  parent: Baby,
+  screen: Monitor,
+};
 
 export default function Navbar() {
   const router = useRouter();
@@ -18,19 +33,7 @@ export default function Navbar() {
     return null;
   }
 
-  const homeHref = getRoleHomePath(currentUser.role);
-  const agentHref = getRoleAgentPath(currentUser.role);
-  const navItems = [
-    { href: homeHref, label: "首页", icon: House },
-    { href: agentHref, label: "AI 助手", icon: BrainCircuit },
-    { href: "/children", label: "儿童档案", icon: Users },
-    { href: "/health", label: "晨检与健康", icon: ShieldCheck },
-    { href: "/growth", label: "成长观察", icon: BookHeart },
-    { href: "/diet", label: "饮食记录", icon: Salad },
-    currentUser.role === "机构管理员"
-      ? { href: "/admin", label: "园所首页", icon: Monitor }
-      : { href: homeHref, label: currentUser.role === "教师" ? "教师首页" : "家长首页", icon: Baby },
-  ];
+  const navItems = buildPrimaryNavItems(currentUser.role);
 
   async function handleLogout() {
     await logout();
@@ -41,7 +44,7 @@ export default function Navbar() {
   return (
     <nav className="sticky top-0 z-40 border-b border-white/60 bg-white/75 shadow-sm backdrop-blur-xl after:absolute after:bottom-0 after:left-0 after:h-px after:w-full after:bg-linear-to-r after:from-indigo-500/20 after:via-violet-500/20 after:to-transparent after:content-['']">
       <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <Link href={homeHref} className="group flex items-center gap-3 font-bold text-(--primary)">
+        <Link href="/" className="group flex items-center gap-3 font-bold text-(--primary)">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-indigo-100 to-sky-100 shadow-sm transition-transform duration-300 group-hover:-translate-y-0.5">
             <Baby className="h-5 w-5 text-indigo-600" />
           </div>
@@ -54,8 +57,10 @@ export default function Navbar() {
         </Link>
 
         <div className="hidden flex-1 items-center justify-center gap-1 overflow-x-auto md:flex">
-          {navItems.map(({ href, label, icon: Icon }) => {
-            const active = href === homeHref ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+          {navItems.map(({ href, label, icon }) => {
+            const Icon = ICON_MAP[icon];
+            const active = isPrimaryNavItemActive(pathname, href);
+
             return (
               <Link
                 key={`${href}-${label}`}

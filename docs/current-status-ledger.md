@@ -18,6 +18,7 @@
 - 前后端 36 人 demo 基线：代码已落地，但仍缺统一 walkthrough / 录屏再验
 - T7 health-file-bridge：`/teacher/health-file-bridge`、`/api/ai/health-file-bridge` 与 backend schema/service skeleton 已落地；OCR / writeback / live escalation 仍未验证
 - T24/T25 Teacher Copilot：backend contract 与 `/teacher/agent` UI 已合入；仍缺人工 walkthrough
+- T26 Weekly Report V2：backend-only contract / generator / route 已落地，`/api/ai/weekly-report` 与 FastAPI `/api/v1/agents/reports/weekly` 已能区分 `teacher / admin / parent`；页面接入仍留给 `T27`
 - staging 与 vivo provider：仍必须保守表达，不写成 `fully healthy`、`fully switched` 或 `fully live`
 
 ## 最稳定 Walkthrough
@@ -131,7 +132,7 @@
 | `T23` | 年龄分层照护引擎接入主链路 | `Planned` | 年龄分层照护 | `T22` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T24` | Teacher Copilot：backend 能力包 | `Done-code-only` | Teacher Copilot | - | 中 | service smoke | `TR+A` |
 | `T25` | Teacher Copilot：UI 接入 | `Done-code-only` | Teacher Copilot | `T24` | 中 | walkthrough / 录屏 | `TR+L+A` |
-| `T26` | Weekly Report V2：三版本行动化 schema / generator | `Planned` | Actionized Weekly Report | - | 中 | generator smoke | `TR+A` |
+| `T26` | Weekly Report V2：三版本行动化 schema / generator | `Done-code-only` | Actionized Weekly Report | - | 中 | generator smoke | `TR+A` |
 | `T27` | Weekly Report V2：前端接入 | `Planned` | Actionized Weekly Report | `T26` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T28` | Admin 质量驾驶舱：metrics engine | `Planned` | Admin 质量治理 | - | 中 | aggregation smoke | `TR+A` |
 | `T29` | Admin 质量驾驶舱：UI | `Planned` | Admin 质量治理 | `T28` | 中 | walkthrough / 录屏 | `TR+L+A` |
@@ -161,6 +162,7 @@
 - `T19` 已把 Admin `ConsultationTraceCard` 接到结构化 `evidenceItems` 证据链 UI，并在 Teacher `TraceStepCard` 补了最小结构化证据预览；旧 `evidenceHighlights` / `explainability` / stage legacy evidence 仍保留为兼容 fallback
 - `T7` 已落地 `/teacher/health-file-bridge` 页面、`/api/ai/health-file-bridge` 桥接与 backend `health_file_bridge` schema/service skeleton；当前仍是 skeleton，不宣称 OCR / writeback / escalation 已闭环
 - `T6` 已把主视角补水表达收敛到状态化文案；底层 hydration 数据仍保留给趋势、聚合与风险判断链路
+- `T26` 已把 weekly report shared contract 扩到 `schemaVersion / role / sections / primaryAction`，并保持旧 `summary / highlights / risks / nextWeekActions / trendPrediction` 字段兼容；三角色 backend section ids 已固定，但页面级 walkthrough 与 UI shape 细化仍未开始，不写成 `T27` 已完成
 
 - 本轮 post-merge integration sweep 与 `T19` 的本地静态与定向测试已通过：`npm run lint`、`npm run build`、`npx --yes tsx --test lib/consultation/evidence-display.test.ts lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts lib/agent/health-file-bridge.test.ts`、`npx --yes tsx --test lib/teacher-copilot/normalize.test.ts`、`py -m pytest backend/tests/test_teacher_voice_understand.py backend/tests/test_health_file_bridge_service.py backend/tests/test_health_file_bridge_endpoint.py backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py backend/tests/test_parent_trend_service.py backend/tests/test_childcare_repository.py -q`；`/teacher/high-risk-consultation`、`/admin`、`/admin/agent`、`/teacher/agent`、`/teacher/health-file-bridge`、`/parent/agent` 的页面级 HTTP / 浏览器 walkthrough 仍未计为已通过
 

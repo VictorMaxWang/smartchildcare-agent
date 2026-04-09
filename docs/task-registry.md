@@ -518,7 +518,9 @@
 - 是否适合并行：中
 - 最小验收方式：三版本 schema、生成逻辑与输出槽位定义齐全，并可被前端接入
 - 是否需人工 walkthrough / 真机 / 录屏再验：否
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-09 更新：`/api/ai/weekly-report` 与 `/api/v1/agents/reports/weekly` 已支持 `teacher / admin / parent` 三角色周报；shared contract 新增 `schemaVersion`、`role`、`sections`、`primaryAction`，并保留 `summary / highlights / risks / nextWeekActions / trendPrediction` 旧字段兼容。
+- 2026-04-09 边界：本轮仅完成 backend-ready schema / generator / route / tests；`T27` 才做 Teacher / Admin / Parent 页面接入。Admin 率值/热力摘要与 Parent 稀疏输入仍允许来自 demo/mock/fallback，不写成 fully live。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T27｜Weekly Report V2：前端接入

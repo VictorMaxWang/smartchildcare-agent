@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { executeWeeklyReport, getAiRuntimeOptions, isValidWeeklyReportPayload } from "@/lib/ai/server";
+import {
+  executeWeeklyReport,
+  getAiRuntimeOptions,
+  isValidWeeklyReportPayload,
+  resolveWeeklyReportRoleFromPayload,
+} from "@/lib/ai/server";
 import type { WeeklyReportPayload } from "@/lib/ai/types";
 import { forwardBrainRequest } from "@/lib/server/brain-client";
 
@@ -18,6 +23,10 @@ export async function POST(request: Request) {
 
   if (!isValidWeeklyReportPayload(payload)) {
     return NextResponse.json({ error: "Invalid snapshot payload" }, { status: 400 });
+  }
+
+  if (!resolveWeeklyReportRoleFromPayload(payload)) {
+    return NextResponse.json({ error: "Weekly report role is required" }, { status: 400 });
   }
 
   const result = await executeWeeklyReport(payload, getAiRuntimeOptions(request));

@@ -85,7 +85,7 @@ export default function RiskPriorityBoard({
         {items.map((item) => (
           <div
             key={item.consultationId}
-            className="grid gap-4 xl:items-start xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]"
+            className="grid min-w-0 gap-4 2xl:items-start 2xl:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.82fr)]"
           >
             <DirectorDecisionCard
               item={item}
@@ -93,7 +93,7 @@ export default function RiskPriorityBoard({
               isCreatingNotification={isCreatingConsultationNotification?.(item.consultationId) ?? false}
               notificationError={notificationError}
             />
-            <ConsultationTraceCard item={item} className="xl:self-start" />
+            <ConsultationTraceCard item={item} className="min-w-0 2xl:self-start" />
           </div>
         ))}
       </div>

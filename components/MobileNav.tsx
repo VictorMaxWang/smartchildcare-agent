@@ -3,10 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Baby, BookHeart, BrainCircuit, House, LogOut, Menu, Monitor, Salad, ShieldCheck, Users, X } from "lucide-react";
-import { getRoleAgentPath, getRoleHomePath } from "@/lib/auth/accounts";
+import { Baby, BookHeart, House, LogOut, Menu, Monitor, Salad, ShieldCheck, Users, X } from "lucide-react";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import {
+  buildPrimaryNavItems,
+  isPrimaryNavItemActive,
+  type PrimaryNavIconKey,
+} from "@/lib/navigation/primary-nav";
+
+const ICON_MAP: Record<PrimaryNavIconKey, typeof House> = {
+  overview: House,
+  "role-home": House,
+  children: Users,
+  health: ShieldCheck,
+  growth: BookHeart,
+  diet: Salad,
+  parent: Baby,
+  screen: Monitor,
+};
 
 export default function MobileNav({ onLogout }: { onLogout: () => void }) {
   const pathname = usePathname();
@@ -15,19 +30,7 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const firstLinkRef = useRef<HTMLAnchorElement>(null);
-  const homeHref = getRoleHomePath(currentUser.role);
-  const agentHref = getRoleAgentPath(currentUser.role);
-  const navItems = [
-    { href: homeHref, label: "首页", icon: House },
-    { href: agentHref, label: "AI 助手", icon: BrainCircuit },
-    { href: "/children", label: "儿童档案", icon: Users },
-    { href: "/health", label: "晨检与健康", icon: ShieldCheck },
-    { href: "/growth", label: "成长观察", icon: BookHeart },
-    { href: "/diet", label: "饮食记录", icon: Salad },
-    currentUser.role === "机构管理员"
-      ? { href: "/admin", label: "园所首页", icon: Monitor }
-      : { href: homeHref, label: currentUser.role === "教师" ? "教师首页" : "家长首页", icon: Baby },
-  ];
+  const navItems = buildPrimaryNavItems(currentUser.role);
 
   const close = () => setOpen(false);
 
@@ -60,6 +63,7 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
       const focusableItems = panelRef.current.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
       );
+
       if (focusableItems.length === 0) {
         return;
       }
@@ -113,7 +117,7 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
         )}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <Link href={homeHref} className="flex items-center gap-2 font-bold text-indigo-600" onClick={close}>
+          <Link href="/" className="flex items-center gap-2 font-bold text-indigo-600" onClick={close}>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100">
               <Baby className="h-5 w-5 text-indigo-600" />
             </div>
@@ -130,8 +134,10 @@ export default function MobileNav({ onLogout }: { onLogout: () => void }) {
 
         <div className="flex-1 overflow-y-auto px-3 py-4">
           <div className="space-y-1">
-            {navItems.map(({ href, label, icon: Icon }, index) => {
-              const active = href === homeHref ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+            {navItems.map(({ href, label, icon }, index) => {
+              const Icon = ICON_MAP[icon];
+              const active = isPrimaryNavItemActive(pathname, href);
+
               return (
                 <Link
                   key={`${href}-${label}`}

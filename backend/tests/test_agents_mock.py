@@ -135,10 +135,11 @@ def test_health_file_bridge():
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["source"] == "backend-rule"
+    assert body["source"] == "backend-text-fallback"
     assert body["mock"] is True
     assert body["extractedFacts"]
-    assert body["schoolTodayActions"]
+    assert body["followUpHints"]
+    assert "confidence" in body
 
 
 def test_admin_run():
@@ -163,13 +164,29 @@ def test_admin_run_sparse_payload_uses_demo_roster_context():
     assert body["priorityTopItems"][0]["targetId"] == "c-16"
 
 
-def test_weekly_report():
+def test_weekly_report_teacher_role():
     response = client.post(
         "/api/v1/agents/reports/weekly",
-        json={"snapshot": {"institutionName": "Demo Institution"}},
+        json={
+            "role": "teacher",
+            "snapshot": {
+                "institutionName": "Demo Institution",
+                "periodLabel": "近 7 天",
+                "role": "机构管理员",
+            },
+        },
     )
     assert response.status_code == 200
-    assert response.json()["source"] == "mock"
+    body = response.json()
+    assert body["source"] == "mock"
+    assert body["schemaVersion"] == "v2-actionized"
+    assert body["role"] == "teacher"
+    assert [section["id"] for section in body["sections"]] == [
+        "weeklyAnomalies",
+        "makeUpItems",
+        "nextWeekObservationFocus",
+    ]
+    assert body["primaryAction"]["ownerRole"] == "teacher"
 
 
 def test_health_file_bridge():
@@ -190,21 +207,49 @@ def test_health_file_bridge():
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["source"] == "backend-rule"
+    assert body["source"] == "backend-text-fallback"
     assert body["mock"] is True
-    assert body["schoolTodayActions"]
-    assert body["writebackSuggestion"]["status"] == "placeholder"
+    assert body["riskItems"]
+    assert body["contraindications"] is not None
 
 
-def test_weekly_report_sparse_payload_hydrates_demo_context():
-    response = client.post("/api/v1/agents/reports/weekly", json={})
+def test_weekly_report_legacy_snapshot_role_normalizes_admin():
+    response = client.post(
+        "/api/v1/agents/reports/weekly",
+        json={"snapshot": {"institutionName": "Demo Institution", "role": "机构管理员"}},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "mock"
+    assert body["role"] == "admin"
+    assert [section["id"] for section in body["sections"]] == [
+        "highRiskClosureRate",
+        "parentFeedbackRate",
+        "classIssueHeat",
+        "nextWeekGovernanceFocus",
+    ]
+    assert body["trendPrediction"] in {"stable", "down"}
+
+
+def test_weekly_report_parent_role_can_hydrate_demo_context():
+    response = client.post("/api/v1/agents/reports/weekly", json={"role": "parent"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "mock"
+    assert body["role"] == "parent"
     assert body["summary"]
     assert body["highlights"]
     assert body["nextWeekActions"]
-    assert body["trendPrediction"] == "stable"
+    assert [section["id"] for section in body["sections"]] == [
+        "weeklyChanges",
+        "topHomeAction",
+        "feedbackNeeded",
+    ]
+
+
+def test_weekly_report_requires_role_or_legacy_snapshot_role():
+    response = client.post("/api/v1/agents/reports/weekly", json={"snapshot": {"institutionName": "Demo Institution"}})
+    assert response.status_code == 400
 
 
 def test_high_risk_consultation():

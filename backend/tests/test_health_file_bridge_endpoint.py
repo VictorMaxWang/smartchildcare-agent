@@ -30,12 +30,13 @@ def test_health_file_bridge_endpoint_accepts_camel_case_payload():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source"] == "backend-rule"
+    assert body["source"] == "backend-text-fallback"
     assert body["mock"] is True
     assert body["liveReadyButNotVerified"] is True
-    assert body["schoolTodayActions"]
-    assert body["followUpPlan"]
-    assert body["writebackSuggestion"]["status"] == "placeholder"
+    assert body["fileType"] in {"pdf", "mixed"}
+    assert body["contraindications"] is not None
+    assert body["followUpHints"]
+    assert isinstance(body["confidence"], float)
 
 
 def test_health_file_bridge_endpoint_accepts_snake_case_payload():
@@ -63,7 +64,8 @@ def test_health_file_bridge_endpoint_accepts_snake_case_payload():
     assert body["childId"] == "child-2"
     assert body["sourceRole"] == "parent"
     assert body["riskItems"]
-    assert body["escalationSuggestion"]["level"] == "school-health-review"
+    assert body["contraindications"]
+    assert body["followUpHints"]
 
 
 def test_health_file_bridge_endpoint_rejects_empty_files():

@@ -363,7 +363,7 @@ export function buildAdminHomeViewModel(params: {
     })),
     highlights: params.smartInsights.filter((item) => item.level !== "warning").map((item) => item.title).slice(0, 4),
     risks: params.smartInsights.filter((item) => item.level === "warning").map((item) => item.title).slice(0, 4),
-  });
+  }, "admin");
 
   const pendingItems = [
     weekHealth.filter((item) => item.isAbnormal).length > 0

@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json(
     buildHealthFileBridgeResponse(payload, {
-      source: "next-local-rule",
+      source: "next-local-extractor",
       fallback: true,
       mock: true,
       liveReadyButNotVerified: true,

@@ -12,15 +12,16 @@ def _to_camel(value: str) -> str:
 
 JsonDict = dict[str, Any]
 HealthFileBridgeSourceRole = Literal["parent", "teacher"]
-HealthFileBridgeSource = Literal["backend-rule", "next-local-rule"]
+HealthFileBridgeSource = Literal["backend-text-fallback", "next-local-extractor"]
 HealthFileBridgeRiskLevel = Literal["low", "medium", "high"]
-HealthFileBridgeEscalationLevel = Literal[
-    "none",
-    "teacher-review",
-    "school-health-review",
-    "medical-follow-up",
+HealthFileBridgeFileType = Literal[
+    "report-screenshot",
+    "pdf",
+    "checklist",
+    "recheck-slip",
+    "mixed",
+    "unknown",
 ]
-HealthFileBridgeWritebackStatus = Literal["placeholder", "not-run"]
 
 
 class HealthFileBridgeModel(BaseModel):
@@ -64,45 +65,16 @@ class HealthFileBridgeRiskItem(HealthFileBridgeModel):
     source: str
 
 
-class HealthFileBridgeActionItem(HealthFileBridgeModel):
+class HealthFileBridgeContraindication(HealthFileBridgeModel):
     title: str
     detail: str
-    owner_role: Literal["teacher", "parent", "family"] = Field(
-        validation_alias=AliasChoices("ownerRole", "owner_role")
-    )
-    timing: str
     source: str
 
 
-class HealthFileBridgeFollowUpItem(HealthFileBridgeModel):
+class HealthFileBridgeFollowUpHint(HealthFileBridgeModel):
     title: str
     detail: str
-    owner_role: Literal["teacher", "parent", "family"] = Field(
-        validation_alias=AliasChoices("ownerRole", "owner_role")
-    )
-    due: str
     source: str
-
-
-class HealthFileBridgeEscalationSuggestion(HealthFileBridgeModel):
-    should_escalate: bool = Field(
-        validation_alias=AliasChoices("shouldEscalate", "should_escalate")
-    )
-    level: HealthFileBridgeEscalationLevel
-    reason: str
-    next_step: str = Field(validation_alias=AliasChoices("nextStep", "next_step"))
-    source: str
-
-
-class HealthFileBridgeWritebackSuggestion(HealthFileBridgeModel):
-    should_writeback: bool = Field(
-        validation_alias=AliasChoices("shouldWriteback", "should_writeback")
-    )
-    destination: str
-    summary: str
-    payload: JsonDict = Field(default_factory=dict)
-    source: str
-    status: HealthFileBridgeWritebackStatus
 
 
 class HealthFileBridgeResponse(HealthFileBridgeModel):
@@ -111,6 +83,9 @@ class HealthFileBridgeResponse(HealthFileBridgeModel):
         validation_alias=AliasChoices("sourceRole", "source_role")
     )
     file_kind: str | None = Field(default=None, validation_alias=AliasChoices("fileKind", "file_kind"))
+    file_type: HealthFileBridgeFileType = Field(
+        validation_alias=AliasChoices("fileType", "file_type")
+    )
     summary: str
     extracted_facts: list[HealthFileBridgeFact] = Field(
         default_factory=list,
@@ -120,24 +95,12 @@ class HealthFileBridgeResponse(HealthFileBridgeModel):
         default_factory=list,
         validation_alias=AliasChoices("riskItems", "risk_items"),
     )
-    school_today_actions: list[HealthFileBridgeActionItem] = Field(
+    contraindications: list[HealthFileBridgeContraindication] = Field(default_factory=list)
+    follow_up_hints: list[HealthFileBridgeFollowUpHint] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("schoolTodayActions", "school_today_actions"),
+        validation_alias=AliasChoices("followUpHints", "follow_up_hints"),
     )
-    family_tonight_actions: list[HealthFileBridgeActionItem] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("familyTonightActions", "family_tonight_actions"),
-    )
-    follow_up_plan: list[HealthFileBridgeFollowUpItem] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("followUpPlan", "follow_up_plan"),
-    )
-    escalation_suggestion: HealthFileBridgeEscalationSuggestion = Field(
-        validation_alias=AliasChoices("escalationSuggestion", "escalation_suggestion")
-    )
-    writeback_suggestion: HealthFileBridgeWritebackSuggestion = Field(
-        validation_alias=AliasChoices("writebackSuggestion", "writeback_suggestion")
-    )
+    confidence: float
     disclaimer: str
     source: HealthFileBridgeSource
     fallback: bool = False

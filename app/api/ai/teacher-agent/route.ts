@@ -187,7 +187,10 @@ export async function POST(request: Request) {
   }
 
   const aiReport = await executeWeeklyReport(
-    { snapshot: buildTeacherWeeklyReportSnapshotWithMemory(classContext, weeklyMemoryContexts) },
+    {
+      role: "teacher",
+      snapshot: buildTeacherWeeklyReportSnapshotWithMemory(classContext, weeklyMemoryContexts),
+    },
     runtimeOptions
   );
   const result = buildTeacherWeeklySummaryResultWithMemory({

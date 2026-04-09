@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
-  BarChart,
   ClipboardCheck,
   HeartPulse,
   MessageSquare,
@@ -17,6 +16,7 @@ import {
   Area,
   AreaChart,
   Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   ResponsiveContainer,

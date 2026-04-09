@@ -14,6 +14,7 @@ import {
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { buildAdminHomeViewModel } from "@/lib/agent/admin-agent";
+import { dedupeAdminHomeExposure } from "@/lib/agent/admin-home-dedupe";
 import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
 import type { AdminDispatchEvent, InstitutionPriorityItem } from "@/lib/agent/admin-types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
@@ -105,6 +106,10 @@ export default function AdminHomePage() {
       visibleChildren,
     ]
   );
+  const displayHome = useMemo(
+    () => dedupeAdminHomeExposure(home, consultationPriorityItems),
+    [consultationPriorityItems, home]
+  );
 
   if (visibleChildren.length === 0) {
     return (
@@ -134,7 +139,7 @@ export default function AdminHomePage() {
         main={
           <div className="space-y-6">
             <MetricGrid
-              items={home.heroStats.map((item, index) => ({
+              items={displayHome.heroStats.map((item, index) => ({
                 ...item,
                 tone: index === 0 ? "amber" : index === 1 ? "sky" : index === 2 ? "emerald" : "indigo",
               }))}
@@ -176,7 +181,7 @@ export default function AdminHomePage() {
               actions={<Badge variant="warning">机构级排序</Badge>}
             >
               <div className="grid gap-4 md:grid-cols-3">
-                {home.priorityTopItems.map((item) => (
+                {displayHome.priorityTopItems.map((item) => (
                   <div key={item.id} className="rounded-3xl border border-amber-100 bg-amber-50/70 p-5">
                     <div className="flex items-center justify-between gap-3">
                       <PriorityLevelBadge level={item.priorityLevel} />
@@ -199,8 +204,8 @@ export default function AdminHomePage() {
                 description="优先展示当前需要园长过目的重点儿童名单。"
               >
                 <div className="space-y-3">
-                  {home.riskChildren.length > 0 ? (
-                    home.riskChildren.map((item) => (
+                  {displayHome.riskChildren.length > 0 ? (
+                    displayHome.riskChildren.map((item) => (
                       <div key={item.childId} className="rounded-3xl border border-slate-100 bg-white p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -259,15 +264,15 @@ export default function AdminHomePage() {
             >
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="space-y-3">
-                  {home.pendingItems.map((item) => (
+                  {displayHome.pendingItems.map((item) => (
                     <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-700">
                       {item}
                     </div>
                   ))}
                 </div>
                 <div className="space-y-3">
-                  {home.pendingDispatches.length > 0 ? (
-                    home.pendingDispatches.map((event) => (
+                  {displayHome.pendingDispatches.length > 0 ? (
+                    displayHome.pendingDispatches.map((event) => (
                       <div key={event.id} className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-sm font-semibold text-slate-900">{event.title}</p>
@@ -297,7 +302,7 @@ export default function AdminHomePage() {
               buttonLabel="进入机构运营 AI 助手"
             >
               <ul className="space-y-3 text-sm leading-6 text-slate-600">
-                <li>{home.actionEntrySummary}</li>
+                <li>{displayHome.actionEntrySummary}</li>
                 <li>当前服务对象：{INSTITUTION_NAME}</li>
                 <li>建议流程：先问优先级，再派单，再看周报。</li>
               </ul>
@@ -305,7 +310,7 @@ export default function AdminHomePage() {
 
             <SectionCard title="本周运营亮点" description="用于周报和大屏复用的高层摘要。">
               <div className="space-y-3">
-                {home.weeklyHighlights.map((item) => (
+                {displayHome.weeklyHighlights.map((item) => (
                   <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4">
                     <div className="flex items-start gap-3">
                       <TrendingUp className="mt-0.5 h-4 w-4 text-indigo-500" />

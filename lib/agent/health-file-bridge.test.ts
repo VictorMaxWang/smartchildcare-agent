@@ -6,7 +6,7 @@ import {
   isValidHealthFileBridgeRequest,
 } from "./health-file-bridge.ts";
 
-test("health-file-bridge helper returns complete skeleton output for metadata-only files", () => {
+test("health-file-bridge helper returns extraction-only output for metadata-heavy files", () => {
   const request = {
     childId: "child-1",
     sourceRole: "teacher",
@@ -24,26 +24,25 @@ test("health-file-bridge helper returns complete skeleton output for metadata-on
   assert.equal(isValidHealthFileBridgeRequest(request), true);
 
   const result = buildHealthFileBridgeResponse(request, {
-    source: "next-local-rule",
+    source: "next-local-extractor",
     fallback: true,
     mock: true,
     liveReadyButNotVerified: true,
   });
 
-  assert.equal(result.source, "next-local-rule");
+  assert.equal(result.source, "next-local-extractor");
+  assert.equal(result.fileType, "pdf");
   assert.equal(result.fallback, true);
   assert.equal(result.mock, true);
   assert.equal(result.liveReadyButNotVerified, true);
-  assert.ok(result.disclaimer.includes("T7 skeleton"));
+  assert.ok(result.disclaimer.includes("T8 extraction only"));
   assert.ok(result.extractedFacts.length >= 3);
-  assert.equal(result.riskItems[0]?.title, "Need manual interpretation by teacher");
-  assert.ok(result.schoolTodayActions.length > 0);
-  assert.ok(result.familyTonightActions.length > 0);
-  assert.ok(result.followUpPlan.length > 0);
-  assert.equal(result.writebackSuggestion.status, "placeholder");
+  assert.ok(result.riskItems.length > 0);
+  assert.ok(result.followUpHints.length > 0);
+  assert.equal(typeof result.confidence, "number");
 });
 
-test("health-file-bridge helper promotes fever and medication cues into bridge actions", () => {
+test("health-file-bridge helper promotes fever and medication cues into extraction fields only", () => {
   const request = {
     childId: "child-2",
     sourceRole: "parent",
@@ -62,7 +61,7 @@ test("health-file-bridge helper promotes fever and medication cues into bridge a
   } as const;
 
   const result = buildHealthFileBridgeResponse(request, {
-    source: "next-local-rule",
+    source: "next-local-extractor",
     fallback: true,
     mock: true,
     liveReadyButNotVerified: true,
@@ -70,13 +69,16 @@ test("health-file-bridge helper promotes fever and medication cues into bridge a
 
   const riskTitles = result.riskItems.map((item) => item.title);
   const factLabels = result.extractedFacts.map((item) => item.label);
-  const schoolActions = result.schoolTodayActions.map((item) => item.title);
+  const contraindicationTitles = result.contraindications.map((item) => item.title);
 
-  assert.ok(riskTitles.includes("Need teacher review before routine care"));
-  assert.ok(riskTitles.includes("Need same-day health recheck in daycare"));
-  assert.ok(factLabels.includes("Allergy or medication signal"));
-  assert.ok(factLabels.includes("Temperature signal"));
-  assert.ok(schoolActions.includes("Review allergy or medication instructions with the care team"));
-  assert.equal(result.escalationSuggestion.level, "school-health-review");
-  assert.equal(result.escalationSuggestion.shouldEscalate, true);
+  assert.equal(result.fileType, "mixed");
+  assert.ok(riskTitles.includes("Potential allergy-related instruction detected"));
+  assert.ok(riskTitles.includes("Temperature-related signal needs manual confirmation"));
+  assert.ok(factLabels.includes("Allergy mention"));
+  assert.ok(factLabels.includes("Temperature mention"));
+  assert.ok(
+    contraindicationTitles.includes("Do not infer a daycare medication plan from the file alone")
+  );
+  assert.ok(result.followUpHints.length > 0);
+  assert.ok(result.confidence >= 0.6);
 });

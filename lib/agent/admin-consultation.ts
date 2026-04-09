@@ -212,12 +212,67 @@ function buildEvidenceHighlightsFromItems(items: ConsultationEvidenceItem[], lim
   return buildConsultationEvidenceHighlights(items, limit);
 }
 
-function pickFirstText(...values: Array<string | null | undefined>) {
+export function pickFirstText(...values: Array<string | null | undefined>) {
   for (const value of values) {
     const normalized = value?.trim();
     if (normalized) return normalized;
   }
   return "";
+}
+
+const WHY_HIGH_PRIORITY_SERIALIZATION_HINTS = [
+  "最近上下文",
+  '{"snapshot":',
+  '"snapshot":',
+  '"child":',
+  '"summary":',
+  '"recordCount":',
+  '"pendingReviewCount":',
+  '"moodKeywords":',
+  '"allergies":',
+] as const;
+
+function looksLikeSerializedWhyHighPriority(text: string) {
+  const compact = text.trim().replace(/\s+/g, " ");
+  if (!compact) return false;
+
+  if (
+    WHY_HIGH_PRIORITY_SERIALIZATION_HINTS.some((hint) => compact.includes(hint))
+  ) {
+    return true;
+  }
+
+  const hasStructuredJsonShape =
+    (compact.startsWith("{") || compact.startsWith("[")) &&
+    compact.includes('":') &&
+    /[{[\]}]/.test(compact);
+
+  if (hasStructuredJsonShape && compact.length > 120) {
+    return true;
+  }
+
+  const punctuationDensity =
+    (compact.match(/[{}[\]":,]/g)?.length ?? 0) / Math.max(compact.length, 1);
+  const naturalSentenceLike = /[。！？；]/.test(compact);
+
+  return compact.length > 180 && punctuationDensity > 0.12 && !naturalSentenceLike;
+}
+
+export function sanitizeAdminWhyHighPriorityText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  return looksLikeSerializedWhyHighPriority(normalized) ? null : normalized;
+}
+
+export function resolveAdminWhyHighPriorityText(
+  ...values: Array<string | null | undefined>
+) {
+  for (const value of values) {
+    const sanitized = sanitizeAdminWhyHighPriorityText(value);
+    if (sanitized) return sanitized;
+  }
+
+  return "待补充说明";
 }
 
 function pickFirstStringList(
@@ -606,11 +661,12 @@ function buildLocalDecisionViewModel(params: {
     statusLabel: getStatusLabel(resolvedStatus.status),
     statusSource: resolvedStatus.statusSource,
     summary: consultation.summary,
-    whyHighPriority:
-      consultation.directorDecisionCard.reason ||
-      consultation.triggerReasons[0] ||
-      consultation.keyFindings[0] ||
-      consultation.summary,
+    whyHighPriority: resolveAdminWhyHighPriorityText(
+      consultation.directorDecisionCard.reason,
+      consultation.triggerReasons[0],
+      consultation.keyFindings[0],
+      consultation.summary
+    ),
     recommendedOwnerName:
       dispatchEvent?.recommendedOwnerName ||
       consultation.directorDecisionCard.recommendedOwnerName ||
@@ -857,15 +913,15 @@ function buildFeedDecisionViewModel(params: {
     statusLabel: getStatusLabel(resolvedStatus.status),
     statusSource: resolvedStatus.statusSource,
     summary: feedItem.summary || localConsultation?.summary || "暂无会诊摘要",
-    whyHighPriority: pickFirstText(
-      feedItem.whyHighPriority,
+    whyHighPriority: resolveAdminWhyHighPriorityText(
+      feedItem.directorDecisionCard.reason,
+      localConsultation?.directorDecisionCard.reason,
       feedItem.triggerReason,
       triggerReasons[0],
       keyFindings[0],
       feedItem.summary,
       localConsultation?.summary,
-      feedItem.directorDecisionCard.reason,
-      "待补充说明"
+      sanitizeAdminWhyHighPriorityText(feedItem.whyHighPriority)
     ),
     recommendedOwnerName:
       dispatchEvent?.recommendedOwnerName ||

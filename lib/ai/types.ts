@@ -829,7 +829,7 @@ export interface ParentTrendQueryResponse {
 export interface WeeklyReportSnapshot {
   institutionName: string;
   periodLabel: string;
-  role: string;
+  role: WeeklyReportRole | string;
   overview: {
     visibleChildren: number;
     attendanceRate: number;
@@ -858,16 +858,54 @@ export interface WeeklyReportSnapshot {
   continuityNotes?: string[];
 }
 
+export type WeeklyReportRole = "teacher" | "admin" | "parent";
+export type WeeklyReportSchemaVersion = "v2-actionized";
+export type WeeklyReportSectionId =
+  | "weeklyAnomalies"
+  | "makeUpItems"
+  | "nextWeekObservationFocus"
+  | "highRiskClosureRate"
+  | "parentFeedbackRate"
+  | "classIssueHeat"
+  | "nextWeekGovernanceFocus"
+  | "weeklyChanges"
+  | "topHomeAction"
+  | "feedbackNeeded";
+
+export interface WeeklyReportSectionItem {
+  label: string;
+  detail: string;
+}
+
+export interface WeeklyReportSection {
+  id: WeeklyReportSectionId;
+  title: string;
+  summary: string;
+  items: WeeklyReportSectionItem[];
+}
+
+export interface WeeklyReportPrimaryAction {
+  title: string;
+  detail: string;
+  ownerRole: WeeklyReportRole;
+  dueWindow: string;
+}
+
 export interface WeeklyReportPayload {
+  role?: WeeklyReportRole;
   snapshot: WeeklyReportSnapshot;
 }
 
 export interface WeeklyReportResponse {
+  schemaVersion: WeeklyReportSchemaVersion;
+  role: WeeklyReportRole;
   summary: string;
   highlights: string[];
   risks: string[];
   nextWeekActions: string[];
   trendPrediction: AiTrendPrediction;
+  sections: WeeklyReportSection[];
+  primaryAction?: WeeklyReportPrimaryAction;
   continuityNotes?: string[];
   memoryMeta?: MemoryContextMeta;
   disclaimer: string;
@@ -876,14 +914,15 @@ export interface WeeklyReportResponse {
 }
 
 export type HealthFileBridgeSourceRole = "parent" | "teacher";
-export type HealthFileBridgeSource = "backend-rule" | "next-local-rule";
+export type HealthFileBridgeSource = "backend-text-fallback" | "next-local-extractor";
 export type HealthFileBridgeRiskLevel = "low" | "medium" | "high";
-export type HealthFileBridgeEscalationLevel =
-  | "none"
-  | "teacher-review"
-  | "school-health-review"
-  | "medical-follow-up";
-export type HealthFileBridgeWritebackStatus = "placeholder" | "not-run";
+export type HealthFileBridgeFileType =
+  | "report-screenshot"
+  | "pdf"
+  | "checklist"
+  | "recheck-slip"
+  | "mixed"
+  | "unknown";
 
 export interface HealthFileBridgeFile {
   fileId?: string;
@@ -920,51 +959,29 @@ export interface HealthFileBridgeRiskItem {
   source: string;
 }
 
-export interface HealthFileBridgeActionItem {
+export interface HealthFileBridgeContraindication {
   title: string;
   detail: string;
-  ownerRole: "teacher" | "parent" | "family";
-  timing: string;
   source: string;
 }
 
-export interface HealthFileBridgeFollowUpItem {
+export interface HealthFileBridgeFollowUpHint {
   title: string;
   detail: string;
-  ownerRole: "teacher" | "parent" | "family";
-  due: string;
   source: string;
-}
-
-export interface HealthFileBridgeEscalationSuggestion {
-  shouldEscalate: boolean;
-  level: HealthFileBridgeEscalationLevel;
-  reason: string;
-  nextStep: string;
-  source: string;
-}
-
-export interface HealthFileBridgeWritebackSuggestion {
-  shouldWriteback: boolean;
-  destination: string;
-  summary: string;
-  payload: Record<string, unknown>;
-  source: string;
-  status: HealthFileBridgeWritebackStatus;
 }
 
 export interface HealthFileBridgeResponse {
   childId?: string;
   sourceRole: HealthFileBridgeSourceRole;
   fileKind?: string;
+  fileType: HealthFileBridgeFileType;
   summary: string;
   extractedFacts: HealthFileBridgeFact[];
   riskItems: HealthFileBridgeRiskItem[];
-  schoolTodayActions: HealthFileBridgeActionItem[];
-  familyTonightActions: HealthFileBridgeActionItem[];
-  followUpPlan: HealthFileBridgeFollowUpItem[];
-  escalationSuggestion: HealthFileBridgeEscalationSuggestion;
-  writebackSuggestion: HealthFileBridgeWritebackSuggestion;
+  contraindications: HealthFileBridgeContraindication[];
+  followUpHints: HealthFileBridgeFollowUpHint[];
+  confidence: number;
   disclaimer: string;
   source: HealthFileBridgeSource;
   fallback: boolean;
@@ -973,4 +990,104 @@ export interface HealthFileBridgeResponse {
   generatedAt: string;
   provider?: string;
   model?: string;
+}
+
+export type IntentRouterRoleHint = "teacher" | "parent" | "admin";
+export type IntentRouterDetectedRole = IntentRouterRoleHint | "unknown";
+export type SupportedIntent =
+  | "record_observation"
+  | "query_trend"
+  | "start_consultation"
+  | "generate_parent_draft"
+  | "view_priority"
+  | "view_tonight_action"
+  | "ask_storybook"
+  | "ask_weekly_report";
+export type IntentRouterIntent = SupportedIntent | "unknown";
+export type IntentRouterConfidence = "high" | "medium" | "low";
+
+export interface IntentRouterPreviewCard {
+  title: string;
+  summary: string;
+  ctaLabel: string;
+  badges: string[];
+}
+
+export interface TeacherReactRunPayload {
+  kind: "teacher-react-run";
+  task: string;
+  message: string;
+  childId?: string;
+}
+
+export interface TeacherAgentRunPayload {
+  kind: "teacher-agent-run";
+  workflow: "communication" | "weekly-summary";
+  message: string;
+  childId?: string;
+}
+
+export interface TeacherConsultationRunPayload {
+  kind: "teacher-consultation-run";
+  message: string;
+  childId?: string;
+}
+
+export interface ParentTrendQueryRunPayload {
+  kind: "parent-trend-query";
+  question: string;
+  message: string;
+  childId?: string;
+}
+
+export interface ParentAgentRunPayload {
+  kind: "parent-agent-run";
+  workflow: "suggestions";
+  message: string;
+  childId?: string;
+  anchor?: "intervention";
+}
+
+export interface ParentStorybookRunPayload {
+  kind: "parent-storybook-run";
+  message: string;
+  childId?: string;
+}
+
+export interface AdminAgentRunPayload {
+  kind: "admin-agent-run";
+  workflow: "daily-priority" | "weekly-ops-report";
+  message: string;
+  institutionId?: string;
+}
+
+export type IntentRouterOptionalPayload =
+  | TeacherReactRunPayload
+  | TeacherAgentRunPayload
+  | TeacherConsultationRunPayload
+  | ParentTrendQueryRunPayload
+  | ParentAgentRunPayload
+  | ParentStorybookRunPayload
+  | AdminAgentRunPayload;
+
+export interface IntentRouterRequest {
+  message: string;
+  roleHint?: IntentRouterRoleHint;
+  childId?: string;
+  institutionId?: string;
+  sourcePage?: string;
+  debug?: boolean;
+}
+
+export interface IntentRouterResult {
+  detectedRole: IntentRouterDetectedRole;
+  intent: IntentRouterIntent;
+  targetWorkflow: string;
+  targetPage: string;
+  deeplink: string;
+  previewCard: IntentRouterPreviewCard;
+  optionalPayload: IntentRouterOptionalPayload | null;
+  ruleId: string;
+  confidence: IntentRouterConfidence;
+  matchedSignals: string[];
 }

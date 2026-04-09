@@ -6,7 +6,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
+from app.schemas.agent import WeeklyReportRequest, WeeklyReportResponse
 from app.schemas.health_file_bridge import HealthFileBridgeRequest, HealthFileBridgeResponse
+from app.schemas.intent_router import IntentRouterRequest, IntentRouterResponse
 from app.schemas.parent_message import ParentMessageReflexionRequest, ParentMessageReflexionResponse
 from app.schemas.parent_storybook import ParentStoryBookRequest, ParentStoryBookResponse
 from app.schemas.parent_trend import ParentTrendQueryRequest, ParentTrendQueryResponse
@@ -118,15 +120,31 @@ async def admin_run(payload: dict[str, Any], orchestrator: Orchestrator = Depend
     return await orchestrator.admin_run(payload)
 
 
+@router.post("/agents/intent-router", response_model=IntentRouterResponse)
+async def intent_router(
+    payload: IntentRouterRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+):
+    result = await orchestrator.intent_router(payload.model_dump(mode="json", by_alias=True))
+    return IntentRouterResponse.model_validate(result)
+
+
 @router.post("/agents/react/run", response_model=ReactRunResponse)
 async def react_run(payload: ReactRunRequest, orchestrator: Orchestrator = Depends(get_orchestrator)):
     result = await orchestrator.react_run(payload.model_dump(mode="json", by_alias=True))
     return ReactRunResponse.model_validate(result)
 
 
-@router.post("/agents/reports/weekly")
-async def weekly_report(payload: dict[str, Any], orchestrator: Orchestrator = Depends(get_orchestrator)):
-    return await orchestrator.weekly_report(payload)
+@router.post("/agents/reports/weekly", response_model=WeeklyReportResponse)
+async def weekly_report(
+    payload: WeeklyReportRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+):
+    try:
+        result = await orchestrator.weekly_report(payload.model_dump(mode="json", by_alias=True))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return WeeklyReportResponse.model_validate(result)
 
 
 @router.post("/agents/consultations/high-risk")

@@ -4,9 +4,11 @@ import type {
   AiSuggestionResponse,
   ChildSuggestionSnapshot,
   InstitutionSuggestionSnapshot,
+  WeeklyReportRole,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { buildActionizedWeeklyReportResponse, normalizeWeeklyReportRole } from "@/lib/ai/weekly-report";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 function riskFromSnapshot(snapshot: ChildSuggestionSnapshot): "low" | "medium" | "high" {
@@ -200,8 +202,14 @@ export function buildMockInstitutionFollowUp(
   };
 }
 
-export function buildMockWeeklyReport(snapshot: WeeklyReportSnapshot): WeeklyReportResponse {
-  return {
+export function buildMockWeeklyReport(
+  snapshot: WeeklyReportSnapshot,
+  role?: WeeklyReportRole
+): WeeklyReportResponse {
+  const resolvedRole = role ?? normalizeWeeklyReportRole(snapshot.role) ?? "admin";
+  return buildActionizedWeeklyReportResponse({
+    role: resolvedRole,
+    snapshot,
     summary:
       `${snapshot.periodLabel}整体运营较稳定，出勤率约 ${snapshot.overview.attendanceRate}%，` +
       `共沉淀 ${snapshot.overview.mealRecordCount} 条餐食记录和 ${snapshot.overview.feedbackCount} 条家园反馈。` +
@@ -222,5 +230,5 @@ export function buildMockWeeklyReport(snapshot: WeeklyReportSnapshot): WeeklyRep
       snapshot.overview.healthAbnormalCount > 0 || snapshot.overview.pendingReviewCount > 2 ? "up" : "stable",
     disclaimer: "本建议由本地规则生成，仅用于托育观察与家园沟通参考，不构成医疗诊断。",
     source: "mock",
-  };
+  });
 }

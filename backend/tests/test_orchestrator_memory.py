@@ -178,6 +178,42 @@ def test_teacher_workflow_result_contains_memory_continuity(tmp_path, monkeypatc
     assert result["memoryMeta"]["memory_context_used"] is True
 
 
+def test_weekly_report_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "weekly-report-memory.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+    seed_child_memory()
+
+    orchestrator = build_orchestrator()
+    result = asyncio.run(
+        orchestrator.weekly_report(
+            {
+                "role": "teacher",
+                "snapshot": {
+                    "institutionName": "Demo Institution",
+                    "periodLabel": "近 7 天",
+                    "role": "教师班级周总结",
+                },
+                "visibleChildren": [{"id": "child-1", "name": "child-one"}],
+                "debugMemory": True,
+            }
+        )
+    )
+
+    traces = asyncio.run(orchestrator.memory.get_recent_traces(child_id="child-1", limit=10))
+    snapshots = asyncio.run(orchestrator.repositories.list_recent_snapshots(limit=10, child_id="child-1"))
+
+    assert result["schemaVersion"] == "v2-actionized"
+    assert result["role"] == "teacher"
+    assert result["continuityNotes"]
+    assert result["memoryMeta"]["memory_context_used"] is True
+    assert any(item.action_type == "weekly-report" and item.status == "succeeded" for item in traces)
+    assert any(item.snapshot_type == "weekly-report-result" for item in snapshots)
+    assert any(
+        item.node_name == "weekly-report" and item.metadata_json.get("memory_context_used") is True
+        for item in traces
+    )
+
+
 def test_parent_trend_query_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):
     sqlite_path = tmp_path / "parent-trend-memory.db"
     configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))

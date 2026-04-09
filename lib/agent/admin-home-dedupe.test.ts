@@ -1,0 +1,220 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { AdminConsultationPriorityItem } from "./admin-consultation.ts";
+import { dedupeAdminHomeExposure } from "./admin-home-dedupe.ts";
+import type { AdminHomeViewModel } from "./admin-types.ts";
+
+function buildHomeViewModel(): AdminHomeViewModel {
+  return {
+    riskChildrenCount: 2,
+    feedbackCompletionRate: 100,
+    pendingItems: ["林小雨需要优先处理会诊派单", "向阳班晨检闭环已完成"],
+    weeklySummary: "本周整体稳定",
+    weeklyHighlights: ["林小雨存在过敏联动风险", "今日运营顺畅"],
+    heroStats: [
+      { label: "今日高优先级事项", value: "3" },
+      { label: "重点风险儿童", value: "2" },
+      { label: "家长反馈完成率", value: "100%" },
+      { label: "待推进派单", value: "1" },
+    ],
+    priorityTopItems: [
+      {
+        id: "priority-child-lxy",
+        targetType: "child",
+        targetId: "c-1",
+        targetName: "林小雨",
+        priorityScore: 95,
+        priorityLevel: "P1",
+        reason: "连续两次待复查",
+        evidence: [],
+        recommendedOwner: { role: "admin", label: "陈园长" },
+        recommendedAction: "立即跟进",
+        recommendedDeadline: "今天 12:00",
+        relatedChildIds: ["c-1"],
+        relatedClassNames: ["向阳班"],
+        dispatchPayload: {
+          eventType: "admin_action",
+          priorityItemId: "priority-child-lxy",
+          title: "林小雨重点跟进",
+          summary: "连续两次待复查",
+          targetType: "child",
+          targetId: "c-1",
+          targetName: "林小雨",
+          priorityLevel: "P1",
+          priorityScore: 95,
+          recommendedOwnerRole: "admin",
+          recommendedOwnerName: "陈园长",
+          recommendedAction: "立即跟进",
+          recommendedDeadline: "今天 12:00",
+          reasonText: "连续两次待复查",
+          evidence: [],
+          source: {
+            institutionName: "SmartChildcare",
+            workflow: "daily-priority",
+            relatedChildIds: ["c-1"],
+            relatedClassNames: ["向阳班"],
+          },
+        },
+      },
+      {
+        id: "priority-class-sun",
+        targetType: "class",
+        targetId: "class-1",
+        targetName: "向阳班",
+        priorityScore: 72,
+        priorityLevel: "P2",
+        reason: "班级闭环需补齐",
+        evidence: [],
+        recommendedOwner: { role: "teacher", label: "李老师" },
+        recommendedAction: "补齐晨检",
+        recommendedDeadline: "今天放学前",
+        relatedChildIds: ["c-1", "c-2"],
+        relatedClassNames: ["向阳班"],
+        dispatchPayload: {
+          eventType: "admin_action",
+          priorityItemId: "priority-class-sun",
+          title: "向阳班闭环补齐",
+          summary: "班级闭环需补齐",
+          targetType: "class",
+          targetId: "class-1",
+          targetName: "向阳班",
+          priorityLevel: "P2",
+          priorityScore: 72,
+          recommendedOwnerRole: "teacher",
+          recommendedOwnerName: "李老师",
+          recommendedAction: "补齐晨检",
+          recommendedDeadline: "今天放学前",
+          reasonText: "班级闭环需补齐",
+          evidence: [],
+          source: {
+            institutionName: "SmartChildcare",
+            workflow: "daily-priority",
+            relatedClassNames: ["向阳班"],
+          },
+        },
+      },
+    ],
+    riskChildren: [
+      {
+        childId: "c-1",
+        childName: "林小雨",
+        className: "向阳班",
+        priorityLevel: "P1",
+        priorityScore: 95,
+        reason: "连续两次待复查",
+        ownerLabel: "陈园长",
+        deadline: "今天 12:00",
+      },
+      {
+        childId: "c-2",
+        childName: "王小明",
+        className: "向阳班",
+        priorityLevel: "P2",
+        priorityScore: 72,
+        reason: "蔬果摄入偏低",
+        ownerLabel: "李老师",
+        deadline: "今天放学前",
+      },
+    ],
+    riskClasses: [],
+    pendingDispatches: [
+      {
+        id: "dispatch-consultation-lxy",
+        institutionId: "inst-1",
+        eventType: "admin_action",
+        status: "pending",
+        priorityItemId: "consult-lxy-1",
+        title: "林小雨重点会诊派单",
+        summary: "林小雨需要继续跟进会诊结论并安排家园协同。",
+        targetType: "child",
+        targetId: "c-1",
+        targetName: "林小雨",
+        priorityLevel: "P1",
+        priorityScore: 95,
+        recommendedOwnerRole: "admin",
+        recommendedOwnerName: "陈园长",
+        recommendedAction: "继续跟进",
+        recommendedDeadline: "今天 12:00",
+        reasonText: "连续两次待复查",
+        evidence: [],
+        source: {
+          institutionName: "SmartChildcare",
+          workflow: "daily-priority",
+          consultationId: "consult-lxy-1",
+          relatedConsultationIds: ["consult-lxy-1"],
+          relatedChildIds: ["c-1"],
+          relatedClassNames: ["向阳班"],
+        },
+        createdBy: "system",
+        updatedBy: "system",
+        createdAt: "2026-04-09T08:00:00.000Z",
+        updatedAt: "2026-04-09T08:00:00.000Z",
+        completedAt: null,
+      },
+    ],
+    actionEntrySummary: "建议园长先推动林小雨相关事项。",
+    adminContext: {} as AdminHomeViewModel["adminContext"],
+  };
+}
+
+function buildConsultationPriorityItem(): AdminConsultationPriorityItem {
+  return {
+    consultationId: "consult-lxy-1",
+    childId: "c-1",
+    riskLevel: "high",
+    generatedAt: "2026-04-09T08:00:00.000Z",
+    shouldEscalateToAdmin: true,
+    decision: {
+      consultationId: "consult-lxy-1",
+      childId: "c-1",
+      childName: "林小雨",
+      className: "向阳班",
+      riskLevel: "high",
+      riskLabel: "高风险预警",
+      priorityLabel: "P1",
+      status: "pending",
+      statusLabel: "待分派",
+      statusSource: "consultation",
+      summary: "需要优先跟进",
+      whyHighPriority: "连续两次待复查",
+      recommendedOwnerName: "陈园长",
+      recommendedAt: "2026-04-09T12:00:00.000Z",
+      recommendedAtLabel: "4月9日 12:00",
+      generatedAtLabel: "4月9日 08:00",
+      triggerReasons: ["连续两次待复查"],
+      keyFindings: ["情绪波动明显"],
+      schoolActions: ["午睡前安抚"],
+      homeActions: ["家长晚上反馈"],
+      followUpActions: ["48 小时复盘"],
+    },
+    trace: {
+      participants: ["健康观察", "饮食行为"],
+      keyFindings: ["情绪波动明显"],
+      collaborationSummary: "需要优先跟进",
+      explainability: [],
+      evidenceItems: [],
+      providerState: "real",
+      providerStateLabel: "真实 Provider",
+      providerLabel: "provider/model",
+      memoryState: "ready",
+      memoryStateLabel: "记忆已命中",
+      memoryDetail: "命中 1 个 memory source",
+      syncTargets: [],
+      evidenceHighlights: [],
+      providerTrace: null,
+    },
+    recommendedOwnerRole: "admin",
+  };
+}
+
+test("dedupeAdminHomeExposure removes repeated child exposure outside consultation primary section", () => {
+  const deduped = dedupeAdminHomeExposure(buildHomeViewModel(), [buildConsultationPriorityItem()]);
+
+  assert.equal(deduped.priorityTopItems.some((item) => item.targetType === "child" && item.targetId === "c-1"), false);
+  assert.equal(deduped.priorityTopItems.some((item) => item.targetType === "class" && item.targetId === "class-1"), true);
+  assert.equal(deduped.riskChildren.some((item) => item.childId === "c-1"), false);
+  assert.equal(deduped.riskChildren.some((item) => item.childId === "c-2"), true);
+  assert.equal(deduped.weeklyHighlights.some((item) => item.includes("林小雨")), false);
+  assert.equal(deduped.pendingDispatches[0]?.summary, "重点会诊事项待派发跟进。");
+});

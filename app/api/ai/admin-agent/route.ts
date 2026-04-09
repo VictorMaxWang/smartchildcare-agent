@@ -119,6 +119,7 @@ export async function POST(request: Request) {
   );
   const report = await executeWeeklyReport(
     {
+      role: "admin",
       snapshot: buildAdminWeeklyReportSnapshotWithMemory(payload, context, weeklyMemoryContexts),
     },
     runtimeOptions

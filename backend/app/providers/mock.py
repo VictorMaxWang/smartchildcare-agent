@@ -4,6 +4,7 @@ from typing import Any
 
 from app.providers.base import ProviderResult, ProviderTextResult
 from app.db.demo_snapshot import build_demo_admin_payload, build_demo_child_service_payload
+from app.services.weekly_report_contract import build_actionized_weekly_report, resolve_weekly_report_role
 from app.tools.risk_tools import compute_priority_level, compute_risk_level, pick_target_child, score_snapshot
 from app.tools.summary_tools import first_non_empty, iso_now, safe_dict, safe_list, unique_texts
 
@@ -460,6 +461,7 @@ def build_mock_follow_up(payload: dict[str, Any]) -> dict[str, Any]:
 def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
     payload = _hydrate_demo_payload(payload, mode="weekly")
     snapshot = safe_dict(payload.get("snapshot"))
+    role = resolve_weekly_report_role(payload) or "admin"
     institution_name = str(snapshot.get("institutionName") or "机构")
     period = str(snapshot.get("periodLabel") or "本周")
     overview = safe_dict(snapshot.get("overview"))
@@ -467,15 +469,14 @@ def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
     prompt_context = _memory_prompt_context(payload)
     continuity_notes = _continuity_notes(payload, institution_name)
 
-    result = {
-        "summary": first_non_empty(
-            [
-                continuity_notes[0] if continuity_notes else "",
-                f"{institution_name} {period} 整体运行稳定，重点仍在家园反馈闭环和重点儿童复查。",
-            ],
+    result = build_actionized_weekly_report(
+        role=role,
+        snapshot=snapshot,
+        summary=first_non_empty(
+            [continuity_notes[0] if continuity_notes else "", f"{institution_name} {period} 整体运行稳定，重点仍在家园反馈闭环和重点儿童复查。"],
             f"{institution_name} {period} 整体运行稳定，重点仍在家园反馈闭环和重点儿童复查。",
         ),
-        "highlights": unique_texts(
+        highlights=unique_texts(
             [
                 "重点儿童清单已经形成，可继续用作下周派单依据。",
                 "本周数据已具备教师端和园长端联动展示价值。",
@@ -485,7 +486,7 @@ def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
             ],
             limit=5,
         ),
-        "risks": unique_texts(
+        risks=unique_texts(
             [
                 "如果晚间反馈覆盖率继续偏低，下周判断仍会偏弱。",
                 "待复查项目需要在周初集中处理，避免拖延。",
@@ -493,7 +494,7 @@ def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
             ],
             limit=4,
         ),
-        "nextWeekActions": unique_texts(
+        next_week_actions=unique_texts(
             [
                 "周一先排重点儿童复查顺序。",
                 "把家长反馈完成率作为固定追踪指标。",
@@ -502,12 +503,14 @@ def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
             ],
             limit=5,
         ),
-        "trendPrediction": "stable" if attendance_rate >= 80 else "down",
-        "disclaimer": "当前为 FastAPI mock 输出，用于前后端联调。",
-        "source": "mock",
-        "model": "mock-weekly-report-v1",
-    }
-    return _attach_memory_fields(payload, result, institution_name)
+        trend_prediction="stable" if attendance_rate >= 80 else "down",
+        disclaimer="当前为 FastAPI mock 输出，用于前后端联调。",
+        source="mock",
+        model="mock-weekly-report-v1",
+        continuity_notes=continuity_notes,
+        memory_meta=_memory_meta(payload),
+    )
+    return result
 
 
 def build_mock_teacher_result(payload: dict[str, Any]) -> dict[str, Any]:

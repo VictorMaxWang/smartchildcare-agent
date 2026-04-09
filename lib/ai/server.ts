@@ -11,6 +11,7 @@ import {
   buildMockInstitutionSuggestion,
   buildMockWeeklyReport,
 } from "@/lib/ai/mock";
+import { resolveWeeklyReportRole } from "@/lib/ai/weekly-report";
 import type {
   AiFollowUpPayload,
   AiFollowUpResponse,
@@ -107,6 +108,12 @@ export function isValidWeeklyReportPayload(payload: unknown): payload is WeeklyR
   return isValidWeeklyReportSnapshot((payload as Record<string, unknown>).snapshot);
 }
 
+export function resolveWeeklyReportRoleFromPayload(
+  payload: WeeklyReportPayload | null | undefined
+) {
+  return resolveWeeklyReportRole(payload);
+}
+
 export async function executeSuggestion(
   payload: AiSuggestionPayload,
   options: AiRuntimeOptions
@@ -194,15 +201,20 @@ export async function executeWeeklyReport(
   payload: WeeklyReportPayload,
   options: AiRuntimeOptions
 ): Promise<WeeklyReportResponse> {
+  const role = resolveWeeklyReportRole(payload);
+  if (!role) {
+    throw new Error("Weekly report role is required");
+  }
+
   if (options.forceMock) {
     return {
-      ...buildMockWeeklyReport(payload.snapshot),
+      ...buildMockWeeklyReport(payload.snapshot, role),
       model: "mock-weekly-report",
     } satisfies WeeklyReportResponse;
   }
 
   const fallback = {
-    ...buildFallbackWeeklyReport(payload.snapshot),
+    ...buildFallbackWeeklyReport(payload.snapshot, role),
     model: "weekly-rule-fallback",
   } satisfies WeeklyReportResponse;
 
@@ -210,7 +222,7 @@ export async function executeWeeklyReport(
     return fallback;
   }
 
-  const aiResult = await requestDashscopeWeeklyReport(payload.snapshot);
+  const aiResult = await requestDashscopeWeeklyReport(payload.snapshot, role);
   if (!aiResult) {
     console.warn(`[AI] Falling back to weekly report rules using model ${options.configuredModel}.`);
     return fallback;
