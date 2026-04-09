@@ -19,7 +19,7 @@ ParentStoryBookGenerationMode = Literal["child-personalized", "manual-theme", "h
 ParentStoryBookPageCount = Literal[4, 6, 8]
 ParentStoryBookStylePreset = Literal["sunrise-watercolor", "moonlit-cutout", "forest-crayon"]
 ParentStoryBookStyleMode = Literal["preset", "custom"]
-ParentStoryBookImageSourceKind = Literal["real", "demo-art", "svg-fallback"]
+ParentStoryBookImageSourceKind = Literal["real", "dynamic-fallback", "demo-art", "svg-fallback"]
 ParentStoryBookHighlightKind = Literal[
     "todayGrowth",
     "warningSuggestion",
@@ -51,7 +51,7 @@ class ParentStoryBookProviderMeta(ParentStoryBookModel):
     transport: str | None = None
     image_provider: str
     audio_provider: str
-    image_delivery: Literal["real", "mixed", "demo-art", "svg-fallback"] | None = None
+    image_delivery: Literal["real", "mixed", "dynamic-fallback", "demo-art", "svg-fallback"] | None = None
     audio_delivery: Literal["real", "mixed", "preview-only"] | None = None
     diagnostics: "ParentStoryBookDiagnostics | None" = None
     style_preset: ParentStoryBookStylePreset | None = None

@@ -82,7 +82,7 @@ test("storybook cache bypasses stale demo or preview-only results on first load"
       buildStory({
         providerMeta: {
           transport: "remote-brain-proxy",
-          imageDelivery: "demo-art",
+          imageDelivery: "dynamic-fallback",
           audioDelivery: "preview-only",
         },
       })
@@ -106,7 +106,41 @@ test("storybook cache bypasses stale demo or preview-only results on first load"
   );
 });
 
-test("storybook cache persists demo-art stories so the demo stays stable", () => {
+test("storybook cache persists dynamic-fallback stories so the main fallback stays stable", () => {
+  assert.equal(
+    shouldPersistParentStoryBook(
+      buildStory({
+        providerMeta: {
+          transport: "remote-brain-proxy",
+          imageDelivery: "dynamic-fallback",
+          audioDelivery: "preview-only",
+          realProvider: false,
+        },
+        scenes: [
+          {
+            sceneIndex: 1,
+            sceneTitle: "第一页",
+            sceneText: "第一页内容",
+            imagePrompt: "image prompt",
+            imageUrl: "/api/ai/parent-storybook/media/dynamic-fallback-1",
+            assetRef: "/api/ai/parent-storybook/media/dynamic-fallback-1",
+            imageStatus: "fallback",
+            imageSourceKind: "dynamic-fallback",
+            audioUrl: null,
+            audioRef: "audio-1",
+            audioScript: "audio script",
+            audioStatus: "fallback",
+            voiceStyle: "warm-storytelling",
+            highlightSource: "manualTheme",
+          },
+        ],
+      })
+    ),
+    true
+  );
+});
+
+test("storybook cache does not persist legacy demo-art stories by default", () => {
   assert.equal(
     shouldPersistParentStoryBook(
       buildStory({
@@ -136,6 +170,6 @@ test("storybook cache persists demo-art stories so the demo stays stable", () =>
         ],
       })
     ),
-    true
+    false
   );
 });

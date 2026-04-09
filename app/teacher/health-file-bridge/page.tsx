@@ -237,9 +237,9 @@ export default function TeacherHealthFileBridgePage() {
       actions={
         <>
           <Button asChild variant="outline" className="min-h-11 rounded-xl">
-            <Link href="/teacher" className="gap-2">
+            <Link href="/teacher/home" className="gap-2">
               <ArrowLeft className="h-4 w-4" />
-              返回教师首页
+              返回教师工作台
             </Link>
           </Button>
           <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />

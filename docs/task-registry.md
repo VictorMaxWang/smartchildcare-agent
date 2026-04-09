@@ -28,8 +28,8 @@
 
 当前初始状态约定：
 
-- `T1-T7`、`T18`、`T24`、`T25 = Done-code-only`
-- `T8-T17`、`T19-T23`、`T26-T31 = Planned`
+- `T1-T7`、`T18`、`T19`、`T24`、`T25 = Done-code-only`
+- 其余任务按各自条目状态为准
 
 ## Wave A-D 与依赖规则
 
@@ -397,7 +397,10 @@
 - 是否适合并行：中
 - 最小验收方式：Teacher / Admin 至少各有一个 evidence chain 可视化入口，且不牺牲当前主路径密度
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-09 更新：Admin 第二展示位已在 `ConsultationTraceCard` 优先消费结构化 `evidenceItems`，展示来源、类别、置信度、人工复核与 supports 关系；证据按 `evidenceCategory` 分组，按 supports / confidence / requiresHumanReview / sourceType 排序，首屏展示关键证据，其余放入折叠区。
+- 2026-04-09 边界：Teacher 侧只在 `TraceStepCard` 增加最多 2 条 compact 结构化证据预览；旧 `evidenceHighlights`、`explainability` 与 stage legacy evidence 仍保留兼容 fallback，不把本轮写成完整 explainability 系统 fully finished。
+- 2026-04-09 验证：`npx --yes tsx --test lib/consultation/evidence-display.test.ts lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts`、`npm run lint`、`npm run build`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T20｜48 小时干预任务实体与生命周期
@@ -413,12 +416,8 @@
 - 是否适合并行：中
 - 最小验收方式：干预卡、提醒、任务状态三者能映射到统一 task model
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 workflow walkthrough
-- 当前状态：`Done-code-only`
-- 2026-04-08 更新：已在 consultation result、backend normalize、admin consultation feed、trace view model 中新增统一 `evidenceItems` contract，并保留 `keyFindings`、`explainability`、`providerTrace`、`memoryMeta`、`evidenceHighlights` 兼容投影。
-- 2026-04-08 边界：本轮只完成 contract / normalize / feed mapping，不包含 Teacher / Admin evidence UI；该部分继续归 `T19`。
+- 当前状态：`Planned`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
-
-- 2026-04-08 验证：`npx tsx --test lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts`、`py -m pytest backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py`、目标文件 `eslint`、`npm run build`
 
 ### T21｜自动升级规则
 

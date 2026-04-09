@@ -12,7 +12,7 @@
 - 当前最稳定比赛主路径：`/teacher` -> `/teacher/high-risk-consultation` -> `/admin` -> `/parent` -> `/parent/storybook?child=c-1` -> `/parent/agent?child=c-1`
 - 当前第一展示位：高风险会诊
 - 当前第二展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
-- T18 当前事实：底层已接入结构化 `evidenceItems` contract 与 trace/feed 映射，但界面仍主要消费兼容摘要；证据链 UI 继续归 `T19`
+- T19 当前事实：Admin 第二展示位已优先展示结构化 `evidenceItems` 证据链，Teacher trace stage 仅补最小证据预览；兼容摘要 fallback 仍保留，walkthrough / 录屏仍待补
 - Parent storybook：已具展示能力，不再允许写回“未开始”
 - Parent trend：已具展示能力，但仍必须保留 `source`、`dataQuality`、`warnings`
 - 前后端 36 人 demo 基线：代码已落地，但仍缺统一 walkthrough / 录屏再验
@@ -51,7 +51,7 @@
 ### 当前收口阶段
 
 - 当前主任务不是继续写旧 `T0-T13`，而是把仓库升级为能支持 `T1-T31` 多线程推进的控制平面
-- 这轮以 docs-only 为主，不做业务功能实现
+- 当前主分支已回到 `code-ready`，可继续推进 `T1-T31` 的功能线程；docs 与功能实现都按 shared contract 收口
 - 旧 freeze 任务仍保留历史价值，但不再充当当前主任务表
 
 ### Wave A｜快收口 / 低风险高收益
@@ -124,7 +124,7 @@
 | `T16` | Parent 结构化反馈填写器 | `Planned` | 家长反馈闭环 | `T15` | 中 | walkthrough / 真机 | `TR+A` |
 | `T17` | 家长反馈写回 memory / trend / weekly report / consultation | `Planned` | 家长反馈闭环 | `T15`、`T16` | 中 | walkthrough / trace 检查 | `TR+L+A` |
 | `T18` | 会诊证据链 contract | `Done-code-only` | 会诊可解释性增强 | - | 中 | contract smoke | `TR+A` |
-| `T19` | 会诊证据链 UI | `Planned` | 会诊可解释性增强 | `T18` | 中 | walkthrough / 录屏 | `TR+L+A` |
+| `T19` | 会诊证据链 UI | `Done-code-only` | 会诊可解释性增强 | `T18` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T20` | 48 小时干预任务实体与生命周期 | `Planned` | 干预执行与升级 | - | 中 | workflow smoke | `TR+A` |
 | `T21` | 自动升级规则 | `Planned` | 干预执行与升级 | `T20` | 中 | walkthrough / trace 检查 | `TR+L+A` |
 | `T22` | 年龄分层照护引擎：共享策略层 | `Planned` | 年龄分层照护 | - | 中 | contract smoke | `TR+A` |
@@ -153,16 +153,16 @@
 
 - 角色页真实存在：`/teacher`、`/teacher/agent`、`/teacher/health-file-bridge`、`/teacher/high-risk-consultation`、`/admin`、`/parent`、`/parent/storybook`、`/parent/agent`
 - Teacher voice、health-file-bridge、consultation、Admin feed、Parent trend、Parent storybook、follow-up、weekly-report 等 route 已存在
-- 高风险会诊结果、Admin consultation feed、consultation trace view model 已开始共同消费结构化 `evidenceItems`；旧 `keyFindings` / `explainability` / `providerTrace` / `memoryMeta` / `evidenceHighlights` 仍保留兼容
+- 高风险会诊结果、Admin consultation feed、consultation trace view model 已共同消费结构化 `evidenceItems`；Admin `ConsultationTraceCard` 已优先展示结构化 evidence chain，Teacher `TraceStepCard` 已补最小结构化证据预览；旧 `keyFindings` / `explainability` / `providerTrace` / `memoryMeta` / `evidenceHighlights` / stage legacy evidence 仍保留兼容
 - Teacher Copilot UI 已接到 `/teacher/agent` 的草稿确认区与结果卡；`/teacher` 继续保持轻入口，不新增第二套 Teacher 页面
 - Parent storybook 页面、route、service、viewer、tests 已存在，当前已具展示能力
 - `GuardianFeedback`、`InterventionCard`、`ReminderItem`、`TaskCheckInRecord` 等 shared contract 锚点已存在
 - 前端 `lib/store.tsx` 与后端 `build_demo_snapshot()` 都已落到 36 人 demo 基线；统一 walkthrough / child QA / 录屏再验仍待补齐
-- `T18` 已把 `evidenceItems` contract 接到 consultation normalize、admin feed 与 trace view model；Admin 第二展示位当前仍以兼容投影消费，证据卡片化 UI 留给 `T19`
+- `T19` 已把 Admin `ConsultationTraceCard` 接到结构化 `evidenceItems` 证据链 UI，并在 Teacher `TraceStepCard` 补了最小结构化证据预览；旧 `evidenceHighlights` / `explainability` / stage legacy evidence 仍保留为兼容 fallback
 - `T7` 已落地 `/teacher/health-file-bridge` 页面、`/api/ai/health-file-bridge` 桥接与 backend `health_file_bridge` schema/service skeleton；当前仍是 skeleton，不宣称 OCR / writeback / escalation 已闭环
 - `T6` 已把主视角补水表达收敛到状态化文案；底层 hydration 数据仍保留给趋势、聚合与风险判断链路
 
-- 本轮 post-merge integration sweep 的本地静态与定向测试已通过：`npm run lint`、`npm run build`、`npx --yes tsx --test lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts lib/agent/health-file-bridge.test.ts`、`npx --yes tsx --test lib/teacher-copilot/normalize.test.ts`、`py -m pytest backend/tests/test_teacher_voice_understand.py backend/tests/test_health_file_bridge_service.py backend/tests/test_health_file_bridge_endpoint.py backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py backend/tests/test_parent_trend_service.py backend/tests/test_childcare_repository.py -q`；`/teacher/agent`、`/teacher/health-file-bridge`、`/admin`、`/parent/agent` 的页面级 HTTP / 浏览器 walkthrough 仅做了启动与探测尝试，暂不计为已通过
+- 本轮 post-merge integration sweep 与 `T19` 的本地静态与定向测试已通过：`npm run lint`、`npm run build`、`npx --yes tsx --test lib/consultation/evidence-display.test.ts lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts lib/agent/health-file-bridge.test.ts`、`npx --yes tsx --test lib/teacher-copilot/normalize.test.ts`、`py -m pytest backend/tests/test_teacher_voice_understand.py backend/tests/test_health_file_bridge_service.py backend/tests/test_health_file_bridge_endpoint.py backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py backend/tests/test_parent_trend_service.py backend/tests/test_childcare_repository.py -q`；`/teacher/high-risk-consultation`、`/admin`、`/admin/agent`、`/teacher/agent`、`/teacher/health-file-bridge`、`/parent/agent` 的页面级 HTTP / 浏览器 walkthrough 仍未计为已通过
 
 ## 历史 Freeze 构建记录（附录，不是当前主任务表）
 

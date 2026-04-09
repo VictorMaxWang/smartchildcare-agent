@@ -587,10 +587,12 @@ export type ParentStoryBookTransport =
 export type ParentStoryBookImageDelivery =
   | "real"
   | "mixed"
+  | "dynamic-fallback"
   | "demo-art"
   | "svg-fallback";
 export type ParentStoryBookSceneImageSourceKind =
   | "real"
+  | "dynamic-fallback"
   | "demo-art"
   | "svg-fallback";
 export type ParentStoryBookHighlightKind =

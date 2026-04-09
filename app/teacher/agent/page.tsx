@@ -625,7 +625,7 @@ export default function TeacherAgentPage() {
       description="这一轮教师 Agent 直接围绕班级上下文、单个儿童上下文和三个核心工作流展开：家长沟通建议、今日跟进行动、本周观察总结。"
       actions={
         <>
-          <InlineLinkButton href="/teacher" label="返回教师首页" />
+          <InlineLinkButton href="/teacher/home" label="返回教师工作台" />
           <InlineLinkButton href="/teacher/agent" label="刷新教师 AI 助手" variant="premium" />
         </>
       }

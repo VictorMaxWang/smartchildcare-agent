@@ -15,6 +15,11 @@ import {
   buildParentStoryBookResponse,
 } from "./parent-storybook.ts";
 
+function decodeSvgDataUrl(dataUrl: string) {
+  const encoded = dataUrl.replace(/^data:image\/svg\+xml;base64,/, "");
+  return Buffer.from(encoded, "base64").toString("utf8");
+}
+
 function buildRequest(
   overrides: Partial<ParentStoryBookRequest> = {}
 ): ParentStoryBookRequest {
@@ -210,18 +215,18 @@ test("custom style overrides preset prompt and reaches image prompt", () => {
   assert.ok(!response.scenes[0]?.imagePrompt.includes("月夜剪纸"));
 });
 
-test("storybook fallback scenes build page-specific demo art assets instead of static scene svgs", () => {
+test("storybook fallback scenes build page-specific dynamic story illustration assets instead of static scene svgs", () => {
   const response = buildParentStoryBookResponse(buildRequest({ pageCount: 8 }));
   const imageUrls = response.scenes.map((scene) => scene.imageUrl ?? "");
 
   assert.equal(response.providerMeta.transport, "next-json-fallback");
-  assert.equal(response.providerMeta.imageDelivery, "demo-art");
+  assert.equal(response.providerMeta.imageDelivery, "dynamic-fallback");
   assert.equal(response.providerMeta.audioDelivery, "preview-only");
   assert.equal(response.scenes.length, 8);
   assert.ok(imageUrls.every((url) => url.startsWith("data:image/svg+xml;base64,")));
   assert.ok(imageUrls.every((url) => !url.includes("/storybook/scene-")));
   assert.equal(new Set(imageUrls).size, 8);
-  assert.ok(response.scenes.every((scene) => scene.imageSourceKind === "demo-art"));
+  assert.ok(response.scenes.every((scene) => scene.imageSourceKind === "dynamic-fallback"));
   assert.ok(
     response.scenes.every(
       (scene) =>
@@ -231,6 +236,35 @@ test("storybook fallback scenes build page-specific demo art assets instead of s
     )
   );
   assert.equal(response.providerMeta.diagnostics?.brain.reachable, false);
+});
+
+test("dynamic fallback art changes with different story themes instead of only reusing demo-art", () => {
+  const honestyResponse = buildParentStoryBookResponse(
+    buildRequest({
+      generationMode: "manual-theme",
+      manualTheme: "诚实",
+      manualPrompt: "把诚实讲成孩子能听懂的小故事。",
+      goalKeywords: ["诚实"],
+      pageCount: 4,
+    })
+  );
+  const sleepResponse = buildParentStoryBookResponse(
+    buildRequest({
+      generationMode: "manual-theme",
+      manualTheme: "独立入睡",
+      manualPrompt: "把睡前分离讲成温柔可读的晚安故事。",
+      goalKeywords: ["独立入睡"],
+      pageCount: 4,
+    })
+  );
+  const honestySvg = decodeSvgDataUrl(honestyResponse.scenes[0]?.imageUrl ?? "");
+  const sleepSvg = decodeSvgDataUrl(sleepResponse.scenes[0]?.imageUrl ?? "");
+
+  assert.equal(honestyResponse.scenes[0]?.imageSourceKind, "dynamic-fallback");
+  assert.equal(sleepResponse.scenes[0]?.imageSourceKind, "dynamic-fallback");
+  assert.notEqual(honestySvg, sleepSvg);
+  assert.match(honestySvg, /诚实/);
+  assert.match(sleepSvg, /独立入睡/);
 });
 
 test("storybook cache key changes when mode theme and page count change", () => {

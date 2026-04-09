@@ -52,6 +52,14 @@ def _base_payload() -> dict:
     }
 
 
+def _read_cached_scene_svg(story: dict, scene_index: int = 0) -> str:
+    media_url = story["scenes"][scene_index]["imageUrl"]
+    media_key = media_url.rsplit("/", 1)[-1]
+    payload = get_storybook_media_cache().get_image(media_key)
+    assert payload is not None
+    return str(payload["svg"])
+
+
 class _SceneProvider:
     def __init__(self, *, provider_name: str, image_status: str | None = None, audio_status: str | None = None):
         self.provider_name = provider_name
@@ -105,21 +113,21 @@ def test_parent_storybook_service_returns_six_page_storybook_by_default():
     assert result["parentNote"]
     assert len(result["scenes"]) == 6
     assert result["providerMeta"]["sceneCount"] == 6
-    assert result["providerMeta"]["imageProvider"] == "storybook-asset"
+    assert result["providerMeta"]["imageProvider"] == "storybook-dynamic-fallback"
     assert result["providerMeta"]["audioProvider"] == "storybook-mock-preview"
     assert result["providerMeta"]["mode"] == "fallback"
     assert result["providerMeta"]["transport"] == "fastapi-brain"
-    assert result["providerMeta"]["imageDelivery"] == "demo-art"
+    assert result["providerMeta"]["imageDelivery"] == "dynamic-fallback"
     assert result["providerMeta"]["audioDelivery"] == "preview-only"
     assert result["providerMeta"]["realProvider"] is False
     assert result["fallback"] is True
     assert result["scenes"][0]["imagePrompt"]
-    assert result["scenes"][0]["imageSourceKind"] == "demo-art"
+    assert result["scenes"][0]["imageSourceKind"] == "dynamic-fallback"
     assert result["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
     assert result["scenes"][0]["assetRef"] == result["scenes"][0]["imageUrl"]
     assert result["scenes"][0]["audioScript"]
     assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
-    assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
+    assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-dynamic-fallback"
     assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
     assert "storybook_image_provider" in result["providerMeta"]["diagnostics"]["image"]["missingConfig"]
     assert result["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
@@ -305,10 +313,10 @@ def test_parent_storybook_service_supports_page_count_variants_and_manual_theme_
         assert result["childId"] == "storybook-guest"
         assert len(result["scenes"]) == page_count
         assert result["providerMeta"]["sceneCount"] == page_count
-        assert result["providerMeta"]["imageDelivery"] == "demo-art"
+        assert result["providerMeta"]["imageDelivery"] == "dynamic-fallback"
         assert result["providerMeta"]["audioDelivery"] == "preview-only"
         assert all(scene["audioScript"] for scene in result["scenes"])
-        assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])
+        assert all(scene["imageSourceKind"] == "dynamic-fallback" for scene in result["scenes"])
         assert all(scene["imageUrl"].startswith("/api/ai/parent-storybook/media/") for scene in result["scenes"])
         assert len({scene["imageUrl"] for scene in result["scenes"]}) == page_count
         assert all(scene["captionTiming"]["mode"] == "duration-derived" for scene in result["scenes"])
@@ -348,6 +356,74 @@ def test_parent_storybook_service_hybrid_threads_theme_into_story_content():
     assert any("表达情绪" in scene["imagePrompt"] for scene in result["scenes"])
     assert any(child_detail in scene["imagePrompt"] for scene in result["scenes"])
     assert any("表达情绪" in scene["audioScript"] for scene in result["scenes"])
-    assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])
+    assert all(scene["imageSourceKind"] == "dynamic-fallback" for scene in result["scenes"])
     assert len({scene["imageUrl"] for scene in result["scenes"]}) == 4
     assert all(scene["captionTiming"]["mode"] == "duration-derived" for scene in result["scenes"])
+
+
+def test_parent_storybook_service_uses_demo_art_only_after_dynamic_fallback_fails(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service._build_dynamic_fallback_scene_svg_v2",
+        lambda blueprint, scene_text, ingredients: "",
+    )
+
+    result = asyncio.run(run_parent_storybook(_base_payload()))
+
+    assert result["providerMeta"]["imageDelivery"] == "demo-art"
+    assert result["providerMeta"]["imageProvider"] == "storybook-demo-art"
+    assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
+    assert all(scene["imageSourceKind"] == "demo-art" for scene in result["scenes"])
+
+
+def test_parent_storybook_service_uses_svg_fallback_only_after_dynamic_and_demo_fail(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service._build_dynamic_fallback_scene_svg_v2",
+        lambda blueprint, scene_text, ingredients: "",
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service._build_demo_art_scene_svg_v2",
+        lambda blueprint, scene_text, ingredients: "",
+    )
+
+    result = asyncio.run(run_parent_storybook(_base_payload()))
+
+    assert result["providerMeta"]["imageDelivery"] == "svg-fallback"
+    assert result["providerMeta"]["imageProvider"] == "storybook-svg-fallback"
+    assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-svg-fallback"
+    assert all(scene["imageSourceKind"] == "svg-fallback" for scene in result["scenes"])
+
+
+def test_parent_storybook_service_dynamic_fallback_svg_changes_with_story_theme():
+    media_cache = get_storybook_media_cache()
+    media_cache._entries.clear()
+
+    honesty_payload = _base_payload()
+    honesty_payload.update(
+        {
+            "generationMode": "manual-theme",
+            "manualTheme": "璇氬疄",
+            "manualPrompt": "鎶婅瘹瀹炶鎴愬瀛愯兘鎳傜殑鎴愰暱灏忔晠浜嬨€?",
+            "goalKeywords": ["璇氬疄"],
+        }
+    )
+
+    sleep_payload = _base_payload()
+    sleep_payload.update(
+        {
+            "generationMode": "manual-theme",
+            "manualTheme": "鐙珛鍏ョ潯",
+            "manualPrompt": "鎶婄潯鍓嶅垎绂昏鎴愭俯鏌斿彲鏈楄鐨勬櫄瀹夋晠浜嬨€?",
+            "goalKeywords": ["鐙珛鍏ョ潯"],
+        }
+    )
+
+    honesty_story = asyncio.run(run_parent_storybook(honesty_payload))
+    sleep_story = asyncio.run(run_parent_storybook(sleep_payload))
+    honesty_svg = _read_cached_scene_svg(honesty_story, 0)
+    sleep_svg = _read_cached_scene_svg(sleep_story, 0)
+
+    assert honesty_story["scenes"][0]["imageSourceKind"] == "dynamic-fallback"
+    assert sleep_story["scenes"][0]["imageSourceKind"] == "dynamic-fallback"
+    assert honesty_svg != sleep_svg
+    assert "璇氬疄" in honesty_svg
+    assert "鐙珛鍏ョ潯" in sleep_svg

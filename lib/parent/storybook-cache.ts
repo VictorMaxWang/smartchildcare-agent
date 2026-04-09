@@ -21,7 +21,7 @@ interface ParentStoryBookClientCacheEntry {
 
 type ParentStoryBookRuntimeProviderMeta = ParentStoryBookResponse["providerMeta"] & {
   transport?: string;
-  imageDelivery?: "real" | "mixed" | "demo-art" | "svg-fallback";
+  imageDelivery?: "real" | "mixed" | "dynamic-fallback" | "demo-art" | "svg-fallback";
   diagnostics?: {
     brain?: {
       reachable?: boolean;
@@ -34,7 +34,7 @@ type ParentStoryBookRuntimeProviderMeta = ParentStoryBookResponse["providerMeta"
 };
 
 type ParentStoryBookRuntimeScene = ParentStoryBookResponse["scenes"][number] & {
-  imageSourceKind?: "real" | "demo-art" | "svg-fallback";
+  imageSourceKind?: "real" | "dynamic-fallback" | "demo-art" | "svg-fallback";
 };
 
 type ParentStoryBookRuntimeStory = ParentStoryBookResponse & {
@@ -74,8 +74,8 @@ export function shouldPersistParentStoryBook(
 
   const runtime = story as ParentStoryBookRuntimeStory;
   if (runtime.providerMeta.realProvider) return true;
-  if (runtime.providerMeta.imageDelivery === "demo-art") return true;
-  if (runtime.scenes.some((scene) => scene.imageSourceKind === "demo-art")) return true;
+  if (runtime.providerMeta.imageDelivery === "dynamic-fallback") return true;
+  if (runtime.scenes.some((scene) => scene.imageSourceKind === "dynamic-fallback")) return true;
 
   return runtime.scenes.some(
     (scene) =>

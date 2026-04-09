@@ -132,9 +132,7 @@ function resolveProviderImageDelivery(
   if (kinds.size === 1) {
     return kinds.values().next().value ?? "svg-fallback";
   }
-  if (kinds.has("real")) return "mixed";
-  if (kinds.has("demo-art")) return "demo-art";
-  return "svg-fallback";
+  return "mixed";
 }
 
 export function buildParentStoryBookRequestCacheKey(payload: unknown) {

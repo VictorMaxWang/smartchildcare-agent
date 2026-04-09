@@ -1,219 +1,317 @@
 "use client";
 
-import Link from "next/link";
-import { AlertTriangle, BookOpenCheck, BrainCircuit, FileText, MessageSquareText, PencilLine, ShieldAlert, ShieldCheck, UsersRound } from "lucide-react";
-import EmptyState from "@/components/EmptyState";
+import { useEffect, useMemo, useState } from "react";
 import {
-  AssistantEntryCard,
-  InlineLinkButton,
-  MetricGrid,
-  RolePageShell,
-  RoleSplitLayout,
-  SectionCard,
-} from "@/components/role-shell/RoleScaffold";
+  Activity,
+  AlertTriangle,
+  BarChart,
+  ClipboardCheck,
+  HeartPulse,
+  MessageSquare,
+  Monitor,
+  Thermometer,
+  Users,
+  Wifi,
+} from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import AnimatedNumber from "@/components/AnimatedNumber";
+import EmptyState from "@/components/EmptyState";
+import ScrollReveal from "@/components/ScrollReveal";
 import { Badge } from "@/components/ui/badge";
-import { buildTeacherHomeViewModel } from "@/lib/view-models/role-home";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildRecentLocalDateRange, getLocalToday } from "@/lib/date";
 import { useApp } from "@/lib/store";
 
-const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
-  month: "long",
-  day: "numeric",
-  weekday: "long",
-});
+export default function InstitutionMonitorPage() {
+  const { visibleChildren, getTodayAttendance, healthCheckRecords, guardianFeedbacks, growthRecords } = useApp();
 
-export default function TeacherHomePage() {
-  const { currentUser, visibleChildren, presentChildren, healthCheckRecords, growthRecords, guardianFeedbacks } = useApp();
-  const viewModel = buildTeacherHomeViewModel({
-    visibleChildren,
-    presentChildren,
-    healthCheckRecords,
-    growthRecords,
-    guardianFeedbacks,
-  });
+  const todayStr = getLocalToday();
+  const totalChildren = visibleChildren.length;
+  const attendanceToday = getTodayAttendance();
+  const presentCount = attendanceToday.filter((record) => record.isPresent).length;
+  const presentRate = totalChildren > 0 ? Math.round((presentCount / totalChildren) * 100) : 0;
+  const todayHealthChecks = healthCheckRecords.filter((record) => record.date === todayStr);
+  const abnormalCount = todayHealthChecks.filter((record) => record.isAbnormal).length;
+  const todayFeedbacks = guardianFeedbacks.filter((record) => record.date === todayStr);
 
-  if (visibleChildren.length === 0) {
-    return (
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <EmptyState
-          icon={<UsersRound className="h-6 w-6" />}
-          title="当前教师账号还没有班级可见数据"
-          description="请先使用示例教师账号，或为普通教师账号关联班级与儿童。"
-        />
-      </div>
-    );
-  }
+  const [envTemp, setEnvTemp] = useState(24.5);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setEnvTemp((prev) => Number((prev + (Math.random() - 0.5) * 0.2).toFixed(1)));
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const growthAlerts = useMemo(
+    () =>
+      growthRecords
+        .filter((record) => record.needsAttention)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 5),
+    [growthRecords]
+  );
+
+  const healthTrendData = useMemo(() => {
+    return buildRecentLocalDateRange(7).map((date) => {
+      const records = healthCheckRecords.filter((record) => record.date === date);
+      const avgTemp =
+        records.length > 0
+          ? records.reduce((sum, record) => sum + record.temperature, 0) / records.length
+          : 36.5;
+
+      return {
+        date: date.slice(5),
+        AvgTemp: Number(avgTemp.toFixed(1)),
+      };
+    });
+  }, [healthCheckRecords]);
+
+  const interventionData = [
+    { category: "午睡入睡", before: 45, after: 20, unit: "分钟" },
+    { category: "偏食拒食", before: 8, after: 2, unit: "次/周" },
+    { category: "大动作达标", before: 60, after: 85, unit: "%" },
+    { category: "情绪崩溃", before: 5, after: 1, unit: "次/周" },
+  ];
 
   return (
-    <RolePageShell
-      badge={`教师首页 · ${currentUser.className ?? "当前班级"} · ${TODAY_TEXT}`}
-      title="今天先处理最紧急的儿童，再把家长沟通和录入路径走顺"
-      description="教师首页只保留高频任务：异常儿童、未晨检、待复查、待沟通家长和快捷录入入口。移动端优先看任务，PC 端补充摘要。"
-      actions={
-        <>
-          <InlineLinkButton href="/teacher/high-risk-consultation" label="发起高风险会诊" variant="premium" />
-          <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />
-          <InlineLinkButton href="/teacher/health-file-bridge" label="外部健康文件桥接" />
-          <InlineLinkButton href="/teacher/agent?action=communication" label="一键生成家长沟通建议" />
-        </>
-      }
-    >
-      <RoleSplitLayout
-        main={
-          <div className="space-y-6">
-            <MetricGrid
-              items={viewModel.heroStats.map((item, index) => ({
-                ...item,
-                tone: index === 0 ? "amber" : index === 1 ? "sky" : index === 2 ? "indigo" : "emerald",
-              }))}
-            />
+    <div className="mx-auto max-w-7xl space-y-8 px-6 py-8 page-enter">
+      <div className="flex w-full flex-col items-start justify-between gap-4 md:flex-row md:items-center">
+        <div className="flex items-center gap-3">
+          <div className="rounded-2xl bg-indigo-100 p-3">
+            <Monitor className="h-8 w-8 text-indigo-600" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800">机构端监控大屏</h1>
+            <p className="mt-1 text-sm text-slate-500">全局掌控在园幼儿健康、成长情况及家园共育干预成果</p>
+            <div className="section-divider mt-5" />
+          </div>
+        </div>
 
-            <SectionCard title="今日异常儿童" description="优先处理晨检异常，避免高频事项被淹没。">
-              <div className="space-y-3">
-                {viewModel.todayAbnormalChildren.length > 0 ? (
-                  viewModel.todayAbnormalChildren.map((item) => (
-                    <div key={item.record.id} className="rounded-3xl border border-rose-100 bg-rose-50/70 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-slate-900">{item.child.name}</p>
-                        <Badge variant="warning">需优先处理</Badge>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-600">
-                        体温 {item.record.temperature}℃ · {item.record.mood} · {item.record.handMouthEye}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">今日暂未发现异常晨检儿童。</p>
-                )}
-              </div>
-            </SectionCard>
+        <div className="flex items-center gap-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-2">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-xs font-medium text-slate-600">IoT网关在线</span>
+          </div>
+          <div className="h-4 w-px bg-slate-200" />
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Wifi className="h-3.5 w-3.5 text-indigo-400" />
+            智能手环活跃: {totalChildren}/{totalChildren}
+          </div>
+          <div className="h-4 w-px bg-slate-200" />
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Thermometer className="h-3.5 w-3.5 text-orange-400" />
+            实时室温: {envTemp}°C
+          </div>
+        </div>
+      </div>
 
-            <div className="grid gap-6 xl:grid-cols-2">
-              <SectionCard title="未完成晨检" description="先补基础记录，后续 AI 建议才可靠。">
-                <div className="space-y-3">
-                  {viewModel.uncheckedMorningChecks.length > 0 ? (
-                    viewModel.uncheckedMorningChecks.map((child) => (
-                      <div key={child.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                        <p className="text-sm font-semibold text-slate-900">{child.name}</p>
-                        <p className="mt-1 text-sm text-slate-500">{child.className} · 今日待晨检</p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-slate-500">今日出勤儿童都已完成晨检。</p>
-                  )}
-                </div>
-              </SectionCard>
-
-              <SectionCard title="待复查名单" description="把需要继续观察的儿童压缩到一个列表。">
-                <div className="space-y-3">
-                  {viewModel.pendingReviews.length > 0 ? (
-                    viewModel.pendingReviews.map((item) => (
-                      <div key={item.record.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-slate-900">{item.child.name}</p>
-                          <Badge variant="secondary">{item.record.category}</Badge>
-                        </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">{item.record.followUpAction ?? item.record.description}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-slate-500">当前没有待复查名单。</p>
-                  )}
-                </div>
-              </SectionCard>
+      <ScrollReveal>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="kpi-accent card-hover relative overflow-hidden border border-indigo-100 border-l-4 border-l-indigo-300 bg-linear-to-br from-indigo-50 to-white shadow-sm">
+            <div className="absolute right-0 top-0 p-4 opacity-[0.07]">
+              <Users className="h-20 w-20" />
             </div>
-
-            <SectionCard title="今日待沟通家长" description="把真正需要今天同步的家长挑出来。">
-              <div className="space-y-3">
-                {viewModel.parentsToCommunicate.length > 0 ? (
-                  viewModel.parentsToCommunicate.map((item) => (
-                    <div key={item.child.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-slate-900">{item.child.name}</p>
-                        <Badge variant="info">建议沟通</Badge>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{item.reason}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">当前没有必须立即沟通的家长对象。</p>
-                )}
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">在园总人数</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black text-indigo-900">
+                <AnimatedNumber value={totalChildren} />
               </div>
-            </SectionCard>
+              <p className="mt-1 text-xs font-medium text-indigo-600/80">全机构注册幼儿</p>
+            </CardContent>
+          </Card>
 
-            <SectionCard title="快捷录入入口" description="保持业务主路径直达，不让老师来回找页面。">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <Link href="/teacher/high-risk-consultation" className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-4 text-sm font-semibold text-slate-900 shadow-sm">
-                  <ShieldAlert className="mb-3 h-5 w-5 text-rose-500" />
-                  发起高风险会诊
-                </Link>
-                <Link href="/health" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
-                  <ShieldCheck className="mb-3 h-5 w-5 text-sky-500" />
-                  去晨检录入
-                </Link>
-                <Link href="/growth" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
-                  <BookOpenCheck className="mb-3 h-5 w-5 text-indigo-500" />
-                  去成长观察
-                </Link>
-                <Link href="/diet" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
-                  <PencilLine className="mb-3 h-5 w-5 text-emerald-500" />
-                  去饮食录入
-                </Link>
-                <Link href="/teacher/health-file-bridge" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
-                  <FileText className="mb-3 h-5 w-5 text-violet-500" />
-                  外部健康文件桥接
-                </Link>
+          <Card className="kpi-accent card-hover relative overflow-hidden border border-emerald-100 border-l-4 border-l-emerald-300 bg-linear-to-br from-emerald-50 to-white shadow-sm">
+            <div className="absolute right-0 top-0 p-4 opacity-[0.07]">
+              <ClipboardCheck className="h-20 w-20" />
+            </div>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">今日出勤率</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black text-emerald-700">
+                <AnimatedNumber value={presentRate} suffix="%" />
               </div>
-            </SectionCard>
-          </div>
-        }
-        aside={
-          <div className="space-y-6">
-            <AssistantEntryCard
-              title="高风险儿童一键会诊"
-              description="适合比赛 demo 的主路径：自动带入晨检异常、待复查、近 7 天观察和家长反馈，直接输出园内动作、家庭任务和园长决策卡。"
-              href="/teacher/high-risk-consultation"
-              buttonLabel="发起高风险会诊"
-            >
-              <ul className="space-y-3 text-sm leading-6 text-slate-600">
-                <li>适用场景：晨检异常、反复待复查、家长反馈提示持续风险</li>
-                <li>输入方式：结构化上下文 + 图片占位 + 语音速记 + 教师补充</li>
-                <li>输出闭环：教师动作、家长今晚任务、园长优先级决策</li>
-              </ul>
-            </AssistantEntryCard>
+              <p className="mt-1 text-xs font-medium text-emerald-600/80">实到 {presentCount} 人</p>
+            </CardContent>
+          </Card>
 
-            <AssistantEntryCard
-              title="进入教师 AI 助手"
-              description="老师进入后直接看到班级上下文、异常摘要和可一键生成的沟通建议。"
-              href="/teacher/agent"
-              buttonLabel="进入教师 AI 助手"
-            >
-              <ul className="space-y-3 text-sm leading-6 text-slate-600">
-                <li>当前班级：{currentUser.className ?? "当前班级"}</li>
-                <li>当前任务：异常处理、复查、家长沟通</li>
-                <li>推荐入口：家长沟通建议 / 今日跟进行动</li>
-              </ul>
-            </AssistantEntryCard>
+          <Card className="kpi-accent card-hover relative overflow-hidden border border-rose-100 border-l-4 border-l-rose-300 bg-linear-to-br from-rose-50 to-white shadow-sm">
+            <div className="absolute right-0 top-0 p-4 opacity-[0.07]">
+              <AlertTriangle className="h-20 w-20" />
+            </div>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">晨检异常预警</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black text-rose-600">
+                <AnimatedNumber value={abnormalCount} />
+              </div>
+              <p className="mt-1 text-xs font-medium text-rose-500/80">今日健康预警人数</p>
+            </CardContent>
+          </Card>
 
-            <SectionCard title="沟通建议预览" description="首页直接露出一条可演示的沟通方向。">
-              <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
-                <div className="flex items-center gap-2">
-                  <MessageSquareText className="h-4 w-4 text-indigo-600" />
-                  <p className="text-sm font-semibold text-slate-900">家长沟通建议</p>
+          <Card className="kpi-accent card-hover relative overflow-hidden border border-amber-100 border-l-4 border-l-amber-300 bg-linear-to-br from-amber-50 to-white shadow-sm">
+            <div className="absolute right-0 top-0 p-4 opacity-[0.07]">
+              <MessageSquare className="h-20 w-20" />
+            </div>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">今日家园反馈</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black text-amber-600">
+                <AnimatedNumber value={todayFeedbacks.length} />
+              </div>
+              <p className="mt-1 text-xs font-medium text-amber-600/80">家长通过在线端提交</p>
+            </CardContent>
+          </Card>
+        </div>
+      </ScrollReveal>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <Card className="border-slate-200 shadow-none">
+            <CardHeader className="pb-4">
+              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Activity className="h-5 w-5 text-indigo-500" />
+                    AI 智慧干预效果对比分析
+                  </CardTitle>
+                  <CardDescription className="mt-1">上周报告生成个性化干预建议执行后的机构幼儿整体指标变化</CardDescription>
                 </div>
-                <p className="mt-3 text-sm leading-7 text-slate-600">{viewModel.communicationPreview}</p>
+                <Badge className="w-fit shrink-0 border-none bg-indigo-100 text-indigo-700 hover:bg-indigo-100">
+                  干预效果显著
+                </Badge>
               </div>
-            </SectionCard>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={interventionData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="category" axisLine={false} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} dy={10} />
+                    <YAxis axisLine={false} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} dx={-10} />
+                    <Tooltip
+                      cursor={{ fill: "#F8FAFC" }}
+                      contentStyle={{
+                        borderRadius: "12px",
+                        border: "1px solid #E2E8F0",
+                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                      }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: "20px", fontSize: "12px" }} />
+                    <Bar dataKey="before" name="干预前 (上周)" fill="#94A3B8" radius={[6, 6, 0, 0]} maxBarSize={40} />
+                    <Bar dataKey="after" name="干预后 (本周)" fill="#6366F1" radius={[6, 6, 0, 0]} maxBarSize={40} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
 
-            <SectionCard title="老师今日顺序" description="移动端一进来先处理这三件事。">
-              <ol className="space-y-3 text-sm text-slate-600">
-                <li className="flex items-center gap-3"><AlertTriangle className="h-4 w-4 text-amber-500" />先看异常儿童</li>
-                <li className="flex items-center gap-3"><ShieldCheck className="h-4 w-4 text-sky-500" />补齐未完成晨检</li>
-                <li className="flex items-center gap-3"><BrainCircuit className="h-4 w-4 text-indigo-500" />再生成家长沟通建议</li>
-              </ol>
-            </SectionCard>
-          </div>
-        }
-      />
-    </RolePageShell>
+          <Card className="border-slate-200 shadow-none">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2 text-lg text-slate-800">机构近七日健康均温监测</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[220px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={healthTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} tickLine={false} dy={10} />
+                    <YAxis
+                      domain={["dataMin - 0.2", "dataMax + 0.2"]}
+                      axisLine={false}
+                      tick={{ fill: "#94a3b8", fontSize: 12 }}
+                      tickLine={false}
+                      dx={-10}
+                    />
+                    <Tooltip contentStyle={{ borderRadius: "12px", border: "1px solid #E2E8F0" }} />
+                    <Area type="monotone" dataKey="AvgTemp" name="平均体温 (℃)" stroke="#10B981" strokeWidth={3} fillOpacity={1} fill="url(#colorTemp)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card className="flex h-full flex-col border-rose-100 bg-white object-cover shadow-none">
+            <CardHeader className="rounded-t-xl border-b border-rose-100/60 bg-rose-50/50 pb-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base text-rose-800">
+                  <AlertTriangle className="h-5 w-5" />
+                  重点预警名单
+                </CardTitle>
+                <div className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                  {growthAlerts.length}
+                </div>
+              </div>
+              <CardDescription className="mt-1 text-xs text-rose-700/70">需要教师二次复查干预的成长记录</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 overflow-auto p-0">
+              <div className="divide-y divide-slate-100">
+                {growthAlerts.map((alert) => {
+                  const child = visibleChildren.find((item) => item.id === alert.childId);
+                  return (
+                    <div key={alert.id} className="p-5 transition-colors hover:bg-slate-50/80">
+                      <div className="mb-2 flex items-start justify-between">
+                        <div className="text-sm font-semibold text-slate-800">
+                          {child?.name || "未知"}
+                          <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-400">
+                            {alert.category}
+                          </span>
+                        </div>
+                        <Badge variant="outline" className="border-rose-200 bg-rose-50 text-[10px] text-rose-600">
+                          待复查
+                        </Badge>
+                      </div>
+                      <p className="line-clamp-2 text-xs leading-relaxed text-slate-600">{alert.description}</p>
+
+                      {alert.followUpAction ? (
+                        <div className="relative mt-3 flex flex-col gap-1 rounded-lg border border-slate-100 bg-white p-2.5 text-xs text-slate-600 shadow-sm before:absolute before:bottom-2 before:left-0 before:top-2 before:w-[3px] before:rounded-r-md before:bg-indigo-400 before:content-['']">
+                          <span className="ml-2 font-semibold text-indigo-900">建议干预措施：</span>
+                          <span className="ml-2 line-clamp-2 leading-relaxed">{alert.followUpAction}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                {growthAlerts.length === 0 ? (
+                  <div className="p-5">
+                    <EmptyState
+                      icon={<HeartPulse className="h-6 w-6" />}
+                      title="目前没有重点预警名单"
+                      description="当前成长与健康数据整体平稳，暂时无需教师额外复查。"
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
   );
 }

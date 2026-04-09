@@ -47,13 +47,13 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["providerMeta"]["provider"] == "parent-storybook-rule"
     assert body["providerMeta"]["mode"] == "fallback"
     assert body["providerMeta"]["realProvider"] is False
-    assert body["providerMeta"]["imageDelivery"] == "demo-art"
+    assert body["providerMeta"]["imageDelivery"] == "dynamic-fallback"
     assert body["providerMeta"]["audioDelivery"] == "preview-only"
-    assert body["scenes"][0]["imageSourceKind"] == "demo-art"
+    assert body["scenes"][0]["imageSourceKind"] == "dynamic-fallback"
     assert body["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
     assert body["scenes"][0]["assetRef"] == body["scenes"][0]["imageUrl"]
     assert body["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
-    assert body["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-demo-art"
+    assert body["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-dynamic-fallback"
     assert body["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
     assert body["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
     assert body["providerMeta"]["diagnostics"]["brain"]["retryStrategy"] == "none"
@@ -227,7 +227,7 @@ def test_parent_storybook_media_endpoint_serves_cached_fallback_svg(monkeypatch)
     assert media_response.status_code == 200
     assert media_response.headers["content-type"] == "image/svg+xml"
     assert "今天的小亮点" in media_response.text
-    assert body["scenes"][0]["imageSourceKind"] == "demo-art"
+    assert body["scenes"][0]["imageSourceKind"] == "dynamic-fallback"
     assert body["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
 
 

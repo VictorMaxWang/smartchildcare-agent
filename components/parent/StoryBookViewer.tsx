@@ -54,7 +54,7 @@ type StoryBookViewerStatus = "loading" | "storybook" | "card" | "empty" | "error
 type PlaybackState = "idle" | "loading" | "playing" | "paused" | "preview" | "local";
 type StoryBookTheme = ReturnType<typeof getTheme>;
 type StoryBookRuntimeTransport = "remote-brain-proxy" | "next-json-fallback" | "next-stream-fallback";
-type StoryBookRuntimeImageDelivery = "real" | "demo-art" | "svg-fallback";
+type StoryBookRuntimeImageDelivery = "real" | "dynamic-fallback" | "demo-art" | "svg-fallback";
 type StoryBookRuntimeDiagnostics = {
   brain?: {
     reachable?: boolean;
@@ -436,6 +436,7 @@ function getRuntimeSceneImageDelivery(scene: StoryBookRuntimeScene) {
   if (scene.imageSourceKind) return scene.imageSourceKind;
   if (scene.imageStatus === "ready") return "real";
   if (scene.imageStatus === "mock") return "demo-art";
+  if (scene.imageStatus === "fallback" && (scene.imageUrl || scene.assetRef)) return "dynamic-fallback";
   return "svg-fallback";
 }
 
@@ -475,17 +476,29 @@ function getRuntimeBannerItems(
       label: "真实插画已就绪",
       detail: "每页将优先展示真实生成的插画结果。",
     });
+  } else if (imageDelivery === "mixed") {
+    items.push({
+      tone: "info",
+      label: "真实插画部分命中，其余页使用动态剧情插画",
+      detail: "当前链路会保留 live 命中的真实图，并用 scene blueprint 驱动剩余页。",
+    });
+  } else if (imageDelivery === "dynamic-fallback") {
+    items.push({
+      tone: "info",
+      label: "真实图片暂未命中，当前使用动态剧情插画",
+      detail: "当前页先展示由 scene blueprint 驱动的剧情插画，不再默认落回示例图。",
+    });
   } else if (imageDelivery === "demo-art") {
     items.push({
       tone: "info",
-      label: "图片 provider 未就绪，当前使用演示插画",
-      detail: "这是高质量的本地演示插画，不是简陋兜底图。",
+      label: "当前命中 legacy 演示插画兜底",
+      detail: "只有动态剧情插画也不可用时，才会退回这一层示例资源。",
     });
   } else {
     items.push({
       tone: "warning",
-      label: "图片 provider 未就绪，当前使用兜底插画",
-      detail: "当前页使用蓝图驱动的 SVG 兜底图，仍保留剧情对应关系。",
+      label: "图片 provider 未就绪，当前使用极端兜底插画",
+      detail: "当前页落到最后一层 SVG 兜底图，仅用于保住完整演示。",
     });
   }
 
@@ -1641,6 +1654,8 @@ function StoryBookSceneStream({
                     variant={
                       imageDelivery === "real"
                         ? "success"
+                        : imageDelivery === "dynamic-fallback"
+                          ? "info"
                         : imageDelivery === "demo-art"
                           ? "info"
                           : "warning"

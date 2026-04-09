@@ -525,3 +525,42 @@ test("buildAdminConsultationPriorityItems lets admin trace consume structured ev
     "教师补充: 老师补充孩子午休前情绪更黏老师。"
   );
 });
+
+test("buildAdminConsultationPriorityItems falls back to legacy evidence highlights when structured evidence is unavailable", () => {
+  const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
+    feedItems: [
+      {
+        consultationId: "consult-legacy-evidence",
+        childId: "child-1",
+        generatedAt: "2026-04-08T10:30:00.000Z",
+        riskLevel: "high",
+        summary: "当前仍需优先围绕午休前情绪波动继续复核。",
+        directorDecisionCard: {
+          title: "Legacy Evidence Decision",
+          status: "pending",
+          recommendedOwnerName: "王园长",
+          recommendedOwnerRole: "admin",
+          recommendedAt: "2026-04-08T12:30:00.000Z",
+        },
+        shouldEscalateToAdmin: true,
+        evidenceItems: [],
+        explainabilitySummary: {
+          agentParticipants: ["Health Agent"],
+          keyFindings: ["情绪波动持续"],
+          coordinationConclusion: "先保留兼容摘要，等待结构化证据补齐。",
+          evidenceHighlights: ["教师补充: 今日午休前情绪更黏老师。"],
+        },
+      },
+    ],
+    children: [{ id: "child-1", name: "安安", className: "向日葵班" }],
+    notificationEvents: [],
+    limit: 4,
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.trace.evidenceItems.length, 0);
+  assert.deepEqual(items[0]?.trace.evidenceHighlights, [
+    "教师补充: 今日午休前情绪更黏老师。",
+  ]);
+});

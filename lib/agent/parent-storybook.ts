@@ -151,6 +151,12 @@ type SceneBlueprint = {
   narrativeAnchor: string;
   highlightSource: string;
   voiceStyle: string;
+  visualAnchor: string;
+  sceneObjectCue: string;
+  supportCharacterCue: string;
+  activityCue: string;
+  emotionCue: string;
+  taskCue: string;
 };
 
 type SceneCaptionTiming = NonNullable<ParentStoryBookScene["captionTiming"]>;
@@ -1231,6 +1237,113 @@ function buildSceneNarrativeAnchorV2(
   return themeAnchor;
 }
 
+function truncateSceneCueV2(value: string, fallback: string, limit = 28) {
+  const text = normalizeText(value) || fallback;
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(limit - 3, 1)).trimEnd()}...`;
+}
+
+function buildVisualAnchorV2(
+  stage: StoryStage,
+  ingredients: StoryIngredients,
+  highlight: ParentStoryBookHighlightCandidate
+) {
+  const sceneTitle = buildSceneTitleV2(stage);
+  const sceneGoal = buildStageGoalV2(stage);
+  const highlightTitle = truncateSceneCueV2(normalizeText(highlight.title), sceneTitle, 18);
+  const highlightDetail = truncateSceneCueV2(
+    normalizeText(highlight.detail),
+    stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight,
+    20
+  );
+  const generationModeLabel =
+    ingredients.generationMode === "child-personalized"
+      ? "成长线索驱动"
+      : ingredients.generationMode === "hybrid"
+        ? "混合线索驱动"
+        : "主题线索驱动";
+  return `${sceneTitle} / ${sceneGoal} / ${ingredients.focusTheme} / ${highlightTitle} / ${highlightDetail} / ${generationModeLabel}`;
+}
+
+function buildSceneObjectCueV2(
+  stage: StoryStage,
+  ingredients: StoryIngredients,
+  highlight: ParentStoryBookHighlightCandidate
+) {
+  const mapping: Record<StoryStage, string> = {
+    opening: normalizeText(highlight.title) || ingredients.focusTheme,
+    setup: normalizeText(highlight.detail) || ingredients.summaryHighlight,
+    challenge: ingredients.challengeDetail,
+    support: ingredients.supportDetail,
+    attempt: ingredients.attemptDetail,
+    wobble: ingredients.wobbleDetail,
+    "small-success": ingredients.successDetail,
+    landing: ingredients.tonightAction,
+  };
+  return truncateSceneCueV2(mapping[stage], ingredients.focusTheme);
+}
+
+function buildSupportCharacterCueV2(
+  stage: StoryStage,
+  ingredients: StoryIngredients,
+  highlight: ParentStoryBookHighlightCandidate
+) {
+  const highlightTitle = normalizeText(highlight.title) || ingredients.focusTheme;
+  if (stage === "support" || stage === "landing") {
+    return truncateSceneCueV2(`轻声陪伴的大人围绕“${highlightTitle}”给出回应`, "轻声陪伴的大人");
+  }
+  if (ingredients.generationMode === "hybrid") {
+    return truncateSceneCueV2(`把最近线索“${highlightTitle}”接进这一页`, "最近被看见的成长线索");
+  }
+  return truncateSceneCueV2(`让场景里的小伙伴回应“${highlightTitle}”`, "回应主题的小伙伴");
+}
+
+function buildActivityCueV2(
+  stage: StoryStage,
+  ingredients: StoryIngredients,
+  highlight: ParentStoryBookHighlightCandidate
+) {
+  const actionTail =
+    stage === "attempt" || stage === "small-success" || stage === "landing"
+      ? ingredients.tonightAction
+      : normalizeText(highlight.detail) || ingredients.summaryHighlight;
+  return truncateSceneCueV2(
+    `${buildSceneVisibleActionV2(stage, ingredients)}；${actionTail}`,
+    buildSceneVisibleActionV2(stage, ingredients),
+    34
+  );
+}
+
+function buildEmotionCueV2(stage: StoryStage) {
+  return truncateSceneCueV2(
+    `${buildSceneEmotionV2(stage)}；${buildStageGoalV2(stage)}`,
+    buildSceneEmotionV2(stage),
+    30
+  );
+}
+
+function buildTaskCueV2(stage: StoryStage, ingredients: StoryIngredients) {
+  if (stage === "landing") {
+    return truncateSceneCueV2(
+      `今晚先做：${ingredients.tonightAction}；明天观察：${ingredients.tomorrowObservation}`,
+      ingredients.tonightAction,
+      34
+    );
+  }
+  if (stage === "attempt" || stage === "small-success") {
+    return truncateSceneCueV2(
+      `这一页先练：${ingredients.tonightAction}`,
+      ingredients.tonightAction,
+      28
+    );
+  }
+  return truncateSceneCueV2(
+    `把“${ingredients.focusTheme}”往明天延续：${ingredients.tomorrowObservation}`,
+    ingredients.tomorrowObservation,
+    34
+  );
+}
+
 function buildSceneBlueprintV2(
   stage: StoryStage,
   index: number,
@@ -1271,6 +1384,12 @@ function buildSceneBlueprintV2(
     narrativeAnchor: buildSceneNarrativeAnchorV2(stage, ingredients, highlight),
     highlightSource: normalizeText(highlight.source) || highlight.kind,
     voiceStyle: buildSceneVoiceStyle(stage),
+    visualAnchor: buildVisualAnchorV2(stage, ingredients, highlight),
+    sceneObjectCue: buildSceneObjectCueV2(stage, ingredients, highlight),
+    supportCharacterCue: buildSupportCharacterCueV2(stage, ingredients, highlight),
+    activityCue: buildActivityCueV2(stage, ingredients, highlight),
+    emotionCue: buildEmotionCueV2(stage),
+    taskCue: buildTaskCueV2(stage, ingredients),
   };
 }
 
@@ -1316,6 +1435,12 @@ function buildSceneImagePromptV2(
     `情绪与表情：${blueprint.emotion}`,
     `本页画面目标：${blueprint.sceneGoal}`,
     `叙事锚点：${blueprint.narrativeAnchor}`,
+    `视觉锚点：${blueprint.visualAnchor}`,
+    `场景物件：${blueprint.sceneObjectCue}`,
+    `辅助角色：${blueprint.supportCharacterCue}`,
+    `活动线索：${blueprint.activityCue}`,
+    `情绪线索：${blueprint.emotionCue}`,
+    `任务线索：${blueprint.taskCue}`,
     `必须出现：${blueprint.mustInclude.join("、")}`,
     "构图：纵向大画幅，主角明确，前景简洁，适合绘本单页观看",
     `禁止项：${Array.from(new Set(blueprint.avoid)).join("、")}`,
@@ -1673,6 +1798,107 @@ function buildDemoArtSceneSvgV2(
 </svg>`.trim();
 }
 
+function hashSceneVisualSeedV2(...parts: string[]) {
+  return Number.parseInt(stableHash(parts.map((part) => normalizeText(part)).join("::")).slice(0, 8), 16);
+}
+
+function buildDynamicFallbackSceneSvgV2(
+  blueprint: SceneBlueprint,
+  sceneText: string,
+  ingredients: StoryIngredients
+) {
+  const palette = ingredients.styleRecipe.palette;
+  const visualSeed = hashSceneVisualSeedV2(
+    blueprint.visualAnchor,
+    blueprint.sceneObjectCue,
+    blueprint.supportCharacterCue,
+    blueprint.activityCue,
+    blueprint.emotionCue,
+    blueprint.taskCue
+  );
+  const accentX = 118 + (visualSeed % 150);
+  const accentY = 158 + (Math.floor(visualSeed / 8) % 120);
+  const accentR = 74 + (visualSeed % 22);
+  const ribbonWidth = 250 + (Math.floor(visualSeed / 16) % 160);
+  const waveHeight = 682 + (Math.floor(visualSeed / 64) % 72);
+  const overlayOpacity = 0.22 + ((visualSeed % 10) / 100);
+  const modeLabel =
+    ingredients.generationMode === "child-personalized"
+      ? "成长线索驱动"
+      : ingredients.generationMode === "hybrid"
+        ? "混合线索驱动"
+        : "主题线索驱动";
+  const demo = buildDemoArtBlueprintV2(blueprint);
+  demo.accentEffect =
+    blueprint.stage === "small-success"
+      ? "confetti"
+      : ingredients.generationMode === "hybrid"
+        ? "ripple"
+        : blueprint.stage === "landing"
+          ? "glow"
+          : "breeze";
+  demo.prop =
+    /睡|晚安/.test(blueprint.taskCue)
+      ? "moon"
+      : /情绪|安抚/.test(ingredients.focusTheme + blueprint.supportCharacterCue)
+        ? "heart"
+        : /尝试|勇气/.test(ingredients.focusTheme + blueprint.activityCue)
+          ? "star"
+          : blueprint.stage === "challenge"
+            ? "door"
+            : demo.prop;
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" fill="none">
+  <defs>
+    <linearGradient id="dynamic-bg-${blueprint.pageIndex}" x1="72" y1="56" x2="808" y2="1168" gradientUnits="userSpaceOnUse">
+      <stop stop-color="${palette.backgroundStart}" />
+      <stop offset="1" stop-color="${palette.backgroundEnd}" />
+    </linearGradient>
+    <linearGradient id="dynamic-panel-${blueprint.pageIndex}" x1="128" y1="94" x2="750" y2="1096" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.90" />
+      <stop offset="1" stop-color="${palette.chip}" stop-opacity="0.64" />
+    </linearGradient>
+    <filter id="dynamic-shadow-${blueprint.pageIndex}" x="78" y="74" width="744" height="1042" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#0f172a" flood-opacity="0.18" />
+    </filter>
+  </defs>
+  <rect width="900" height="1200" rx="56" fill="url(#dynamic-bg-${blueprint.pageIndex})" />
+  <circle cx="${accentX}" cy="${accentY}" r="${accentR}" fill="${palette.chip}" opacity="0.92" />
+  <circle cx="756" cy="${220 + (Math.floor(visualSeed / 32) % 70)}" r="${42 + (Math.floor(visualSeed / 4) % 26)}" fill="${palette.accent}" opacity="0.16" />
+  <path d="M92 ${waveHeight}C240 ${waveHeight - 92},426 ${waveHeight - 120},812 ${waveHeight - 32}V1200H92Z" fill="${palette.chip}" opacity="0.52" />
+  <rect x="78" y="78" width="744" height="1038" rx="46" fill="url(#dynamic-panel-${blueprint.pageIndex})" filter="url(#dynamic-shadow-${blueprint.pageIndex})" />
+  <rect x="110" y="112" width="${ribbonWidth}" height="44" rx="22" fill="${palette.chip}" />
+  <text x="136" y="141" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">${escapeSvgTextV2(modeLabel)}</text>
+  <rect x="628" y="112" width="158" height="44" rx="22" fill="${palette.accent}" fill-opacity="0.14" />
+  <text x="652" y="141" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">${escapeSvgTextV2(ingredients.focusTheme)}</text>
+  <text x="118" y="208" fill="${palette.text}" font-size="38" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">${escapeSvgTextV2(blueprint.sceneTitle)}</text>
+  <text x="118" y="248" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.84">${escapeSvgTextV2(truncateSceneCueV2(blueprint.visualAnchor, blueprint.sceneGoal, 62))}</text>
+  <g opacity="${overlayOpacity}">
+    ${renderDemoBackdropV2(blueprint, ingredients, demo)}
+  </g>
+  <g opacity="0.22">
+    ${renderDemoAccentV2(blueprint, ingredients, demo)}
+  </g>
+  <g opacity="0.90">
+    ${renderProtagonistSvgV2(blueprint, ingredients, demo)}
+  </g>
+  <rect x="102" y="798" width="324" height="124" rx="28" fill="#ffffff" fill-opacity="0.84" />
+  <text x="128" y="842" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">场景物件</text>
+  <text x="128" y="886" fill="${palette.text}" font-size="28" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">${escapeSvgTextV2(blueprint.sceneObjectCue)}</text>
+  <rect x="474" y="798" width="324" height="124" rx="28" fill="#ffffff" fill-opacity="0.84" />
+  <text x="500" y="842" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">当前动作</text>
+  <text x="500" y="886" fill="${palette.text}" font-size="26" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">${escapeSvgTextV2(truncateSceneCueV2(blueprint.activityCue, blueprint.visibleAction, 20))}</text>
+  <rect x="102" y="948" width="696" height="132" rx="32" fill="${palette.chip}" fill-opacity="0.92" />
+  <text x="132" y="994" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">辅助角色</text>
+  <text x="132" y="1034" fill="${palette.text}" font-size="24" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">${escapeSvgTextV2(truncateSceneCueV2(blueprint.supportCharacterCue, blueprint.narrativeAnchor, 34))}</text>
+  <text x="132" y="1070" fill="${palette.text}" font-size="20" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.86">${escapeSvgTextV2(truncateSceneCueV2(blueprint.emotionCue, blueprint.emotion, 34))}</text>
+  <rect x="102" y="1092" width="420" height="54" rx="27" fill="${palette.accent}" fill-opacity="0.16" />
+  <text x="130" y="1127" fill="${palette.text}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">${escapeSvgTextV2(truncateSceneCueV2(blueprint.taskCue, ingredients.tonightAction, 28))}</text>
+  <text x="102" y="1178" fill="${palette.text}" font-size="18" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.76">${escapeSvgTextV2(truncateSceneCueV2(sceneText, blueprint.narrativeAnchor, 62))}</text>
+</svg>`.trim();
+}
+
 function buildFallbackSceneSvgV2(
   blueprint: SceneBlueprint,
   sceneText: string,
@@ -1725,22 +1951,32 @@ function buildStoryScenesV2(ingredients: StoryIngredients) {
         ? `${ingredients.protagonist.label}把今天那一点点亮光抱进怀里。今晚先做一件小事：${ingredients.tonightAction}。`
         : buildSceneTextV2(blueprint, ingredients);
     const audioScript = buildSceneAudioScriptV2(blueprint, sceneText);
-    const demoArtImage = buildSceneFallbackDataUrlV2(
-      buildDemoArtSceneSvgV2(blueprint, sceneText, ingredients)
-    );
-    const fallbackSvgImage = buildSceneFallbackDataUrlV2(
-      buildFallbackSceneSvgV2(blueprint, sceneText, ingredients)
-    );
+    const dynamicFallbackSvg = buildDynamicFallbackSceneSvgV2(blueprint, sceneText, ingredients);
+    const demoArtSvg = buildDemoArtSceneSvgV2(blueprint, sceneText, ingredients);
+    const fallbackSvg = buildFallbackSceneSvgV2(blueprint, sceneText, ingredients);
+    const hasDynamicFallback = Boolean(dynamicFallbackSvg.trim());
+    const hasDemoArt = Boolean(demoArtSvg.trim());
+    const imageSourceKind = hasDynamicFallback
+      ? "dynamic-fallback"
+      : hasDemoArt
+        ? "demo-art"
+        : "svg-fallback";
+    const selectedSvg = hasDynamicFallback
+      ? dynamicFallbackSvg
+      : hasDemoArt
+        ? demoArtSvg
+        : fallbackSvg;
+    const selectedImage = buildSceneFallbackDataUrlV2(selectedSvg);
 
     return {
       sceneIndex: blueprint.pageIndex,
       sceneTitle: blueprint.sceneTitle,
       sceneText,
       imagePrompt: buildSceneImagePromptV2(blueprint, ingredients),
-      imageUrl: demoArtImage,
-      assetRef: fallbackSvgImage,
-      imageSourceKind: "demo-art",
-      imageStatus: "mock",
+      imageUrl: selectedImage,
+      assetRef: selectedImage,
+      imageSourceKind,
+      imageStatus: "fallback",
       audioUrl: null,
       audioRef:
         ingredients.storyMode === "card"
@@ -1824,13 +2060,7 @@ function resolveProviderImageDeliveryFromScenes(
   if (kinds.size === 1) {
     return kinds.values().next().value ?? "svg-fallback";
   }
-  if (kinds.has("real")) {
-    return "mixed";
-  }
-  if (kinds.has("demo-art")) {
-    return "demo-art";
-  }
-  return "svg-fallback";
+  return "mixed";
 }
 
 function buildLocalDiagnostics(
@@ -1853,7 +2083,7 @@ function buildLocalDiagnostics(
     },
     image: {
       requestedProvider: "vivo-story-image",
-      resolvedProvider: reachable ? "storybook-demo-art" : "storybook-local-demo-art",
+      resolvedProvider: reachable ? "storybook-dynamic-fallback" : "storybook-local-dynamic-fallback",
       liveEnabled: false,
       missingConfig,
     },
@@ -1914,7 +2144,7 @@ export function buildParentStoryBookResponse(
       provider: "parent-storybook-rule",
       mode: "fallback",
       transport: options?.transport ?? "next-json-fallback",
-      imageProvider: "storybook-demo-art",
+      imageProvider: "storybook-dynamic-fallback",
       audioProvider: "storybook-mock-preview",
       imageDelivery: resolveProviderImageDeliveryFromScenes(scenes),
       audioDelivery: resolveProviderAudioDeliveryFromScenes(scenes),

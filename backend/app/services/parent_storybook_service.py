@@ -829,6 +829,96 @@ def _build_scene_narrative_anchor_v2(stage: str, ingredients: dict[str, Any], hi
     return theme_anchor
 
 
+def _truncate_scene_cue_v2(value: str, fallback: str, *, limit: int = 28) -> str:
+    text = _normalize_text(value) or fallback
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(limit - 3, 1)].rstrip()}..."
+
+
+def _build_visual_anchor_v2(stage: str, ingredients: dict[str, Any], highlight: dict[str, Any]) -> str:
+    scene_title = _build_scene_title_v2(stage)
+    scene_goal = _build_stage_goal_v2(stage)
+    highlight_title = _truncate_scene_cue_v2(_normalize_text(highlight.get("title")), scene_title, limit=18)
+    highlight_detail = _truncate_scene_cue_v2(
+        _normalize_text(highlight.get("detail")),
+        ingredients["tonight_action"] if stage == "landing" else ingredients["summary_highlight"],
+        limit=20,
+    )
+    generation_mode_label = (
+        "成长线索驱动"
+        if ingredients["generation_mode"] == "child-personalized"
+        else "混合线索驱动"
+        if ingredients["generation_mode"] == "hybrid"
+        else "主题线索驱动"
+    )
+    return f"{scene_title} / {scene_goal} / {ingredients['focus_theme']} / {highlight_title} / {highlight_detail} / {generation_mode_label}"
+
+
+def _build_scene_object_cue_v2(stage: str, ingredients: dict[str, Any], highlight: dict[str, Any]) -> str:
+    scene_object_map = {
+        "opening": _normalize_text(highlight.get("title")) or ingredients["focus_theme"],
+        "setup": _normalize_text(highlight.get("detail")) or ingredients["summary_highlight"],
+        "challenge": ingredients["challenge_detail"],
+        "support": ingredients["support_detail"],
+        "attempt": ingredients["attempt_detail"],
+        "wobble": ingredients["wobble_detail"],
+        "small-success": ingredients["success_detail"],
+        "landing": ingredients["tonight_action"],
+    }
+    return _truncate_scene_cue_v2(scene_object_map.get(stage, ingredients["focus_theme"]), ingredients["focus_theme"])
+
+
+def _build_support_character_cue_v2(stage: str, ingredients: dict[str, Any], highlight: dict[str, Any]) -> str:
+    highlight_title = _normalize_text(highlight.get("title")) or ingredients["focus_theme"]
+    if stage in {"support", "landing"}:
+        return _truncate_scene_cue_v2(f"轻声陪伴的大人围绕“{highlight_title}”给出回应", "轻声陪伴的大人")
+    if ingredients["generation_mode"] == "hybrid":
+        return _truncate_scene_cue_v2(f"把最近线索“{highlight_title}”接进这一页", "最近被看见的成长线索")
+    return _truncate_scene_cue_v2(f"让场景里的小伙伴回应“{highlight_title}”", "回应主题的小伙伴")
+
+
+def _build_activity_cue_v2(stage: str, ingredients: dict[str, Any], highlight: dict[str, Any]) -> str:
+    action_tail = (
+        ingredients["tonight_action"]
+        if stage in {"attempt", "small-success", "landing"}
+        else _normalize_text(highlight.get("detail")) or ingredients["summary_highlight"]
+    )
+    return _truncate_scene_cue_v2(
+        f"{_build_scene_visible_action_v2(stage, ingredients)}；{action_tail}",
+        _build_scene_visible_action_v2(stage, ingredients),
+        limit=34,
+    )
+
+
+def _build_emotion_cue_v2(stage: str, ingredients: dict[str, Any]) -> str:
+    return _truncate_scene_cue_v2(
+        f"{_build_scene_emotion_v2(stage)}；{_build_stage_goal_v2(stage)}",
+        _build_scene_emotion_v2(stage),
+        limit=30,
+    )
+
+
+def _build_task_cue_v2(stage: str, ingredients: dict[str, Any]) -> str:
+    if stage == "landing":
+        return _truncate_scene_cue_v2(
+            f"今晚先做：{ingredients['tonight_action']}；明天观察：{ingredients['tomorrow_observation']}",
+            ingredients["tonight_action"],
+            limit=34,
+        )
+    if stage in {"attempt", "small-success"}:
+        return _truncate_scene_cue_v2(
+            f"这一页先练：{ingredients['tonight_action']}",
+            ingredients["tonight_action"],
+            limit=28,
+        )
+    return _truncate_scene_cue_v2(
+        f"把“{ingredients['focus_theme']}”往明天延续：{ingredients['tomorrow_observation']}",
+        ingredients["tomorrow_observation"],
+        limit=34,
+    )
+
+
 def _build_scene_blueprint_v2(stage: str, index: int, ingredients: dict[str, Any]) -> dict[str, Any]:
     highlight = _select_highlight_v2(ingredients, index, stage)
     return {
@@ -857,6 +947,12 @@ def _build_scene_blueprint_v2(stage: str, index: int, ingredients: dict[str, Any
         "narrativeAnchor": _build_scene_narrative_anchor_v2(stage, ingredients, highlight),
         "highlightSource": _normalize_text(highlight.get("source")) or _normalize_text(highlight.get("kind")) or "rule",
         "voiceStyle": _build_scene_voice_style(stage),
+        "visualAnchor": _build_visual_anchor_v2(stage, ingredients, highlight),
+        "sceneObjectCue": _build_scene_object_cue_v2(stage, ingredients, highlight),
+        "supportCharacterCue": _build_support_character_cue_v2(stage, ingredients, highlight),
+        "activityCue": _build_activity_cue_v2(stage, ingredients, highlight),
+        "emotionCue": _build_emotion_cue_v2(stage, ingredients),
+        "taskCue": _build_task_cue_v2(stage, ingredients),
     }
 
 
@@ -896,6 +992,12 @@ def _build_scene_image_prompt_v2(blueprint: dict[str, Any], ingredients: dict[st
             f"情绪与表情：{blueprint['emotion']}",
             f"本页画面目标：{blueprint['sceneGoal']}",
             f"叙事锚点：{blueprint['narrativeAnchor']}",
+            f"视觉锚点：{blueprint['visualAnchor']}",
+            f"场景物件：{blueprint['sceneObjectCue']}",
+            f"辅助角色：{blueprint['supportCharacterCue']}",
+            f"活动线索：{blueprint['activityCue']}",
+            f"情绪线索：{blueprint['emotionCue']}",
+            f"任务线索：{blueprint['taskCue']}",
             f"必须出现：{'、'.join([item for item in blueprint['mustInclude'] if item])}",
             "构图：纵向大画幅，主角明确，前景简洁，适合绘本单页观看",
             f"禁止项：{'、'.join(dict.fromkeys([item for item in blueprint['avoid'] if item]))}",
@@ -1214,6 +1316,109 @@ def _build_demo_art_scene_svg_v2(blueprint: dict[str, Any], scene_text: str, ing
 """.strip()
 
 
+def _hash_scene_visual_seed_v2(*parts: str) -> int:
+    seed = "::".join(_normalize_text(part) for part in parts if _normalize_text(part))
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
+
+
+def _build_dynamic_fallback_scene_svg_v2(blueprint: dict[str, Any], scene_text: str, ingredients: dict[str, Any]) -> str:
+    palette = ingredients["style_recipe"]["palette"]
+    visual_seed = _hash_scene_visual_seed_v2(
+        blueprint["visualAnchor"],
+        blueprint["sceneObjectCue"],
+        blueprint["supportCharacterCue"],
+        blueprint["activityCue"],
+        blueprint["emotionCue"],
+        blueprint["taskCue"],
+    )
+    accent_x = 118 + (visual_seed % 150)
+    accent_y = 158 + ((visual_seed // 8) % 120)
+    accent_r = 74 + (visual_seed % 22)
+    ribbon_width = 250 + ((visual_seed // 16) % 160)
+    wave_height = 682 + ((visual_seed // 64) % 72)
+    overlay_opacity = 0.22 + ((visual_seed % 10) / 100)
+    mode_label = (
+        "成长线索驱动"
+        if ingredients["generation_mode"] == "child-personalized"
+        else "混合线索驱动"
+        if ingredients["generation_mode"] == "hybrid"
+        else "主题线索驱动"
+    )
+    demo = _build_demo_art_blueprint_v2(blueprint["stage"])
+    demo["accentEffect"] = (
+        "confetti"
+        if blueprint["stage"] == "small-success"
+        else "ripple"
+        if ingredients["generation_mode"] == "hybrid"
+        else "glow"
+        if blueprint["stage"] == "landing"
+        else "breeze"
+    )
+    demo["prop"] = (
+        "moon"
+        if "睡" in blueprint["taskCue"] or "晚安" in blueprint["taskCue"]
+        else "heart"
+        if "情绪" in ingredients["focus_theme"] or "安抚" in blueprint["supportCharacterCue"]
+        else "star"
+        if "尝试" in blueprint["activityCue"] or "勇气" in ingredients["focus_theme"]
+        else "door"
+        if blueprint["stage"] == "challenge"
+        else demo["prop"]
+    )
+
+    return f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" fill="none">
+  <defs>
+    <linearGradient id="dynamic-bg-{blueprint['pageIndex']}" x1="72" y1="56" x2="808" y2="1168" gradientUnits="userSpaceOnUse">
+      <stop stop-color="{palette['backgroundStart']}" />
+      <stop offset="1" stop-color="{palette['backgroundEnd']}" />
+    </linearGradient>
+    <linearGradient id="dynamic-panel-{blueprint['pageIndex']}" x1="128" y1="94" x2="750" y2="1096" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.90" />
+      <stop offset="1" stop-color="{palette['chip']}" stop-opacity="0.64" />
+    </linearGradient>
+    <filter id="dynamic-shadow-{blueprint['pageIndex']}" x="78" y="74" width="744" height="1042" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#0f172a" flood-opacity="0.18" />
+    </filter>
+  </defs>
+  <rect width="900" height="1200" rx="56" fill="url(#dynamic-bg-{blueprint['pageIndex']})" />
+  <circle cx="{accent_x}" cy="{accent_y}" r="{accent_r}" fill="{palette['chip']}" opacity="0.92" />
+  <circle cx="756" cy="{220 + ((visual_seed // 32) % 70)}" r="{42 + ((visual_seed // 4) % 26)}" fill="{palette['accent']}" opacity="0.16" />
+  <path d="M92 {wave_height}C240 {wave_height - 92},426 {wave_height - 120},812 {wave_height - 32}V1200H92Z" fill="{palette['chip']}" opacity="0.52" />
+  <rect x="78" y="78" width="744" height="1038" rx="46" fill="url(#dynamic-panel-{blueprint['pageIndex']})" filter="url(#dynamic-shadow-{blueprint['pageIndex']})" />
+  <rect x="110" y="112" width="{ribbon_width}" height="44" rx="22" fill="{palette['chip']}" />
+  <text x="136" y="141" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">{_escape_svg_text_v2(mode_label)}</text>
+  <rect x="628" y="112" width="158" height="44" rx="22" fill="{palette['accent']}" fill-opacity="0.14" />
+  <text x="652" y="141" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">{_escape_svg_text_v2(ingredients['focus_theme'])}</text>
+  <text x="118" y="208" fill="{palette['text']}" font-size="38" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">{_escape_svg_text_v2(blueprint['sceneTitle'])}</text>
+  <text x="118" y="248" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.84">{_escape_svg_text_v2(_truncate_scene_cue_v2(blueprint['visualAnchor'], blueprint['sceneGoal'], limit=62))}</text>
+  <g opacity="{overlay_opacity}">
+    {_render_demo_backdrop_v2(blueprint, ingredients, demo)}
+  </g>
+  <g opacity="0.22">
+    {_render_demo_accent_v2(ingredients, demo)}
+  </g>
+  <g opacity="0.90">
+    {_render_protagonist_svg_v2(blueprint, demo)}
+  </g>
+  <rect x="102" y="798" width="324" height="124" rx="28" fill="#ffffff" fill-opacity="0.84" />
+  <text x="128" y="842" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">场景物件</text>
+  <text x="128" y="886" fill="{palette['text']}" font-size="28" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">{_escape_svg_text_v2(blueprint['sceneObjectCue'])}</text>
+  <rect x="474" y="798" width="324" height="124" rx="28" fill="#ffffff" fill-opacity="0.84" />
+  <text x="500" y="842" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">当前动作</text>
+  <text x="500" y="886" fill="{palette['text']}" font-size="26" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">{_escape_svg_text_v2(_truncate_scene_cue_v2(blueprint['activityCue'], blueprint['visibleAction'], limit=20))}</text>
+  <rect x="102" y="948" width="696" height="132" rx="32" fill="{palette['chip']}" fill-opacity="0.92" />
+  <text x="132" y="994" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">辅助角色</text>
+  <text x="132" y="1034" fill="{palette['text']}" font-size="24" font-family="'Noto Sans SC','PingFang SC',sans-serif" font-weight="700">{_escape_svg_text_v2(_truncate_scene_cue_v2(blueprint['supportCharacterCue'], blueprint['narrativeAnchor'], limit=34))}</text>
+  <text x="132" y="1070" fill="{palette['text']}" font-size="20" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.86">{_escape_svg_text_v2(_truncate_scene_cue_v2(blueprint['emotionCue'], blueprint['emotion'], limit=34))}</text>
+  <rect x="102" y="1092" width="420" height="54" rx="27" fill="{palette['accent']}" fill-opacity="0.16" />
+  <text x="130" y="1127" fill="{palette['text']}" font-size="22" font-family="'Noto Sans SC','PingFang SC',sans-serif">{_escape_svg_text_v2(_truncate_scene_cue_v2(blueprint['taskCue'], ingredients['tonight_action'], limit=28))}</text>
+  <text x="102" y="1178" fill="{palette['text']}" font-size="18" font-family="'Noto Sans SC','PingFang SC',sans-serif" opacity="0.76">{_escape_svg_text_v2(_truncate_scene_cue_v2(scene_text, blueprint['narrativeAnchor'], limit=62))}</text>
+</svg>
+""".strip()
+
+
 def _build_scene_fallback_svg_v2(blueprint: dict[str, Any], scene_text: str, ingredients: dict[str, Any]) -> str:
     palette = ingredients["style_recipe"]["palette"]
     return f"""
@@ -1264,6 +1469,7 @@ def _build_story_scenes_v2(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
                 "imagePrompt": _build_scene_image_prompt_v2(blueprint, ingredients),
                 "imageUrl": None,
                 "assetRef": None,
+                "dynamicFallbackSvg": _build_dynamic_fallback_scene_svg_v2(blueprint, scene_text, ingredients),
                 "demoArtSvg": _build_demo_art_scene_svg_v2(blueprint, scene_text, ingredients),
                 "fallbackSvg": _build_scene_fallback_svg_v2(blueprint, scene_text, ingredients),
                 "imageStatus": "fallback",
@@ -1379,50 +1585,13 @@ def _resolve_missing_audio_config(settings: Any) -> list[str]:
     return missing
 
 
-def _resolve_scene_image_asset(
+def _store_scene_image_svg_asset(
     *,
     story_id: str,
     scene_blueprint: dict[str, Any],
-    scene_text: str,
-    image_status: str,
-    image_result: Any,
-    settings: Any,
-    ingredients: dict[str, Any],
-) -> tuple[str | None, str | None, str]:
-    image_url = image_result.output.get("imageUrl")
-    asset_ref = image_result.output.get("assetRef")
-
-    if image_status == "ready" and image_url:
-        return image_url, asset_ref or image_url, "real"
-
-    demo_svg = scene_blueprint.get("demoArtSvg")
-    if not isinstance(demo_svg, str) or not demo_svg.strip():
-        demo_svg = _build_demo_art_scene_svg_v2(scene_blueprint, scene_text, ingredients)
-    if isinstance(demo_svg, str) and demo_svg.strip():
-        media_key = _build_image_media_key(
-            story_id=story_id,
-            scene_index=scene_blueprint["sceneIndex"] - 1,
-            scene_title=scene_blueprint["sceneTitle"],
-        )
-        get_storybook_media_cache().put_image(
-            media_key,
-            payload={
-                "storyId": story_id,
-                "sceneIndex": scene_blueprint["sceneIndex"],
-                "sceneTitle": scene_blueprint["sceneTitle"],
-                "contentType": "image/svg+xml",
-                "svg": demo_svg,
-                "imageSourceKind": "demo-art",
-                "expiresAt": time() + float(get_storybook_media_cache().cache_window_seconds),
-            },
-        )
-        asset_url = f"/api/ai/parent-storybook/media/{media_key}"
-        return asset_url, asset_url, "demo-art"
-
-    fallback_svg = scene_blueprint.get("fallbackSvg")
-    if not isinstance(fallback_svg, str) or not fallback_svg.strip():
-        return image_url, asset_ref, "svg-fallback"
-
+    svg: str,
+    image_source_kind: str,
+) -> str:
     media_key = _build_image_media_key(
         story_id=story_id,
         scene_index=scene_blueprint["sceneIndex"] - 1,
@@ -1435,21 +1604,97 @@ def _resolve_scene_image_asset(
             "sceneIndex": scene_blueprint["sceneIndex"],
             "sceneTitle": scene_blueprint["sceneTitle"],
             "contentType": "image/svg+xml",
-            "svg": fallback_svg,
+            "svg": svg,
+            "imageSourceKind": image_source_kind,
             "expiresAt": time() + float(get_storybook_media_cache().cache_window_seconds),
         },
     )
-    asset_url = f"/api/ai/parent-storybook/media/{media_key}"
+    return f"/api/ai/parent-storybook/media/{media_key}"
+
+
+def _resolve_scene_image_asset(
+    *,
+    story_id: str,
+    scene_blueprint: dict[str, Any],
+    scene_text: str,
+    image_status: str,
+    image_result: Any,
+    settings: Any,
+    ingredients: dict[str, Any],
+) -> tuple[str | None, str | None, str]:
+    image_url = image_result.output.get("imageUrl")
+    asset_ref = image_result.output.get("assetRef")
+    render_blueprint = scene_blueprint.get("sceneBlueprint")
+    if not isinstance(render_blueprint, dict):
+        render_blueprint = scene_blueprint
+
+    if image_status == "ready" and image_url:
+        return image_url, asset_ref or image_url, "real"
+
+    dynamic_svg = scene_blueprint.get("dynamicFallbackSvg")
+    if not isinstance(dynamic_svg, str) or not dynamic_svg.strip():
+        dynamic_svg = _build_dynamic_fallback_scene_svg_v2(render_blueprint, scene_text, ingredients)
+    if isinstance(dynamic_svg, str) and dynamic_svg.strip():
+        asset_url = _store_scene_image_svg_asset(
+            story_id=story_id,
+            scene_blueprint=scene_blueprint,
+            svg=dynamic_svg,
+            image_source_kind="dynamic-fallback",
+        )
+        return asset_url, asset_url, "dynamic-fallback"
+
+    demo_svg = scene_blueprint.get("demoArtSvg")
+    if not isinstance(demo_svg, str) or not demo_svg.strip():
+        demo_svg = _build_demo_art_scene_svg_v2(render_blueprint, scene_text, ingredients)
+    if isinstance(demo_svg, str) and demo_svg.strip():
+        asset_url = _store_scene_image_svg_asset(
+            story_id=story_id,
+            scene_blueprint=scene_blueprint,
+            svg=demo_svg,
+            image_source_kind="demo-art",
+        )
+        return asset_url, asset_url, "demo-art"
+
+    fallback_svg = scene_blueprint.get("fallbackSvg")
+    if not isinstance(fallback_svg, str) or not fallback_svg.strip():
+        return image_url, asset_ref, "svg-fallback"
+
+    asset_url = _store_scene_image_svg_asset(
+        story_id=story_id,
+        scene_blueprint=scene_blueprint,
+        svg=fallback_svg,
+        image_source_kind="svg-fallback",
+    )
     return asset_url, asset_url, "svg-fallback"
 
 
-def _resolve_image_delivery(image_source_kinds: list[str]) -> Literal["real", "mixed", "demo-art", "svg-fallback"]:
+def _resolve_image_delivery(
+    image_source_kinds: list[str],
+) -> Literal["real", "mixed", "dynamic-fallback", "demo-art", "svg-fallback"]:
     unique_kinds = [kind for kind in dict.fromkeys(image_source_kinds) if kind]
     if not unique_kinds:
         return "svg-fallback"
     if len(unique_kinds) == 1:
         return unique_kinds[0]  # type: ignore[return-value]
     return "mixed"
+
+
+def _resolve_storybook_fallback_provider(image_source_kinds: list[str]) -> str:
+    if any(kind == "dynamic-fallback" for kind in image_source_kinds):
+        return "storybook-dynamic-fallback"
+    if any(kind == "demo-art" for kind in image_source_kinds):
+        return "storybook-demo-art"
+    return "storybook-svg-fallback"
+
+
+def _resolve_scene_image_provider_label(primary_name: str, image_source_kinds: list[str]) -> str:
+    image_delivery = _resolve_image_delivery(image_source_kinds)
+    fallback_provider = _resolve_storybook_fallback_provider(image_source_kinds)
+    if image_delivery == "real":
+        return primary_name
+    if image_delivery == "mixed":
+        return f"{primary_name}+{fallback_provider}"
+    return fallback_provider
 
 
 def _resolve_media_diagnostics(
@@ -1468,12 +1713,14 @@ def _resolve_media_diagnostics(
     audio_provider_name = getattr(audio_provider, "provider_name", "storybook-mock-preview")
     if image_delivery == "real":
         image_resolved_provider = image_provider_name
+    elif image_delivery == "dynamic-fallback":
+        image_resolved_provider = "storybook-dynamic-fallback"
     elif image_delivery == "demo-art":
         image_resolved_provider = "storybook-demo-art"
     elif image_delivery == "svg-fallback":
         image_resolved_provider = "storybook-svg-fallback"
     else:
-        image_resolved_provider = f"{image_provider_name}+storybook-demo-art"
+        image_resolved_provider = f"{image_provider_name}+{_resolve_storybook_fallback_provider(image_source_kinds)}"
 
     return {
         "brain": {
@@ -1758,11 +2005,9 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             "provider": "parent-storybook-rule",
             "mode": provider_mode,
             "transport": "fastapi-brain",
-            "imageProvider": _provider_label(
-                primary_name=getattr(image_provider, "provider_name", "storybook-asset"),
-                fallback_name=fallback_image_provider.provider_name,
-                scenes=scenes,
-                status_key="imageStatus",
+            "imageProvider": _resolve_scene_image_provider_label(
+                getattr(image_provider, "provider_name", "storybook-asset"),
+                [str(scene.get("imageSourceKind") or "svg-fallback") for scene in scenes],
             ),
             "audioProvider": _provider_label(
                 primary_name=getattr(audio_provider, "provider_name", "storybook-mock-preview"),

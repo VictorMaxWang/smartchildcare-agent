@@ -10,6 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  buildConsultationEvidencePanelModel,
+  getConsultationEvidenceConfidenceLabel,
+  getConsultationEvidenceHumanReviewLabel,
+  type ConsultationEvidenceDisplayItem,
+} from "@/lib/consultation/evidence-display";
+import {
   getConsultationStageStatusLabel,
   type ConsultationStageView,
   type ConsultationTraceMode,
@@ -29,6 +35,14 @@ function getCalloutClasses(tone: NonNullable<ConsultationStageView["callout"]>["
   return "border-sky-200 bg-sky-50 text-sky-700";
 }
 
+function getEvidenceConfidenceBadgeVariant(
+  confidence: ConsultationEvidenceDisplayItem["item"]["confidence"]
+) {
+  if (confidence === "high") return "success" as const;
+  if (confidence === "medium") return "info" as const;
+  return "outline" as const;
+}
+
 export default function TraceStepCard({
   stage,
   mode,
@@ -43,8 +57,13 @@ export default function TraceStepCard({
 
   const sourceLabel = getSourceLabel(stage.source);
   const shouldShowMemory = (stage.key === "long_term_profile" || stage.key === "recent_context") && Boolean(stage.memoryMeta);
+  const evidencePreviewModel = buildConsultationEvidencePanelModel({
+    evidenceItems: stage.evidenceItems,
+    leadLimit: 2,
+  });
   const hasStructuredContent =
     stage.items.length > 0 ||
+    stage.evidenceItems.length > 0 ||
     stage.evidence.length > 0 ||
     Boolean(stage.summaryCard) ||
     Boolean(stage.followUpCard) ||
@@ -111,16 +130,43 @@ export default function TraceStepCard({
             </div>
           ) : null}
 
-          {stage.evidence.length ? (
+          {stage.evidence.length || stage.evidenceItems.length ? (
             <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
               <p className="text-sm font-semibold text-slate-900">关键信号</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {stage.evidence.map((item, index) => (
-                  <Badge key={`${stage.key}-${item.label}-${index}`} variant="outline">
-                    {item.label}: {item.detail}
-                  </Badge>
-                ))}
-              </div>
+              {evidencePreviewModel.mode === "structured" ? (
+                <div className="mt-3 space-y-3">
+                  {evidencePreviewModel.leadItems.map((evidence) => (
+                    <div
+                      key={evidence.item.id}
+                      className="rounded-2xl border border-slate-100 bg-white/90 p-3"
+                    >
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="info">{evidence.item.sourceLabel}</Badge>
+                        <Badge variant={getEvidenceConfidenceBadgeVariant(evidence.item.confidence)}>
+                          {getConsultationEvidenceConfidenceLabel(evidence.item.confidence)}
+                        </Badge>
+                        <Badge variant={evidence.item.requiresHumanReview ? "warning" : "success"}>
+                          {getConsultationEvidenceHumanReviewLabel(
+                            evidence.item.requiresHumanReview
+                          )}
+                        </Badge>
+                        {evidence.supportLabels[0] ? (
+                          <Badge variant="outline">{evidence.supportLabels[0]}</Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-3 text-sm leading-6 text-slate-700">{evidence.item.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {stage.evidence.map((item, index) => (
+                    <Badge key={`${stage.key}-${item.label}-${index}`} variant="outline">
+                      {item.label}: {item.detail}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
           ) : null}
 

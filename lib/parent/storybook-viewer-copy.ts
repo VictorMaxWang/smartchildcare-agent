@@ -30,6 +30,18 @@ function mapProviderName(kind: "image" | "audio", providerName: string) {
     return kind === "image" ? "未知插画来源" : "未知配音来源";
   }
 
+  if (normalized === "storybook-dynamic-fallback") {
+    return "动态剧情插画";
+  }
+  if (normalized === "storybook-local-dynamic-fallback") {
+    return "本地动态剧情插画";
+  }
+  if (normalized === "storybook-demo-art") {
+    return "演示插画";
+  }
+  if (normalized === "storybook-svg-fallback") {
+    return "极端兜底插画";
+  }
   if (normalized === "storybook-asset") {
     return "预置绘本资产";
   }
@@ -71,8 +83,8 @@ export function describeStoryBookMode(mode: string) {
   }
 
   return {
-    label: "演示兜底",
-    summary: "当前走演示兜底，但故事、节奏和交互仍然完整可看。",
+    label: "动态剧情兜底",
+    summary: "当前走蓝图驱动的动态剧情插画与预览朗读，故事、节奏和交互仍然完整可看。",
     badgeVariant: "secondary" as const,
   };
 }
@@ -99,12 +111,17 @@ export type StoryBookRuntimeTransport =
   | "next-json-fallback"
   | "next-stream-fallback";
 
-export type StoryBookRuntimeImageDelivery = "real" | "demo-art" | "svg-fallback";
+export type StoryBookRuntimeImageDelivery =
+  | "real"
+  | "dynamic-fallback"
+  | "demo-art"
+  | "svg-fallback";
 
 export function formatStoryBookSceneImageDelivery(
   value?: StoryBookRuntimeImageDelivery | ParentStoryBookMediaStatus
 ) {
   if (value === "real" || value === "ready") return "真实插画";
+  if (value === "dynamic-fallback" || value === "fallback") return "动态剧情插画";
   if (value === "demo-art" || value === "mock") return "演示插画";
   return "兜底插画";
 }

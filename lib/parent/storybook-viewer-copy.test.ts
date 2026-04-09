@@ -26,8 +26,8 @@ test("describeStoryBookMode maps live mixed fallback to Chinese labels and summa
     badgeVariant: "warning",
   });
   assert.deepEqual(describeStoryBookMode("fallback"), {
-    label: "演示兜底",
-    summary: "当前走演示兜底，但故事、节奏和交互仍然完整可看。",
+    label: "动态剧情兜底",
+    summary: "当前走蓝图驱动的动态剧情插画与预览朗读，故事、节奏和交互仍然完整可看。",
     badgeVariant: "secondary",
   });
 });
@@ -43,8 +43,8 @@ test("storybook viewer copy maps media status and playback labels to Chinese", (
 
 test("storybook viewer copy maps provider, cache and source badges to Chinese", () => {
   assert.equal(
-    formatStoryBookProviderLabel("image", "vivo-story-image+storybook-asset"),
-    "插画：vivo 实时插画 + 预置绘本资产"
+    formatStoryBookProviderLabel("image", "vivo-story-image+storybook-dynamic-fallback"),
+    "插画：vivo 实时插画 + 动态剧情插画"
   );
   assert.equal(
     formatStoryBookProviderLabel("audio", "storybook-mock-preview"),
@@ -52,6 +52,7 @@ test("storybook viewer copy maps provider, cache and source badges to Chinese", 
   );
   assert.equal(formatStoryBookResponseCache("hit"), "响应缓存命中");
   assert.equal(formatStoryBookAudioDelivery("preview-only"), "字幕预演");
+  assert.equal(formatStoryBookSceneImageDelivery("dynamic-fallback"), "动态剧情插画");
   assert.equal(formatStoryBookSceneImageDelivery("demo-art"), "演示插画");
   assert.equal(formatStoryBookSceneImageDelivery("svg-fallback"), "兜底插画");
   assert.equal(formatStoryBookTransport("remote-brain-proxy"), "FastAPI 实时链路");

@@ -4,12 +4,22 @@ import { BrainCircuit, Database, GitBranchPlus, Network, SearchCheck } from "luc
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AdminConsultationPriorityItem } from "@/lib/agent/admin-consultation";
+import {
+  buildConsultationEvidencePanelModel,
+  getConsultationEvidenceCategoryLabel,
+  getConsultationEvidenceConfidenceLabel,
+  getConsultationEvidenceHumanReviewLabel,
+  type ConsultationEvidenceDisplayGroup,
+  type ConsultationEvidenceDisplayItem,
+  type ConsultationEvidencePanelModel,
+} from "@/lib/consultation/evidence-display";
 import { cn } from "@/lib/utils";
 
+const MOBILE_EVIDENCE_LIMIT = 3;
+const DESKTOP_EVIDENCE_LIMIT = 4;
 const DESKTOP_SUMMARY_LIMIT = 96;
 const DESKTOP_FINDINGS_LIMIT = 2;
 const DESKTOP_EXPLAINABILITY_LIMIT = 2;
-const DESKTOP_EVIDENCE_LIMIT = 2;
 
 function getProviderBadgeVariant(state: AdminConsultationPriorityItem["trace"]["providerState"]) {
   if (state === "real") return "success" as const;
@@ -23,10 +33,31 @@ function getMemoryBadgeVariant(state: AdminConsultationPriorityItem["trace"]["me
   return "outline" as const;
 }
 
+function getEvidenceConfidenceBadgeVariant(
+  confidence: ConsultationEvidenceDisplayItem["item"]["confidence"]
+) {
+  if (confidence === "high") return "success" as const;
+  if (confidence === "medium") return "info" as const;
+  return "outline" as const;
+}
+
+function getEvidenceCategoryBadgeVariant(
+  category: ConsultationEvidenceDisplayItem["item"]["evidenceCategory"]
+) {
+  if (category === "risk_control") return "warning" as const;
+  if (category === "family_communication") return "info" as const;
+  if (category === "development_support") return "success" as const;
+  return "secondary" as const;
+}
+
 function summarizeText(text: string, limit: number) {
   const normalized = text.trim();
   if (normalized.length <= limit) return normalized;
   return `${normalized.slice(0, limit).trimEnd()}...`;
+}
+
+function countEvidenceGroups(groups: ConsultationEvidenceDisplayGroup[]) {
+  return groups.reduce((total, group) => total + group.items.length, 0);
 }
 
 function SectionHeading({
@@ -118,6 +149,128 @@ function DesktopExplainabilityList({
   );
 }
 
+function EvidenceCard({
+  evidence,
+  compact = false,
+}: {
+  evidence: ConsultationEvidenceDisplayItem;
+  compact?: boolean;
+}) {
+  const excerpt =
+    evidence.item.excerpt && evidence.item.excerpt !== evidence.item.summary
+      ? summarizeText(evidence.item.excerpt, compact ? 80 : 120)
+      : null;
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white/90 p-4">
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="info">{evidence.item.sourceLabel}</Badge>
+        <Badge variant={getEvidenceCategoryBadgeVariant(evidence.item.evidenceCategory)}>
+          {getConsultationEvidenceCategoryLabel(evidence.item.evidenceCategory)}
+        </Badge>
+        <Badge variant={getEvidenceConfidenceBadgeVariant(evidence.item.confidence)}>
+          {getConsultationEvidenceConfidenceLabel(evidence.item.confidence)}
+        </Badge>
+        <Badge variant={evidence.item.requiresHumanReview ? "warning" : "success"}>
+          {getConsultationEvidenceHumanReviewLabel(evidence.item.requiresHumanReview)}
+        </Badge>
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-slate-700">{evidence.item.summary}</p>
+      {excerpt ? <p className="mt-2 text-xs leading-5 text-slate-500">{excerpt}</p> : null}
+
+      {evidence.supportLabels.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {evidence.supportLabels.slice(0, compact ? 1 : 2).map((label) => (
+            <Badge key={`${evidence.item.id}-${label}`} variant="outline">
+              {summarizeText(label, compact ? 20 : 28)}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FallbackEvidenceList({
+  model,
+  emptyText,
+}: {
+  model: ConsultationEvidencePanelModel;
+  emptyText: string;
+}) {
+  if (model.mode === "empty") {
+    return <p className="text-sm leading-6 text-slate-500">{emptyText}</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">兼容摘要</Badge>
+        <p className="text-xs text-slate-500">当前 consultation 仍在回退展示旧字段摘要。</p>
+      </div>
+      <div className="space-y-2">
+        {model.fallbackItems.map((item) => (
+          <div
+            key={`${item.source}-${item.detail}`}
+            className="rounded-2xl border border-amber-100 bg-amber-50/80 px-3 py-3"
+          >
+            <p className="text-xs font-medium text-amber-700">{item.label}</p>
+            <p className="mt-1 text-sm leading-6 text-slate-700">{item.detail}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StructuredEvidenceSection({
+  model,
+  emptyText,
+}: {
+  model: ConsultationEvidencePanelModel;
+  emptyText: string;
+}) {
+  if (model.mode !== "structured") {
+    return <FallbackEvidenceList model={model} emptyText={emptyText} />;
+  }
+
+  const remainderCount = countEvidenceGroups(model.groupedRemainder);
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-3">
+        {model.leadItems.map((evidence) => (
+          <EvidenceCard key={evidence.item.id} evidence={evidence} />
+        ))}
+      </div>
+
+      {remainderCount > 0 ? (
+        <details className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+            查看其余 {remainderCount} 条证据
+          </summary>
+          <div className="mt-4 space-y-4 border-t border-slate-200 pt-4">
+            {model.groupedRemainder.map((group) => (
+              <div key={group.category} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Badge variant={getEvidenceCategoryBadgeVariant(group.category)}>{group.label}</Badge>
+                  <p className="text-xs text-slate-500">{group.items.length} 条</p>
+                </div>
+                <div className="space-y-3">
+                  {group.items.map((evidence) => (
+                    <EvidenceCard key={evidence.item.id} evidence={evidence} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ConsultationTraceCard({
   item,
   className,
@@ -131,13 +284,22 @@ export default function ConsultationTraceCard({
   const extraKeyFindings = trace.keyFindings.slice(DESKTOP_FINDINGS_LIMIT);
   const desktopExplainability = trace.explainability.slice(0, DESKTOP_EXPLAINABILITY_LIMIT);
   const extraExplainability = trace.explainability.slice(DESKTOP_EXPLAINABILITY_LIMIT);
-  const desktopEvidence = trace.evidenceHighlights.slice(0, DESKTOP_EVIDENCE_LIMIT);
-  const extraEvidence = trace.evidenceHighlights.slice(DESKTOP_EVIDENCE_LIMIT);
+  const mobileEvidenceModel = buildConsultationEvidencePanelModel({
+    evidenceItems: trace.evidenceItems,
+    evidenceHighlights: trace.evidenceHighlights,
+    explainability: trace.explainability,
+    leadLimit: MOBILE_EVIDENCE_LIMIT,
+  });
+  const desktopEvidenceModel = buildConsultationEvidencePanelModel({
+    evidenceItems: trace.evidenceItems,
+    evidenceHighlights: trace.evidenceHighlights,
+    explainability: trace.explainability,
+    leadLimit: DESKTOP_EVIDENCE_LIMIT,
+  });
   const hasDesktopDetails =
     summaryPreview !== trace.collaborationSummary ||
     extraKeyFindings.length > 0 ||
-    extraExplainability.length > 0 ||
-    extraEvidence.length > 0;
+    extraExplainability.length > 0;
 
   return (
     <Card
@@ -159,7 +321,7 @@ export default function ConsultationTraceCard({
             会诊 Trace 摘要
           </CardTitle>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            园长端只保留可答辩的 explainability、证据与协作状态，不再呈现日志式时间线。
+            园长侧只保留可答辩的 explainability、证据链与协作状态，不展示日志式调试信息。
           </p>
         </div>
       </CardHeader>
@@ -200,6 +362,19 @@ export default function ConsultationTraceCard({
 
           <div className="rounded-2xl border border-slate-100 bg-white p-4">
             <div className="flex items-center gap-2">
+              <SearchCheck className="h-4 w-4 text-amber-500" />
+              <p className="text-sm font-semibold text-slate-900">关键证据链</p>
+            </div>
+            <div className="mt-3">
+              <StructuredEvidenceSection
+                model={mobileEvidenceModel}
+                emptyText="当前没有可展示的证据摘要。"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-white p-4">
+            <div className="flex items-center gap-2">
               <GitBranchPlus className="h-4 w-4 text-indigo-500" />
               <p className="text-sm font-semibold text-slate-900">Explainability</p>
             </div>
@@ -210,15 +385,6 @@ export default function ConsultationTraceCard({
               />
             </div>
           </div>
-
-          {trace.evidenceHighlights.length > 0 ? (
-            <div className="rounded-2xl border border-slate-100 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">证据亮点</p>
-              <div className="mt-3">
-                <FilledList items={trace.evidenceHighlights} emptyText="当前没有证据亮点。" />
-              </div>
-            </div>
-          ) : null}
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-100 bg-white p-4">
@@ -308,18 +474,19 @@ export default function ConsultationTraceCard({
                 </div>
               </div>
 
-              {desktopEvidence.length > 0 ? (
-                <div className="rounded-3xl border border-slate-100 bg-white p-4">
-                  <p className="text-sm font-semibold text-slate-900">证据亮点</p>
-                  <div className="mt-3">
-                    <FilledList
-                      items={desktopEvidence}
-                      emptyText="当前没有证据亮点。"
-                      toneClassName="bg-amber-50/80"
-                    />
-                  </div>
+              <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                <SectionHeading
+                  icon={<SearchCheck className="h-4 w-4 text-amber-500" />}
+                  title="关键证据链"
+                  toneClassName="bg-amber-100 text-amber-700"
+                />
+                <div className="mt-3">
+                  <StructuredEvidenceSection
+                    model={desktopEvidenceModel}
+                    emptyText="当前没有可展示的证据摘要。"
+                  />
                 </div>
-              ) : null}
+              </div>
 
               <div className="rounded-3xl border border-slate-100 bg-white p-4">
                 <p className="text-sm font-semibold text-slate-900">状态面板</p>
@@ -383,19 +550,6 @@ export default function ConsultationTraceCard({
                       <DesktopExplainabilityList
                         items={extraExplainability}
                         emptyText="当前没有额外 explainability 明细。"
-                      />
-                    </div>
-                  </div>
-                ) : null}
-
-                {extraEvidence.length > 0 ? (
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">其余证据亮点</p>
-                    <div className="mt-3">
-                      <FilledList
-                        items={extraEvidence}
-                        emptyText="当前没有证据亮点。"
-                        toneClassName="bg-amber-50/80"
                       />
                     </div>
                   </div>
