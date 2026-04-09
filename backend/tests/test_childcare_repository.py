@@ -75,6 +75,43 @@ def test_childcare_repository_request_snapshot_supports_real_request_scoped_writ
     assert repository.snapshot["mobileDrafts"][0]["childId"] == "c-11"
 
 
+def test_childcare_repository_request_snapshot_history_anchors_to_snapshot_updated_at():
+    snapshot = build_app_snapshot()
+    snapshot["meals"].extend(
+        [
+            {
+                "id": "meal-2",
+                "childId": "c-11",
+                "date": "2026-04-02",
+                "meal": "lunch",
+                "foods": ["米饭", "青菜", "鸡肉"],
+                "intakeLevel": "medium",
+                "preference": "neutral",
+                "waterMl": 140,
+                "nutritionScore": 72,
+            },
+            {
+                "id": "meal-3",
+                "childId": "c-11",
+                "date": "2026-03-30",
+                "meal": "lunch",
+                "foods": ["米饭", "南瓜", "鸡蛋"],
+                "intakeLevel": "medium",
+                "preference": "neutral",
+                "waterMl": 130,
+                "nutritionScore": 70,
+            },
+        ]
+    )
+
+    repository = asyncio.run(ChildcareRepository.create(app_snapshot=snapshot, institution_id=None, database_url=None))
+
+    history = repository.get_child_history("c-11", 7)
+
+    assert history["aggregates"]["mealCount"] == 3
+    assert [record["id"] for record in history["meals"]] == ["meal-1", "meal-2", "meal-3"]
+
+
 def test_childcare_repository_demo_snapshot_expands_to_36_children_and_recent_histories():
     repository = asyncio.run(ChildcareRepository.create(app_snapshot=None, institution_id=None, database_url=None))
 

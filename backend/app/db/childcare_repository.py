@@ -482,6 +482,27 @@ class ChildcareRepository:
 
         return sorted(records, key=_sort_key, reverse=True)
 
+    def _history_anchor(self, child_id: str) -> datetime:
+        candidates: list[datetime] = []
+        snapshot_updated_at = _parse_datetime(self.snapshot.get("updatedAt"))
+        if snapshot_updated_at is not None:
+            candidates.append(snapshot_updated_at)
+
+        for bucket, keys in (
+            ("meals", ("date",)),
+            ("health", ("date",)),
+            ("growth", ("createdAt", "reviewDate")),
+            ("feedback", ("date",)),
+        ):
+            for record in self._child_records(bucket, child_id):
+                for key in keys:
+                    parsed = _parse_datetime(record.get(key))
+                    if parsed is not None:
+                        candidates.append(parsed)
+                        break
+
+        return max(candidates) if candidates else _now()
+
     def get_recent_observations(self, child_id: str, limit: int) -> list[dict[str, Any]]:
         normalized_limit = max(1, min(limit, 20))
         observations: list[dict[str, Any]] = []
@@ -542,7 +563,7 @@ class ChildcareRepository:
 
     def get_child_history(self, child_id: str, days: int) -> dict[str, Any]:
         normalized_days = max(1, min(days, 30))
-        cutoff = _now() - timedelta(days=normalized_days)
+        cutoff = self._history_anchor(child_id) - timedelta(days=normalized_days)
 
         def _recent(records: list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
             items = []

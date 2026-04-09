@@ -1,6 +1,6 @@
 # SmartChildcare Agent Task Registry
 
-更新基准：`2026-04-08`
+更新基准：`2026-04-09`
 
 本文件是 `T1-T31` 的**唯一详细任务主表**。如果它与其他文档冲突，统一按下面优先级处理：
 
@@ -28,8 +28,8 @@
 
 当前初始状态约定：
 
-- `T2 = Done-code-only`
-- `T1`、`T3`、`T4`、`T5`、`T6`、`T7-T31 = Planned`
+- `T1-T7`、`T18`、`T24`、`T25 = Done-code-only`
+- `T8-T17`、`T19-T23`、`T26-T31 = Planned`
 
 ## Wave A-D 与依赖规则
 
@@ -96,7 +96,7 @@
 - 是否适合并行：高
 - 最小验收方式：桌面宽屏下能把 trace 摘要压缩为多段结构化摘要，移动端布局不退化
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要桌面 walkthrough 与录屏再验
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T2｜前端 36 人 demo 数据扩充
@@ -128,7 +128,8 @@
 - 是否适合并行：中
 - 最小验收方式：后端 demo snapshot 的 child 基线与前端 36 人对齐，并能被 trend / consultation / weekly report 正常消费
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-09 更新：backend demo snapshot 已扩到 36 人，并可被 repository / parent trend 定向测试消费；仍缺统一 walkthrough 与录屏再验。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`
 
 ### T4｜36 人 demo seed 矩阵与 QA 文档
@@ -144,7 +145,8 @@
 - 是否适合并行：中
 - 最小验收方式：形成 child ID -> 场景 -> 推荐 walkthrough 的矩阵，并被 demo script / checklist 引用
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要录屏 child QA 再验
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-09 更新：`docs/demo-seed-matrix.md` 与相关 demo script / QA 文档已存在，但仍缺按录屏顺序做一轮 child QA 再验。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`
 
 ### T5｜饮水量字段全链路审计
@@ -160,7 +162,7 @@
 - 是否适合并行：高
 - 最小验收方式：输出 hydration 字段用途清单、影响面、推荐处理策略，并在文档中明确哪些链路会受影响
 - 是否需人工 walkthrough / 真机 / 录屏再验：否
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T6｜饮水量展示降级 / 状态化表达
@@ -176,7 +178,8 @@
 - 是否适合并行：中
 - 最小验收方式：主视角不再高频暴露精确 ml 数值，同时 walkthrough 中的 copy 更可信
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏再验
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-09 更新：主视角补水表达已切到状态化文案；底层 hydration 数据仍保留给 trend / consultation / aggregation 链路。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ---
@@ -190,13 +193,14 @@
 - 问题定义：家长上传医院、过敏、复查、服药等外部健康资料后，系统当前缺少统一入口把这些资料接进托育主系统。
 - 目标效果：建立最小上传入口、Next route、FastAPI service 与统一 request/response schema，为后续 OCR 和动作映射打底。
 - 主要触达层：Parent / Teacher 入口、Next route、backend service、types
-- 建议触达模块：`app/parent/page.tsx`、`app/teacher/page.tsx`、现有 `/api/ai/*` 桥接层、`backend/app/schemas/multimodal.py`、`backend/app/services/orchestrator.py`、`backend/app/services/memory_service.py`
+- 建议触达模块：`app/teacher/health-file-bridge/page.tsx`、`app/api/ai/health-file-bridge/route.ts`、`lib/agent/health-file-bridge.ts`、`backend/app/schemas/health_file_bridge.py`、`backend/app/services/health_file_bridge_service.py`
 - 推荐前置依赖：无
 - 推荐 subagents：`repo_mapper + frontend_architect + backend_architect + reviewer_tester`
 - 是否适合并行：中
 - 最小验收方式：上传入口、bridge schema、服务端入口三者打通，并能落到统一结构
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-09 更新：teacher 入口、Next route、本地 fallback 与 backend schema/service skeleton 已落地；OCR / writeback / live escalation 继续留给 `T8-T10`。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T8｜外部健康文件桥接助手：OCR / 多模态抽取

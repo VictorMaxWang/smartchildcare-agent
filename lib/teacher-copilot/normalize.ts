@@ -66,6 +66,16 @@ function readSectionRecord(source: unknown, key: string) {
   return source[key];
 }
 
+function readSectionRecordAny(source: unknown, ...keys: string[]) {
+  if (!isRecord(source)) return undefined;
+  for (const key of keys) {
+    if (key in source) {
+      return source[key];
+    }
+  }
+  return undefined;
+}
+
 function parseHint(value: unknown, index: number): TeacherCopilotHint | null {
   if (typeof value === "string") {
     return {
@@ -99,6 +109,8 @@ function parseHint(value: unknown, index: number): TeacherCopilotHint | null {
     title,
     detail:
       readString(value.detail) ??
+      readString(value.reason) ??
+      readString(value.suggested_prompt) ??
       readString(value.description) ??
       readString(value.body) ??
       readString(value.message),
@@ -179,14 +191,30 @@ function parseSOP(value: unknown): TeacherCopilotSOP | null {
     title,
     summary:
       readString(value.summary) ??
+      readString(value.reason) ??
       readString(value.description) ??
       readString(value.body),
     durationLabel:
       readString(value.durationLabel) ??
       readString(value.duration) ??
+      readString(value.duration_text) ??
       readString(value.timeHint),
     steps,
   };
+}
+
+function parseSOPValue(value: unknown): TeacherCopilotSOP | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const parsed = parseSOP(item);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
+  return parseSOP(value);
 }
 
 function parseCommunicationScript(value: unknown): TeacherCopilotCommunicationScript | null {
@@ -213,11 +241,15 @@ function parseCommunicationScript(value: unknown): TeacherCopilotCommunicationSc
 
   const script = {
     title,
-    opening: readString(value.opening) ?? readString(value.open),
+    opening:
+      readString(value.opening) ??
+      readString(value.open) ??
+      readString(value.short_message),
     situation:
       readString(value.situation) ??
       readString(value.context) ??
-      readString(value.observation),
+      readString(value.observation) ??
+      readString(value.calm_explanation),
     ask:
       readString(value.ask) ??
       readString(value.request) ??
@@ -225,7 +257,8 @@ function parseCommunicationScript(value: unknown): TeacherCopilotCommunicationSc
     closing:
       readString(value.closing) ??
       readString(value.wrapUp) ??
-      readString(value.followUp),
+      readString(value.followUp) ??
+      readString(value.follow_up_reminder),
     bullets,
   } satisfies TeacherCopilotCommunicationScript;
 
@@ -290,16 +323,38 @@ export function normalizeTeacherCopilotPayload(source: unknown): TeacherCopilotP
 
   const nestedCopilot = readSectionRecord(source, "copilot");
   const hints = firstHints(
-    parseHints(readSectionRecord(source, "recordCompletionHints")),
-    parseHints(readSectionRecord(nestedCopilot, "recordCompletionHints"))
+    parseHints(
+      readSectionRecordAny(source, "recordCompletionHints", "record_completion_hints")
+    ),
+    parseHints(
+      readSectionRecordAny(
+        nestedCopilot,
+        "recordCompletionHints",
+        "record_completion_hints"
+      )
+    )
   );
   const sop = firstValue(
-    parseSOP(readSectionRecord(source, "microTrainingSOP")),
-    parseSOP(readSectionRecord(nestedCopilot, "microTrainingSOP"))
+    parseSOPValue(readSectionRecordAny(source, "microTrainingSOP", "micro_training_sop")),
+    parseSOPValue(
+      readSectionRecordAny(nestedCopilot, "microTrainingSOP", "micro_training_sop")
+    )
   );
   const script = firstValue(
-    parseCommunicationScript(readSectionRecord(source, "parentCommunicationScript")),
-    parseCommunicationScript(readSectionRecord(nestedCopilot, "parentCommunicationScript"))
+    parseCommunicationScript(
+      readSectionRecordAny(
+        source,
+        "parentCommunicationScript",
+        "parent_communication_script"
+      )
+    ),
+    parseCommunicationScript(
+      readSectionRecordAny(
+        nestedCopilot,
+        "parentCommunicationScript",
+        "parent_communication_script"
+      )
+    )
   );
 
   return cleanupCopilotPayload({
