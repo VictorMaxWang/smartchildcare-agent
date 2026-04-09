@@ -137,6 +137,7 @@ test("buildAdminConsultationWorkspaceView keeps board-ready fallback state stabl
         },
         explainability: [{ label: "关键发现", detail: "需要家园同步观察" }],
         nextCheckpoints: ["明天晨检复看"],
+        evidenceItems: [],
         coordinatorSummary: {
           finalConclusion: "建议今天完成协同",
           riskLevel: "high",

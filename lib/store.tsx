@@ -1671,7 +1671,7 @@ const INITIAL_GROWTH: GrowthRecord[] = [
     recorderRole: "教师",
     category: "独立进食",
     tags: ["饮水少", "需提醒"],
-    description: "午餐进食正常但全天饮水不足 100ml，需多次提醒才喝水。",
+    description: "午餐进食正常，但全天补水偏少，需多次提醒才愿意喝水。",
     needsAttention: true,
     followUpAction: "设置半小时饮水提醒，使用有刻度的趣味水杯",
     reviewDate: shiftDate(DEMO_TEMPLATE_TODAY, 2),

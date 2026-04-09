@@ -1,3 +1,12 @@
+import type { TeacherCopilotPayload } from "@/lib/teacher-copilot/types";
+import {
+  buildTeacherVoiceCopilotCompatPayload,
+  buildTeacherVoiceCopilotPayload,
+  type TeacherVoiceMicroTrainingSOP,
+  type TeacherVoiceParentCommunicationScript,
+  type TeacherVoiceRecordCompletionHint,
+} from "@/lib/ai/teacher-voice-copilot";
+
 export type TeacherVoiceCategory =
   | "DIET"
   | "EMOTION"
@@ -51,6 +60,13 @@ export interface TeacherVoiceUnderstandResponse {
   router_result: TeacherVoiceRouterResult;
   draft_items: TeacherVoiceDraftItem[];
   warnings: string[];
+  record_completion_hints: TeacherVoiceRecordCompletionHint[];
+  micro_training_sop: TeacherVoiceMicroTrainingSOP[];
+  parent_communication_script: TeacherVoiceParentCommunicationScript;
+  copilot?: TeacherCopilotPayload | Record<string, unknown> | null;
+  recordCompletionHints?: TeacherCopilotPayload["recordCompletionHints"];
+  microTrainingSOP?: TeacherCopilotPayload["microTrainingSOP"];
+  parentCommunicationScript?: TeacherCopilotPayload["parentCommunicationScript"];
   source: {
     asr: string;
     router: string;
@@ -420,21 +436,36 @@ export function buildTeacherVoiceUnderstandFallback(
   });
   const chaining = buildDraftItems(router.router_result);
   const warnings = uniqueItems([...router.warnings, ...chaining.warnings]);
+  const transcriptPayload: TeacherVoiceTranscriptPayload = {
+    text: transcript,
+    source: input.asrSource,
+    confidence: input.asrConfidence,
+    provider: input.asrProvider,
+    mode: input.asrMode,
+    fallback: input.asrFallback,
+    raw: input.asrRaw ?? {},
+    meta: input.asrMeta ?? {},
+  };
+  const copilotPayload = buildTeacherVoiceCopilotPayload({
+    transcript: {
+      text: transcriptPayload.text,
+      confidence: transcriptPayload.confidence,
+      fallback: transcriptPayload.fallback,
+    },
+    draftItems: chaining.draftItems,
+    warnings,
+  });
+  const compatCopilotPayload = buildTeacherVoiceCopilotCompatPayload(
+    copilotPayload
+  );
 
   return {
-    transcript: {
-      text: transcript,
-      source: input.asrSource,
-      confidence: input.asrConfidence,
-      provider: input.asrProvider,
-      mode: input.asrMode,
-      fallback: input.asrFallback,
-      raw: input.asrRaw ?? {},
-      meta: input.asrMeta ?? {},
-    },
+    transcript: transcriptPayload,
     router_result: router.router_result,
     draft_items: chaining.draftItems,
     warnings,
+    ...copilotPayload,
+    ...compatCopilotPayload,
     source: {
       asr: input.asrSource,
       router: "rule",

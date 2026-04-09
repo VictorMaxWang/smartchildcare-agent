@@ -36,7 +36,7 @@ INTENT_LABELS = {
 }
 FOLLOW_UP_HINTS = {
     "emotion": "接下来可以继续看入园分离、午睡前情绪和安抚时间是否持续缩短。",
-    "diet": "接下来可以继续看进餐完成度、喝水量和对蔬菜、蛋白的接受度是否更稳定。",
+    "diet": "接下来可以继续看进餐完成度、补水状态和对蔬菜、蛋白的接受度是否更稳定。",
     "sleep": "接下来可以继续看入睡时长、午睡前波动和夜间睡眠反馈是否连续平稳。",
     "health": "接下来可以继续看晨检异常、体温波动和身体不适描述是否继续减少。",
     "growth_overall": "接下来可以继续看情绪、饮食、睡眠和健康四个维度是否一起保持稳定。",
@@ -45,7 +45,7 @@ SERIES_LABELS = {
     "emotion_calm_score": ("情绪平稳度", "score", "line"),
     "distress_signals": ("波动信号", "count", "bar"),
     "diet_quality_score": ("饮食质量", "score", "line"),
-    "hydration_ml": ("喝水量", "ml", "bar"),
+    "hydration_ml": ("补水趋势", "ml", "bar"),
     "picky_signals": ("挑食信号", "count", "bar"),
     "sleep_stability_score": ("睡眠稳定度", "score", "line"),
     "sleep_distress_signals": ("睡眠波动信号", "count", "bar"),

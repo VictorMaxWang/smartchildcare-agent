@@ -393,6 +393,7 @@ export default function TeacherAgentPage() {
         initialExpandedRecordId: readTeacherDraftConfirmationState(
           selectedStructuredDraftSource.payload
         )?.activeRecordId,
+        copilotSource: selectedStructuredDraftSource.payload,
       };
     }
 
@@ -413,6 +414,7 @@ export default function TeacherAgentPage() {
         initialExpandedRecordId: readTeacherDraftConfirmationState(
           fallbackStructuredPayload
         )?.activeRecordId,
+        copilotSource: fallbackStructuredPayload,
       };
     }
 
@@ -859,6 +861,7 @@ export default function TeacherAgentPage() {
                 sourceModeLabel={draftConfirmationSource?.sourceModeLabel}
                 sourceSyncStatusLabel={draftConfirmationSource?.sourceSyncStatusLabel}
                 sourceTranscript={draftConfirmationSource?.transcript}
+                copilotSource={draftConfirmationSource?.copilotSource}
                 seed={draftConfirmationSource?.seed ?? null}
                 persistAdapter={teacherDraftPersistAdapter}
                 initialExpandedRecordId={draftConfirmationSource?.initialExpandedRecordId}

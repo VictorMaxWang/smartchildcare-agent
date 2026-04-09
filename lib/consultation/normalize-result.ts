@@ -1,4 +1,5 @@
 import type { HighRiskConsultationResult } from "@/lib/ai/types";
+import { buildConsultationEvidenceItems } from "@/lib/consultation/evidence";
 
 type NormalizationOptions = {
   brainProvider?: string;
@@ -327,6 +328,7 @@ function validateNormalizedResult(result: Record<string, unknown>) {
     "followUp48h",
     "nextCheckpoints",
     "explainability",
+    "evidenceItems",
   ].forEach((key) => {
     if (!Array.isArray(result[key])) issues.push(key);
   });
@@ -381,6 +383,21 @@ export function normalizeHighRiskConsultationResult(
     keyFindings,
     coordinatorSummary.finalConclusion
   );
+  const evidenceItems = buildConsultationEvidenceItems({
+    consultationId: asString(result.consultationId),
+    generatedAt: asString(result.generatedAt),
+    keyFindings,
+    triggerReasons,
+    todayInSchoolActions,
+    tonightAtHomeActions,
+    followUp48h,
+    explainability,
+    continuityNotes,
+    memoryMeta,
+    providerTrace,
+    multimodalNotes: asRecord(result.multimodalNotes),
+    rawEvidenceItems: result.evidenceItems,
+  });
 
   const normalized: Record<string, unknown> = {
     ...result,
@@ -401,6 +418,7 @@ export function normalizeHighRiskConsultationResult(
     followUp48h,
     nextCheckpoints,
     continuityNotes,
+    evidenceItems,
     participants,
     shouldEscalateToAdmin: coordinatorSummary.shouldEscalateToAdmin,
     coordinatorSummary,
@@ -424,6 +442,7 @@ export function normalizeHighRiskConsultationResult(
       agentParticipants: participants.map((item) => item.label),
       coordinationConclusion: coordinatorSummary.finalConclusion,
       keyFindings,
+      evidenceCount: evidenceItems.length,
     },
     explainability,
     reviewIn48h:

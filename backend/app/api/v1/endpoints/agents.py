@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
+from app.schemas.health_file_bridge import HealthFileBridgeRequest, HealthFileBridgeResponse
 from app.schemas.parent_message import ParentMessageReflexionRequest, ParentMessageReflexionResponse
 from app.schemas.parent_storybook import ParentStoryBookRequest, ParentStoryBookResponse
 from app.schemas.parent_trend import ParentTrendQueryRequest, ParentTrendQueryResponse
@@ -64,6 +65,18 @@ async def parent_storybook(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return ParentStoryBookResponse.model_validate(result)
+
+
+@router.post("/agents/health-file-bridge", response_model=HealthFileBridgeResponse)
+async def health_file_bridge(
+    payload: HealthFileBridgeRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+):
+    try:
+        result = await orchestrator.health_file_bridge(payload.model_dump(mode="json", by_alias=True))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return HealthFileBridgeResponse.model_validate(result)
 
 
 @router.get("/agents/parent/storybook/media/{media_key}")

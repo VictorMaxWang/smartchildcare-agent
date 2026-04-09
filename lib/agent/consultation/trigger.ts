@@ -1,5 +1,6 @@
 import type { AiRiskLevel, ConsultationTrigger, ConsultationTriggerType } from "@/lib/ai/types";
 import type { ConsultationInput } from "@/lib/agent/consultation/input";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 export interface ConsultationTriggerResult {
   shouldTrigger: boolean;
@@ -41,6 +42,7 @@ export function detectConsultationTrigger(input: ConsultationInput): Consultatio
   const reviewRisk = input.summary.growth.pendingReviewCount > 0;
   const growthRisk = input.summary.growth.attentionCount >= 2;
   const abnormalDays = countAbnormalDays(input);
+  const hydrationDisplay = getHydrationDisplayState(input.summary.meals.hydrationAvg);
 
   if ([healthRisk, dietRisk, reviewRisk || growthRisk].filter(Boolean).length >= 2) {
     triggers.push({
@@ -49,7 +51,7 @@ export function detectConsultationTrigger(input: ConsultationInput): Consultatio
       score: 88,
       evidence: takeUnique([
         healthRisk ? `晨检异常 ${input.summary.health.abnormalCount} 次` : undefined,
-        dietRisk ? `近 7 天平均饮水 ${input.summary.meals.hydrationAvg}ml` : undefined,
+        dietRisk ? `近 7 天补水状态 ${hydrationDisplay.statusLabel}` : undefined,
         reviewRisk ? `待复查 ${input.summary.growth.pendingReviewCount} 项` : undefined,
         growthRisk ? `持续关注观察 ${input.summary.growth.attentionCount} 条` : undefined,
       ]),

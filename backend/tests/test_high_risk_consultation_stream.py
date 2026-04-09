@@ -152,6 +152,12 @@ def test_high_risk_consultation_stream_uses_memory_and_canonical_done(tmp_path, 
     assert done_data["result"]["traceMeta"]["memory"]["usedSources"]
     assert done_data["result"]["traceMeta"]["transport"] == "fastapi-brain"
     assert done_data["result"]["consultationId"]
+    assert done_data["result"]["evidenceItems"]
+    assert any(
+        item["sourceType"] == "derived_explainability"
+        and item["requiresHumanReview"] is True
+        for item in done_data["result"]["evidenceItems"]
+    )
     assert [item["label"] for item in done_data["result"]["explainability"][:3]] == [
         "Agent 参与",
         "关键发现",

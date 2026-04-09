@@ -35,6 +35,12 @@ class _FakeWebSocket:
         return self.frames.pop(0)
 
 
+class _SendFirstWebSocket(_FakeWebSocket):
+    def recv(self, timeout=None):
+        assert self.sent_messages, "recv called before send"
+        return super().recv(timeout=timeout)
+
+
 class _FakeResponse:
     def __init__(self, *, status_code: int, headers: dict[str, str] | None = None, body: bytes | None = None):
         self.status_code = status_code
@@ -57,13 +63,6 @@ def _settings(**overrides) -> Settings:
         "storybook_tts_voice": "yige",
         "storybook_tts_fallback_engineid": "short_audio_synthesis_jovi",
         "storybook_tts_fallback_voice": "vivoHelper",
-        "storybook_tts_model": "unknown",
-        "storybook_tts_product": "unknown",
-        "storybook_tts_package": "unknown",
-        "storybook_tts_client_version": "unknown",
-        "storybook_tts_system_version": "unknown",
-        "storybook_tts_sdk_version": "unknown",
-        "storybook_tts_android_version": "unknown",
         "request_timeout_seconds": 1.0,
     }
     base.update(overrides)
@@ -82,9 +81,8 @@ def test_vivo_tts_provider_returns_wav_data_url_with_signed_headers(monkeypatch:
     monkeypatch.setattr("app.providers.vivo_tts.time.time", lambda: 1_700_000_000)
 
     def fake_connect(url, **kwargs):
-        websocket = _FakeWebSocket(
+        websocket = _SendFirstWebSocket(
             [
-                {"error_code": 0, "error_msg": "connect success"},
                 {
                     "error_code": 0,
                     "data": {
@@ -113,7 +111,7 @@ def test_vivo_tts_provider_returns_wav_data_url_with_signed_headers(monkeypatch:
     monkeypatch.setattr("app.providers.vivo_tts.connect", fake_connect)
 
     result = VivoTtsProvider(_settings()).synthesize(
-        text="浠婂ぉ鎰挎剰涓诲姩鍜岃€佸笀鎵撴嫑鍛笺€?",
+        text="hello story",
         child_id="child-1",
         story_id="storybook-1",
         scene_index=0,
@@ -137,8 +135,9 @@ def test_vivo_tts_provider_returns_wav_data_url_with_signed_headers(monkeypatch:
     assert parsed.netloc == "api-ai.vivo.com.cn"
     assert parsed.path == TTS_PATH
     assert query["engineid"] == "short_audio_synthesis_jovi"
-    assert query["package"] == "unknown"
+    assert query["system_time"] == "1700000000"
     assert len(query["user_id"]) == 32
+    assert set(query) == {"engineid", "system_time", "user_id"}
     assert "requestId" not in query
     assert captured["headers"] == expected_headers
     assert "Authorization" not in captured["headers"]
@@ -159,12 +158,37 @@ def test_vivo_tts_provider_returns_wav_data_url_with_signed_headers(monkeypatch:
     assert result["requestId"]
 
 
-def test_vivo_tts_provider_normalizes_blank_required_query_metadata_to_unknown(monkeypatch: pytest.MonkeyPatch):
+def test_vivo_tts_provider_uses_minimal_handshake_query(monkeypatch: pytest.MonkeyPatch):
     captured: dict[str, object] = {}
 
     def fake_connect(url, **kwargs):
         del kwargs
         captured["url"] = url
+        return _FakeWebSocket(
+            [
+                {
+                    "error_code": 0,
+                    "data": {
+                        "audio": base64.b64encode(b"\x01\x02").decode("utf-8"),
+                        "status": 2,
+                        "progress": 100,
+                        "slice": 0,
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("app.providers.vivo_tts.connect", fake_connect)
+
+    VivoTtsProvider(_settings()).synthesize(text="bedtime story", child_id="child-1", story_id="storybook-1")
+
+    query = _single_value_query(captured["url"])
+    assert set(query) == {"engineid", "system_time", "user_id"}
+
+
+def test_vivo_tts_provider_ignores_ack_frames_without_data(monkeypatch: pytest.MonkeyPatch):
+    def fake_connect(url, **kwargs):
+        del url, kwargs
         return _FakeWebSocket(
             [
                 {"error_code": 0, "error_msg": "connect success"},
@@ -182,26 +206,10 @@ def test_vivo_tts_provider_normalizes_blank_required_query_metadata_to_unknown(m
 
     monkeypatch.setattr("app.providers.vivo_tts.connect", fake_connect)
 
-    VivoTtsProvider(
-        _settings(
-            storybook_tts_model="  ",
-            storybook_tts_product="",
-            storybook_tts_package="",
-            storybook_tts_client_version="",
-            storybook_tts_system_version="",
-            storybook_tts_sdk_version="",
-            storybook_tts_android_version="",
-        )
-    ).synthesize(text="鏅氬畨鏁呬簨", child_id="child-1", story_id="storybook-1")
+    result = VivoTtsProvider(_settings()).synthesize(text="ack frame", child_id="child-1", story_id="storybook-1")
 
-    query = _single_value_query(captured["url"])
-    assert query["model"] == "unknown"
-    assert query["product"] == "unknown"
-    assert query["package"] == "unknown"
-    assert query["client_version"] == "unknown"
-    assert query["system_version"] == "unknown"
-    assert query["sdk_version"] == "unknown"
-    assert query["android_version"] == "unknown"
+    assert result["engineId"] == "short_audio_synthesis_jovi"
+    assert result["voiceName"] == "yige"
 
 
 def test_vivo_tts_provider_includes_speed_and_volume_when_non_default(monkeypatch: pytest.MonkeyPatch):
@@ -210,7 +218,6 @@ def test_vivo_tts_provider_includes_speed_and_volume_when_non_default(monkeypatc
     def fake_connect(url, **kwargs):
         websocket = _FakeWebSocket(
             [
-                {"error_code": 0, "error_msg": "connect success"},
                 {
                     "error_code": 0,
                     "data": {
@@ -228,7 +235,7 @@ def test_vivo_tts_provider_includes_speed_and_volume_when_non_default(monkeypatc
     monkeypatch.setattr("app.providers.vivo_tts.connect", fake_connect)
 
     VivoTtsProvider(_settings(storybook_tts_speed=60, storybook_tts_volume=30)).synthesize(
-        text="鏅氬畨鏁呬簨",
+        text="speed volume",
         child_id="child-1",
         story_id="storybook-1",
     )
@@ -243,7 +250,6 @@ def test_vivo_tts_provider_raises_on_frame_error(monkeypatch: pytest.MonkeyPatch
         del url, kwargs
         return _FakeWebSocket(
             [
-                {"error_code": 0, "error_msg": "connect success"},
                 {"error_code": 12345, "error_msg": "bad frame"},
             ]
         )
@@ -251,7 +257,7 @@ def test_vivo_tts_provider_raises_on_frame_error(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("app.providers.vivo_tts.connect", fake_connect)
 
     with pytest.raises(ProviderResponseError, match="synthesis failed"):
-        VivoTtsProvider(_settings()).synthesize(text="鏅氬畨鏁呬簨", child_id="child-1", story_id="storybook-1")
+        VivoTtsProvider(_settings()).synthesize(text="frame error", child_id="child-1", story_id="storybook-1")
 
 
 def test_vivo_tts_provider_raises_when_audio_is_empty(monkeypatch: pytest.MonkeyPatch):
@@ -259,7 +265,6 @@ def test_vivo_tts_provider_raises_when_audio_is_empty(monkeypatch: pytest.Monkey
         del url, kwargs
         return _FakeWebSocket(
             [
-                {"error_code": 0, "error_msg": "connect success"},
                 {"error_code": 0, "data": {"status": 2, "progress": 100, "slice": 1}},
             ]
         )
@@ -267,7 +272,7 @@ def test_vivo_tts_provider_raises_when_audio_is_empty(monkeypatch: pytest.Monkey
     monkeypatch.setattr("app.providers.vivo_tts.connect", fake_connect)
 
     with pytest.raises(ProviderResponseError, match="without audio data"):
-        VivoTtsProvider(_settings()).synthesize(text="鏅氬畨鏁呬簨", child_id="child-1", story_id="storybook-1")
+        VivoTtsProvider(_settings()).synthesize(text="no audio", child_id="child-1", story_id="storybook-1")
 
 
 def test_vivo_tts_provider_logs_handshake_400_with_redacted_context(
@@ -282,7 +287,7 @@ def test_vivo_tts_provider_logs_handshake_400_with_redacted_context(
             _FakeResponse(
                 status_code=400,
                 headers={"Content-Type": "application/json", "X-Request-Id": "req-123"},
-                body=b'{"error_code":10000,"error_msg":"package not exist"}',
+                body=b'{"error_code":10000,"error_msg":"package not exist","trace_id":"trace-123"}',
             )
         )
 
@@ -295,7 +300,7 @@ def test_vivo_tts_provider_logs_handshake_400_with_redacted_context(
                 storybook_tts_fallback_engineid="short_audio_synthesis_jovi",
                 storybook_tts_fallback_voice="yige",
             )
-        ).synthesize(text="鏅氬畨鏁呬簨", child_id="child-1", story_id="storybook-1")
+        ).synthesize(text="handshake 400", child_id="child-1", story_id="storybook-1")
 
     message = str(exc.value)
     assert "profile=primary" in message
@@ -307,6 +312,8 @@ def test_vivo_tts_provider_logs_handshake_400_with_redacted_context(
     assert "wss://api-ai.vivo.com.cn/tts?" in caplog.text
     assert "package not exist" in caplog.text
     assert '"profile": "primary"' in caplog.text
+    assert '"query_keys": ["engineid", "system_time", "user_id"]' in caplog.text
+    assert '"trace_id": "trace-123"' in caplog.text
 
 
 def test_vivo_tts_provider_falls_back_to_secondary_voice_profile(monkeypatch: pytest.MonkeyPatch):
@@ -319,7 +326,6 @@ def test_vivo_tts_provider_falls_back_to_secondary_voice_profile(monkeypatch: py
             raise ProviderResponseError("primary profile rejected")
         return _FakeWebSocket(
             [
-                {"error_code": 0, "error_msg": "connect success"},
                 {
                     "error_code": 0,
                     "data": {
@@ -341,7 +347,7 @@ def test_vivo_tts_provider_falls_back_to_secondary_voice_profile(monkeypatch: py
             storybook_tts_fallback_engineid="short_audio_synthesis_jovi",
             storybook_tts_fallback_voice="vivoHelper",
         )
-    ).synthesize(text="鏅氬畨鏁呬簨", child_id="child-1", story_id="storybook-1")
+    ).synthesize(text="fallback", child_id="child-1", story_id="storybook-1")
 
     assert len(calls) == 2
     assert "engineid=short_audio_synthesis_jovi" in calls[1]

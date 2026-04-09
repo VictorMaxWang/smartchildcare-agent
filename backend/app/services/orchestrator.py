@@ -29,6 +29,7 @@ from app.memory.vector_store import SimpleVectorStore
 from app.providers.mock import build_mock_diet_evaluation, build_mock_vision_meal
 from app.services.memory_service import MemoryService
 from app.services.admin_consultation_feed import list_high_risk_consultation_feed
+from app.services.health_file_bridge_service import run_health_file_bridge
 from app.services.high_risk_consultation_contract import (
     build_high_risk_done_event,
     normalize_high_risk_consultation_result,
@@ -472,6 +473,15 @@ class Orchestrator:
             runner=run_parent_storybook,
             node_name="parent-storybook",
             snapshot_type="parent-storybook-result",
+        )
+
+    async def health_file_bridge(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._run_with_trace(
+            task="health-file-bridge",
+            payload=payload,
+            runner=run_health_file_bridge,
+            node_name="health-file-bridge",
+            snapshot_type="health-file-bridge-result",
         )
 
     async def teacher_run(self, payload: dict[str, Any]) -> dict[str, Any]:

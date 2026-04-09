@@ -117,6 +117,30 @@ def test_teacher_run():
     assert "interventionCard" in body
 
 
+def test_health_file_bridge():
+    response = client.post(
+        "/api/v1/agents/health-file-bridge",
+        json={
+            "childId": "c1",
+            "sourceRole": "teacher",
+            "files": [
+                {
+                    "name": "outside-note.pdf",
+                    "mimeType": "application/pdf",
+                    "previewText": "发热 38.0，明早复查",
+                }
+            ],
+            "requestSource": "agents-mock-smoke",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "backend-rule"
+    assert body["mock"] is True
+    assert body["extractedFacts"]
+    assert body["schoolTodayActions"]
+
+
 def test_admin_run():
     response = client.post(
         "/api/v1/agents/admin/run",
@@ -148,6 +172,30 @@ def test_weekly_report():
     assert response.json()["source"] == "mock"
 
 
+def test_health_file_bridge():
+    response = client.post(
+        "/api/v1/agents/health-file-bridge",
+        json={
+            "childId": "child-bridge-1",
+            "sourceRole": "teacher",
+            "files": [
+                {
+                    "fileId": "file-1",
+                    "name": "clinic-note.pdf",
+                    "mimeType": "application/pdf",
+                }
+            ],
+            "requestSource": "pytest-agents-mock",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "backend-rule"
+    assert body["mock"] is True
+    assert body["schoolTodayActions"]
+    assert body["writebackSuggestion"]["status"] == "placeholder"
+
+
 def test_weekly_report_sparse_payload_hydrates_demo_context():
     response = client.post("/api/v1/agents/reports/weekly", json={})
     assert response.status_code == 200
@@ -177,6 +225,12 @@ def test_high_risk_consultation():
     assert "memoryMeta" in body
     assert "traceMeta" in body
     assert "model" in body
+    assert body["evidenceItems"]
+    assert any(
+        item["sourceType"] == "derived_explainability"
+        and item["requiresHumanReview"] is True
+        for item in body["evidenceItems"]
+    )
     assert isinstance(body["realProvider"], bool)
     assert isinstance(body["fallback"], bool)
     assert body["traceMeta"]["memory"]["backend"]

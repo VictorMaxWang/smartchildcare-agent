@@ -1,9 +1,11 @@
 import type { InterventionCard } from "@/lib/agent/intervention-card";
 import type {
+  ConsultationEvidenceItem,
   ExplainabilityItem,
   HighRiskConsultationResult,
   MemoryContextMeta,
 } from "@/lib/ai/types";
+import { isConsultationEvidenceItem } from "@/lib/consultation/evidence";
 
 export type ConsultationStageKey =
   | "long_term_profile"
@@ -153,6 +155,7 @@ export interface ConsultationStageView {
   source?: string;
   summaryCard?: ConsultationSummaryCardData;
   followUpCard?: FollowUp48hCardData;
+  evidenceItems: ConsultationEvidenceItem[];
   evidence: ConsultationTraceEvidence[];
   callout?: ConsultationTraceCallout | null;
   expandedByDefault: boolean;
@@ -173,6 +176,7 @@ export interface ConsultationTraceViewModel {
   providerTrace: ConsultationProviderTrace | null;
   memoryMeta: MemoryContextMeta | Record<string, unknown> | null;
   traceMemoryMeta: Record<string, unknown> | null;
+  evidenceItems: ConsultationEvidenceItem[];
   stages: ConsultationStageView[];
   callouts: ConsultationTraceCallout[];
   syncTargets: string[];
@@ -224,6 +228,10 @@ function isExplainabilityArray(value: unknown): value is ExplainabilityItem[] {
         isNonEmptyString(item.detail)
     )
   );
+}
+
+function isEvidenceItemArray(value: unknown): value is ConsultationEvidenceItem[] {
+  return Array.isArray(value) && value.every((item) => isConsultationEvidenceItem(item));
 }
 
 function isProviderTraceLike(value: unknown) {
@@ -440,6 +448,7 @@ export function getConsultationResultIssues(value: unknown) {
   if (!isStringArray(value.tonightAtHomeActions)) issues.push("tonightAtHomeActions");
   if (!isStringArray(value.followUp48h)) issues.push("followUp48h");
   if (!isExplainabilityArray(value.explainability)) issues.push("explainability");
+  if (!isEvidenceItemArray(value.evidenceItems)) issues.push("evidenceItems");
   if (!isBoolean(value.shouldEscalateToAdmin)) issues.push("shouldEscalateToAdmin");
   if (!isCoordinatorSummaryLike(value.coordinatorSummary)) issues.push("coordinatorSummary");
   if (!isDirectorDecisionCardLike(value.directorDecisionCard)) issues.push("directorDecisionCard");

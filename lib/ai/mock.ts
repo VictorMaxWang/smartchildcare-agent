@@ -7,6 +7,7 @@ import type {
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 function riskFromSnapshot(snapshot: ChildSuggestionSnapshot): "low" | "medium" | "high" {
   const { health, meals, growth } = snapshot.summary;
@@ -27,12 +28,13 @@ function riskFromSnapshot(snapshot: ChildSuggestionSnapshot): "low" | "medium" |
 export function buildMockAiSuggestion(snapshot: ChildSuggestionSnapshot): AiSuggestionResponse {
   const riskLevel = riskFromSnapshot(snapshot);
   const { child, summary } = snapshot;
+  const hydrationDisplay = getHydrationDisplayState(summary.meals.hydrationAvg);
 
   return {
     riskLevel,
     summary:
       `${child.name} 近 7 天在饮食、成长和家园反馈上已形成连续记录，` +
-      `${summary.meals.hydrationAvg < 120 ? "当前饮水偏低需要重点提醒，" : "饮水整体较稳定，"}` +
+      `${hydrationDisplay.tone === "warning" ? "当前补水状态需要继续关注，" : "补水整体较稳定，"}` +
       `${summary.growth.attentionCount > 0 ? "且存在需要持续跟进的成长观察项，" : "成长记录整体平稳，"}` +
       "建议围绕作息、饮水和家园协同继续做更细化的个性化跟进。",
     highlights: [
@@ -44,9 +46,9 @@ export function buildMockAiSuggestion(snapshot: ChildSuggestionSnapshot): AiSugg
       summary.health.abnormalCount > 0
         ? `近 7 天发现 ${summary.health.abnormalCount} 次健康异常记录，建议加强晨检复盘。`
         : "近 7 天未见明显健康异常，可继续保持当前节奏。",
-      summary.meals.hydrationAvg < 120
-        ? `平均饮水量约 ${summary.meals.hydrationAvg}ml，建议提升日间饮水提醒频次。`
-        : `平均饮水量约 ${summary.meals.hydrationAvg}ml，处于可接受区间。`,
+      hydrationDisplay.tone === "warning"
+        ? `近 7 天补水状态为${hydrationDisplay.statusLabel}，建议提升日间补水提醒频次。`
+        : `近 7 天补水状态为${hydrationDisplay.statusLabel}，可继续保持当前节奏。`,
       summary.growth.pendingReviewCount > 0
         ? `仍有 ${summary.growth.pendingReviewCount} 条成长记录待复查，建议本周完成闭环。`
         : "成长观察复查状态整体较好。",

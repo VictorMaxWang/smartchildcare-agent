@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, BookOpenCheck, BrainCircuit, MessageSquareText, PencilLine, ShieldAlert, ShieldCheck, UsersRound } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, BrainCircuit, FileText, MessageSquareText, PencilLine, ShieldAlert, ShieldCheck, UsersRound } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import {
   AssistantEntryCard,
@@ -52,6 +52,7 @@ export default function TeacherHomePage() {
         <>
           <InlineLinkButton href="/teacher/high-risk-consultation" label="发起高风险会诊" variant="premium" />
           <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />
+          <InlineLinkButton href="/teacher/health-file-bridge" label="外部健康文件桥接" />
           <InlineLinkButton href="/teacher/agent?action=communication" label="一键生成家长沟通建议" />
         </>
       }
@@ -140,7 +141,7 @@ export default function TeacherHomePage() {
             </SectionCard>
 
             <SectionCard title="快捷录入入口" description="保持业务主路径直达，不让老师来回找页面。">
-              <div className="grid gap-3 sm:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <Link href="/teacher/high-risk-consultation" className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-4 text-sm font-semibold text-slate-900 shadow-sm">
                   <ShieldAlert className="mb-3 h-5 w-5 text-rose-500" />
                   发起高风险会诊
@@ -156,6 +157,10 @@ export default function TeacherHomePage() {
                 <Link href="/diet" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
                   <PencilLine className="mb-3 h-5 w-5 text-emerald-500" />
                   去饮食录入
+                </Link>
+                <Link href="/teacher/health-file-bridge" className="rounded-3xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm">
+                  <FileText className="mb-3 h-5 w-5 text-violet-500" />
+                  外部健康文件桥接
                 </Link>
               </div>
             </SectionCard>

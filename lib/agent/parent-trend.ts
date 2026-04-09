@@ -360,7 +360,7 @@ export function buildParentTrendDebugState({
           }),
           buildDebugSeries({
             id: "hydration_ml",
-            label: "饮水量",
+            label: "补水趋势",
             unit: "ml",
             values: [90, 100, 110, 140, 150, 170, 180],
             windowDays: 7,
@@ -382,7 +382,7 @@ export function buildParentTrendDebugState({
           direction: "up",
         },
         explanation:
-          "这 7 天的饮食质量分和饮水量都在上升，挑食信号同步下降。这个 case 用来演示正常有数据时的趋势线，不依赖 fallback，也不会伪造高质量趋势。",
+          "这 7 天的饮食质量分在上升，补水状态也在改善，挑食信号同步下降。这个 case 用来演示正常有数据时的趋势线，不依赖 fallback，也不会伪造高质量趋势。",
         supportingSignals: [
           {
             sourceType: "meal",
@@ -392,7 +392,7 @@ export function buildParentTrendDebugState({
           {
             sourceType: "meal",
             date: "2026-04-04",
-            summary: "当天饮食完成度高，喝水也更稳定。",
+            summary: "当天饮食完成度高，补水状态也更稳定。",
           },
         ],
         dataQuality: {

@@ -264,7 +264,7 @@ def _build_meal_records(child: dict[str, Any], now: datetime) -> list[dict[str, 
     if focus == "hydration-risk":
         return [
             _meal_record(child, now, days_ago=0, foods=["米饭", "鸡肉", "青菜"], intake_level="medium", preference="neutral", water_ml=90, nutrition_score=73, summary="进食尚可，但全天饮水偏低，需要反复提醒。"),
-            _meal_record(child, now, days_ago=1, foods=["小馄饨", "豆腐", "菠菜"], intake_level="medium", preference="neutral", water_ml=88, nutrition_score=72, summary="午餐接受度稳定，但补水不足 100ml。"),
+            _meal_record(child, now, days_ago=1, foods=["小馄饨", "豆腐", "菠菜"], intake_level="medium", preference="neutral", water_ml=88, nutrition_score=72, summary="午餐接受度稳定，但补水仍偏少。"),
             _meal_record(child, now, days_ago=3, foods=["米饭", "虾仁替代菜", "南瓜"], intake_level="good", preference="accept", water_ml=96, nutrition_score=77, summary="避开过敏食物后进食更顺利，但仍需要定时喝水。"),
             _meal_record(child, now, days_ago=5, foods=["面条", "鸡丝", "油麦菜"], intake_level="medium", preference="neutral", water_ml=92, nutrition_score=74, summary="进食正常，饮水仍偏少。"),
         ]
@@ -732,6 +732,50 @@ def build_demo_consultation_feed_items(now: datetime | None = None) -> list[dict
                 "followUp48h": ["48 小时内复查执行结果，并决定是否继续升级。"],
                 "syncTargets": ["教师端结果卡", "家长端今晚任务", *([] if not spec["shouldEscalate"] else ["园长端决策卡"])],
                 "shouldEscalateToAdmin": spec["shouldEscalate"],
+                "evidenceItems": [
+                    {
+                        "id": f"ce:consultation-{spec['childId']}:consultation_history:demo:0",
+                        "sourceType": "consultation_history",
+                        "sourceLabel": "演示连续性说明",
+                        "sourceId": f"demo-history-{spec['childId']}",
+                        "summary": spec["triggerReason"],
+                        "confidence": "medium",
+                        "requiresHumanReview": False,
+                        "evidenceCategory": "risk_control",
+                        "supports": [
+                            {
+                                "type": "finding",
+                                "targetId": "finding:key:0",
+                                "targetLabel": spec["triggerReason"],
+                            }
+                        ],
+                        "metadata": {
+                            "sourceField": "demo_snapshot",
+                            "provenance": {"provider": "mock-brain", "source": "mock"},
+                        },
+                    },
+                    {
+                        "id": f"ce:consultation-{spec['childId']}:derived_explainability:demo:1",
+                        "sourceType": "derived_explainability",
+                        "sourceLabel": "演示协调结论",
+                        "sourceId": "explainability:0",
+                        "summary": spec["summary"],
+                        "confidence": "low",
+                        "requiresHumanReview": True,
+                        "evidenceCategory": "development_support",
+                        "supports": [
+                            {
+                                "type": "action",
+                                "targetId": "action:followup:0",
+                                "targetLabel": "48 灏忔椂鍐呭鏌ユ墽琛岀粨鏋滐紝骞跺喅瀹氭槸鍚︾户缁崌绾с€?",
+                            }
+                        ],
+                        "metadata": {
+                            "sourceField": "demo_snapshot",
+                            "provenance": {"provider": "mock-brain", "source": "mock"},
+                        },
+                    },
+                ],
                 "explainabilitySummary": {
                     "agentParticipants": ["健康观察", "饮食行为", "家园协同", "协调器"],
                     "keyFindings": [spec["triggerReason"], "需要把园内动作和家庭反馈接成一条线。"],

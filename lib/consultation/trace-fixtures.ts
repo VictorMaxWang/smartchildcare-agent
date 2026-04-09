@@ -151,6 +151,7 @@ const BASE_RESULT: HighRiskConsultationResult & {
     { label: "家园一致", detail: "园内观察与家长反馈指向同一问题。" },
   ],
   nextCheckpoints: ["明早入园后抓耳是否缓解", "今晚睡前情绪是否更稳定"],
+  evidenceItems: [],
   coordinatorSummary: {
     finalConclusion: "当前建议先完成今晚家庭动作，并在明早回收反馈，再决定是否升级到保健复查。",
     riskLevel: "high",

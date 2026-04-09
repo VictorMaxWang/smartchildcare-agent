@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ParentTrendSeries } from "@/lib/ai/types";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 const SERIES_COLORS = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444"];
 
@@ -52,6 +53,22 @@ function formatValue(value: number | null, unit: string) {
   return `${value}`;
 }
 
+function getSeriesDisplayLabel(series: ParentTrendSeries) {
+  return series.id === "hydration_ml" ? "补水状态" : series.label;
+}
+
+function formatSeriesValue(series: ParentTrendSeries, value: number | null) {
+  if (series.id === "hydration_ml") {
+    if (value === null || Number.isNaN(value)) {
+      return "无记录";
+    }
+
+    return getHydrationDisplayState(value).statusLabel;
+  }
+
+  return formatValue(value, series.unit);
+}
+
 function buildSupportMetricSummary(series: ParentTrendSeries[]) {
   return series.map((item) => {
     const latestPoint = [...item.data].reverse().find((point) => point.value !== null);
@@ -59,8 +76,8 @@ function buildSupportMetricSummary(series: ParentTrendSeries[]) {
 
     return {
       id: item.id,
-      label: item.label,
-      value: formatValue(latestValue, item.unit),
+      label: getSeriesDisplayLabel(item),
+      value: formatSeriesValue(item, latestValue),
       date: latestPoint?.label ?? "暂无",
     };
   });
@@ -119,9 +136,9 @@ function TrendTooltip({
                   className="h-2.5 w-2.5 rounded-full"
                   style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }}
                 />
-                <span>{series.label}</span>
+                <span>{getSeriesDisplayLabel(series)}</span>
               </div>
-              <span className="font-semibold text-slate-900">{formatValue(value, series.unit)}</span>
+              <span className="font-semibold text-slate-900">{formatSeriesValue(series, value)}</span>
             </div>
           );
         })}
@@ -237,7 +254,7 @@ export default function TrendLineChart({
                 className="h-2 w-2 rounded-full"
                 style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }}
               />
-              {item.label}
+              {getSeriesDisplayLabel(item)}
             </Badge>
           ))}
         </div>
@@ -266,13 +283,13 @@ export default function TrendLineChart({
       <div className="flex flex-wrap gap-2 overflow-x-auto pb-1">
         {chartSeries.map((item, index) => (
           <Badge key={item.id} variant={index === 0 ? "info" : "secondary"} className="gap-2 px-3 py-1">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }}
-            />
-            {item.label}
-          </Badge>
-        ))}
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }}
+              />
+              {getSeriesDisplayLabel(item)}
+            </Badge>
+          ))}
       </div>
 
       <div className="h-48 w-full">

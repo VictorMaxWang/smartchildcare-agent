@@ -12,6 +12,7 @@ import { analyzeExecutionConsultation } from "@/lib/agent/consultation/execution
 import { analyzeHealthConsultation } from "@/lib/agent/consultation/health-agent";
 import type { ConsultationInput } from "@/lib/agent/consultation/input";
 import { detectConsultationTrigger } from "@/lib/agent/consultation/trigger";
+import { buildConsultationEvidenceItems } from "@/lib/consultation/evidence";
 
 const PARTICIPANTS: ConsultationParticipant[] = [
   { id: "health-agent", label: "HealthObservationAgent" },
@@ -224,9 +225,37 @@ export async function maybeRunHighRiskConsultation(input: ConsultationInput): Pr
     schoolAction,
     continuityNotes: input.continuityNotes,
   });
+  const consultationId = createConsultationId(input.childId);
+  const explainability = buildExplainability({
+    triggerReasons,
+    healthView: healthAgentView,
+    dietView: dietBehaviorAgentView,
+    parentView: parentCommunicationAgentView,
+    schoolView: inSchoolActionAgentView,
+    continuityNotes: input.continuityNotes,
+  });
+  const source = mapToConsultationSource(input.responseSource);
+  const evidenceItems = buildConsultationEvidenceItems({
+    consultationId,
+    generatedAt: input.generatedAt,
+    keyFindings,
+    triggerReasons,
+    todayInSchoolActions,
+    tonightAtHomeActions,
+    followUp48h: [reviewIn48h, ...nextCheckpoints.slice(0, 2)],
+    explainability,
+    continuityNotes: input.continuityNotes ?? [],
+    memoryMeta:
+      input.memoryMeta && typeof input.memoryMeta === "object"
+        ? (input.memoryMeta as Record<string, unknown>)
+        : null,
+    providerTrace: null,
+    multimodalNotes: null,
+    rawEvidenceItems: undefined,
+  });
 
   return {
-    consultationId: createConsultationId(input.childId),
+    consultationId,
     triggerReason: trigger.triggerReason,
     triggerType: trigger.triggerTypes,
     triggerReasons,
@@ -250,14 +279,8 @@ export async function maybeRunHighRiskConsultation(input: ConsultationInput): Pr
       continuityNotes: input.continuityNotes,
     }),
     directorDecisionCard,
-    explainability: buildExplainability({
-      triggerReasons,
-      healthView: healthAgentView,
-      dietView: dietBehaviorAgentView,
-      parentView: parentCommunicationAgentView,
-      schoolView: inSchoolActionAgentView,
-      continuityNotes: input.continuityNotes,
-    }),
+    explainability,
+    evidenceItems,
     nextCheckpoints,
     coordinatorSummary: {
       finalConclusion,
@@ -276,7 +299,7 @@ export async function maybeRunHighRiskConsultation(input: ConsultationInput): Pr
     shouldEscalateToAdmin,
     continuityNotes: input.continuityNotes,
     memoryMeta: input.memoryMeta,
-    source: mapToConsultationSource(input.responseSource),
+    source,
     model: input.model,
     generatedAt: input.generatedAt,
   };

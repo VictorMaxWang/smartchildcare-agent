@@ -69,12 +69,21 @@ async def _load_latest_trace(
 def _build_explainability_summary(result: dict[str, Any]) -> dict[str, Any]:
     trace_meta = safe_dict(result.get("traceMeta"))
     explainability = [safe_dict(item) for item in safe_list(result.get("explainability"))]
+    evidence_items = _build_evidence_items(result)
     evidence_highlights = unique_texts(
-        [
-            f"{_coalesce_text(item.get('label'), fallback='evidence')}: {_coalesce_text(item.get('detail'))}"
-            for item in explainability
-            if _coalesce_text(item.get("detail"))
-        ],
+        (
+            [
+                f"{_coalesce_text(item.get('sourceLabel'), fallback='evidence')}: {_coalesce_text(item.get('summary'))}"
+                for item in evidence_items
+                if _coalesce_text(item.get("summary"))
+            ]
+            if evidence_items
+            else [
+                f"{_coalesce_text(item.get('label'), fallback='evidence')}: {_coalesce_text(item.get('detail'))}"
+                for item in explainability
+                if _coalesce_text(item.get("detail"))
+            ]
+        ),
         limit=4,
     )
 
@@ -94,6 +103,16 @@ def _build_explainability_summary(result: dict[str, Any]) -> dict[str, Any]:
         ),
         "evidenceHighlights": evidence_highlights,
     }
+
+
+def _build_evidence_items(result: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in safe_list(result.get("evidenceItems")):
+        record = safe_dict(item)
+        if not _coalesce_text(record.get("id")):
+            continue
+        items.append(record)
+    return items
 
 
 def _build_provider_trace_summary(
@@ -304,6 +323,7 @@ async def list_high_risk_consultation_feed(
             "followUp48h": follow_up_48h,
             "syncTargets": _build_sync_targets(normalized_result),
             "shouldEscalateToAdmin": bool(normalized_result.get("shouldEscalateToAdmin")),
+            "evidenceItems": _build_evidence_items(normalized_result),
             "explainabilitySummary": _build_explainability_summary(normalized_result),
             "providerTraceSummary": _build_provider_trace_summary(
                 result=normalized_result,

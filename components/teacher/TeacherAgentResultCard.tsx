@@ -2,10 +2,39 @@
 
 import { Clock3, MessageSquareText, Target } from "lucide-react";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
+import TeacherCopilotPanel from "@/components/teacher/TeacherCopilotPanel";
 import { Badge } from "@/components/ui/badge";
 import { buildTeacherAgentTimeLabel, type TeacherAgentResult } from "@/lib/agent/teacher-agent";
+import {
+  hasTeacherResultAttentionSignal,
+  normalizeTeacherCopilotFromResult,
+} from "@/lib/teacher-copilot/normalize";
+import type { TeacherCopilotSectionId } from "@/lib/teacher-copilot/types";
 
 export default function TeacherAgentResultCard({ result }: { result: TeacherAgentResult }) {
+  const copilotPayload = normalizeTeacherCopilotFromResult(result);
+  let defaultOpenSection: TeacherCopilotSectionId | null = null;
+  let sectionOrder: TeacherCopilotSectionId[] = [
+    "parentCommunicationScript",
+    "microTrainingSOP",
+    "recordCompletionHints",
+  ];
+
+  if (result.workflow === "communication" && copilotPayload?.parentCommunicationScript) {
+    defaultOpenSection = "parentCommunicationScript";
+  } else if (
+    result.workflow === "follow-up" &&
+    copilotPayload?.microTrainingSOP &&
+    hasTeacherResultAttentionSignal(result)
+  ) {
+    defaultOpenSection = "microTrainingSOP";
+    sectionOrder = [
+      "microTrainingSOP",
+      "parentCommunicationScript",
+      "recordCompletionHints",
+    ];
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
@@ -89,6 +118,12 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
           </ul>
         </div>
       ) : null}
+
+      <TeacherCopilotPanel
+        payload={copilotPayload}
+        defaultOpenSection={defaultOpenSection}
+        sectionOrder={sectionOrder}
+      />
 
       {result.keyChildren?.length || result.riskTypes?.length ? (
         <div className="grid gap-4 lg:grid-cols-2">

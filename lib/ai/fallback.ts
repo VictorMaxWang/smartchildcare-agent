@@ -7,6 +7,7 @@ import type {
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 const DEFAULT_DISCLAIMER =
   "本建议仅用于托育观察与家园沟通参考，不构成医疗诊断；如出现持续发热或明显异常，请及时就医。";
@@ -115,11 +116,12 @@ export function buildFallbackFollowUp(payload: AiFollowUpPayload): AiFollowUpRes
   const hydrationAvg = payload.snapshot.summary.meals.hydrationAvg;
   const pendingReviewCount = payload.snapshot.summary.growth.pendingReviewCount;
   const latestFeedback = payload.latestFeedback;
+  const hydrationDisplay = getHydrationDisplayState(hydrationAvg);
 
   return {
     answer:
       `关于“${payload.suggestionTitle}”，更稳妥的做法是先把它拆成可执行的小动作。` +
-      `${childName} 当前${hydrationAvg < 120 ? `饮水偏低，` : "日常记录较连续，"}` +
+      `${childName} 当前${hydrationDisplay.tone === "warning" ? `${hydrationDisplay.statusLabel}，` : "补水记录较连续，"}` +
       `${pendingReviewCount > 0 ? `且仍有${pendingReviewCount}项待复查，` : "当前重点项相对集中，"}` +
       `所以建议先从最容易当天落实的一项园内动作和一项家庭动作开始，再用48小时连续记录验证是否有效。`,
     keyPoints: [

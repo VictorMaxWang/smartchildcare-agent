@@ -7,6 +7,7 @@ import type {
   RuleFallbackItem,
 } from "@/lib/ai/types";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate } from "@/lib/date";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 import { getWeeklyTaskForChild } from "@/lib/mock/coparenting";
 import type {
   Child,
@@ -40,7 +41,7 @@ export interface ParentMessageMeta {
 export const PARENT_AGENT_QUICK_QUESTIONS = [
   "为什么最近不愿意去园？",
   "今晚我应该怎么陪伴？",
-  "这几天饮水少怎么办？",
+  "这几天补水偏少怎么办？",
   "我做完之后应该怎么反馈？",
   "明天老师会继续看什么？",
 ] as const;
@@ -147,9 +148,10 @@ function buildFocusReasons(params: {
   latestFeedback?: GuardianFeedback;
 }) {
   const warningInsights = params.smartInsights.filter((item) => item.level === "warning");
+  const hydrationDisplay = getHydrationDisplayState(params.weeklyTrend.hydrationAvg);
   const reasons = uniqueItems([
     ...warningInsights.map((item) => item.title),
-    params.weeklyTrend.hydrationAvg < 140 ? `近 7 天平均饮水 ${params.weeklyTrend.hydrationAvg} ml，偏低` : undefined,
+    params.weeklyTrend.hydrationAvg < 140 ? hydrationDisplay.trendSummary : undefined,
     params.pendingReviews.length > 0 ? `有 ${params.pendingReviews.length} 条待复查观察记录` : undefined,
     params.weeklyHealthChecks.some((item) => item.isAbnormal) ? "近 7 天出现过晨检异常，需要继续跟进" : undefined,
     params.latestFeedback
@@ -167,7 +169,7 @@ function buildObservationDefaults(context: {
   latestFeedback?: GuardianFeedback;
 }) {
   return uniqueItems([
-    context.weeklyTrend.hydrationAvg < 140 ? "今晚是否比前几天更愿意主动喝水" : undefined,
+    context.weeklyTrend.hydrationAvg < 140 ? "今晚补水是否比前几天更主动" : undefined,
     context.attentionGrowthRecords.some((item) => item.category === "情绪表现") ? "晚间情绪是否比接园前更稳定" : undefined,
     context.attentionGrowthRecords.some((item) => item.category === "睡眠情况") ? "入睡速度和晨起状态是否改善" : undefined,
     context.weeklyHealthChecks.some((item) => item.isAbnormal) ? "今晚是否还有异常体温或明显不适" : undefined,
@@ -226,7 +228,7 @@ function buildWhyNow(context: ParentAgentChildContext, suggestion: AiSuggestionR
 function buildRecommendedQuestions(context: ParentAgentChildContext, responseQuestions?: string[]) {
   const dynamic = uniqueItems([
     ...PARENT_AGENT_QUICK_QUESTIONS,
-    context.weeklyTrend.hydrationAvg < 140 ? "如果今晚还是不愿意喝水，下一步怎么做？" : undefined,
+    context.weeklyTrend.hydrationAvg < 140 ? "如果今晚补水还是不够主动，下一步怎么做？" : undefined,
     context.pendingReviews.length > 0 ? "48 小时后我要重点回看哪一个变化？" : undefined,
     ...(responseQuestions ?? []),
   ]);

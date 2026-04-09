@@ -7,6 +7,7 @@ import type {
   TeacherDraftConfirmationState,
   TeacherDraftUnderstandingSeed,
 } from "@/lib/mobile/teacher-draft-records";
+import type { TeacherCopilotPayload } from "@/lib/teacher-copilot/types";
 
 export function buildMockVoiceDraft(params: {
   childId: string;
@@ -36,6 +37,10 @@ export interface TeacherVoiceDraftPayload extends Record<string, unknown> {
   kind: "teacher-voice-understanding";
   childName?: string;
   transcript: string;
+  copilot?: TeacherCopilotPayload | Record<string, unknown> | null;
+  recordCompletionHints?: TeacherCopilotPayload["recordCompletionHints"];
+  microTrainingSOP?: TeacherCopilotPayload["microTrainingSOP"];
+  parentCommunicationScript?: TeacherCopilotPayload["parentCommunicationScript"];
   upload: {
     assetId?: string;
     transcript?: string;
@@ -49,12 +54,7 @@ export interface TeacherVoiceDraftPayload extends Record<string, unknown> {
   };
   understanding: TeacherVoiceUnderstandResponse | null;
   understandingError: string | null;
-  t5Seed: {
-    transcript: string;
-    router_result: TeacherVoiceUnderstandResponse["router_result"] | null;
-    draft_items: TeacherVoiceUnderstandResponse["draft_items"];
-    warnings: string[];
-  };
+  t5Seed: TeacherDraftUnderstandingSeed;
   t5State?: TeacherDraftConfirmationState;
 }
 
@@ -80,12 +80,20 @@ export function createTeacherVoiceDraftPayload(params: {
       router_result: params.understanding?.router_result ?? null,
       draft_items: params.understanding?.draft_items ?? [],
       warnings: params.understanding?.warnings ?? [],
+      copilot: params.understanding?.copilot,
+      recordCompletionHints: params.understanding?.recordCompletionHints,
+      microTrainingSOP: params.understanding?.microTrainingSOP,
+      parentCommunicationScript: params.understanding?.parentCommunicationScript,
     } satisfies TeacherDraftUnderstandingSeed);
 
   return {
     kind: "teacher-voice-understanding",
     childName: params.childName,
     transcript,
+    copilot: params.understanding?.copilot,
+    recordCompletionHints: params.understanding?.recordCompletionHints,
+    microTrainingSOP: params.understanding?.microTrainingSOP,
+    parentCommunicationScript: params.understanding?.parentCommunicationScript,
     upload: {
       assetId: params.upload.assetId,
       transcript: params.upload.transcript,

@@ -376,7 +376,8 @@
 - 是否适合并行：中
 - 最小验收方式：evidence contract 被 consultation 输出、admin feed 和 trace view model 同时消费
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 contract walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-08 更新：已新增 `ConsultationEvidenceItem` / `evidenceItems`，并把 `explainability`、`keyFindings`、`triggerReasons`、`memoryMeta`、`continuityNotes`、`multimodalNotes` 归并到统一 evidence contract；Admin feed 与 trace view model 已开始消费结构化 evidence，真正的 evidence UI 仍留给 `T19`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T19｜会诊证据链 UI
@@ -408,8 +409,12 @@
 - 是否适合并行：中
 - 最小验收方式：干预卡、提醒、任务状态三者能映射到统一 task model
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 workflow walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-08 更新：已在 consultation result、backend normalize、admin consultation feed、trace view model 中新增统一 `evidenceItems` contract，并保留 `keyFindings`、`explainability`、`providerTrace`、`memoryMeta`、`evidenceHighlights` 兼容投影。
+- 2026-04-08 边界：本轮只完成 contract / normalize / feed mapping，不包含 Teacher / Admin evidence UI；该部分继续归 `T19`。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
+
+- 2026-04-08 验证：`npx tsx --test lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts`、`py -m pytest backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py`、目标文件 `eslint`、`npm run build`
 
 ### T21｜自动升级规则
 
@@ -468,15 +473,16 @@
 - 类型：深度优化
 - Lane：Teacher Copilot 线
 - 问题定义：Teacher 语音主线现在更像输入入口，还没完全升级成“教师能力增强工具”。
-- 目标效果：增加 `recordCompletionHints`、`microTrainingSOP`、`parentCommunicationScript` 三类 Copilot 输出。
-- 主要触达层：teacher voice understand / draft confirm / types / follow-up
-- 建议触达模块：`backend/app/agents/teacher_agent.py`、`backend/app/services/teacher_voice_understand.py`、`app/api/ai/teacher-agent/route.ts`、`lib/agent/teacher-agent.ts`
+- 目标效果：在 `teacher-voice-understand` 响应中稳定增加 `record_completion_hints`、`micro_training_sop`、`parent_communication_script` 三类结构化 Copilot 输出，并保留兼容 UI 的 legacy mirrors。
+- 主要触达层：teacher voice understand / typed contract / local fallback / mobile draft passthrough
+- 建议触达模块：`backend/app/schemas/teacher_voice.py`、`backend/app/services/teacher_voice_understand.py`、`backend/app/services/teacher_voice_copilot.py`、`lib/ai/teacher-voice-understand.ts`、`lib/ai/teacher-voice-copilot.ts`、`backend/tests/test_teacher_voice_understand.py`
 - 推荐前置依赖：无
-- 推荐 subagents：`backend_architect + workflow_cartographer + reviewer_tester`
+- 推荐 subagents：`repo_mapper + backend_architect + workflow_cartographer + reviewer_tester`
 - 是否适合并行：中
-- 最小验收方式：Teacher backend 输出中稳定出现补全提示、30 秒 SOP、家长沟通话术三个槽位
+- 最小验收方式：Teacher backend 输出中稳定出现补全提示、30 秒 SOP、家长沟通话术三个结构化槽位，且不改动 `t5Seed` 主形状
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 service walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-08 更新：主落点已收敛到 `teacher_voice_understand` contract；backend 与本地 fallback 都会返回 3 类结构化 Copilot 字段，展示层仍需 `T25` 继续接入
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T25｜Teacher Copilot：UI 接入
@@ -492,7 +498,8 @@
 - 是否适合并行：中
 - 最小验收方式：Teacher 端至少一条主路径能展示 Copilot 卡片，不破坏当前录屏主线
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-08 更新：`/teacher/agent` 已接入草稿确认区 Copilot 与结果卡 Copilot；`/teacher` 保持轻入口，语音录制主链未改
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T26｜Weekly Report V2：三版本行动化 schema / generator
@@ -590,4 +597,3 @@
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
 - 当前状态：`Planned`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
-

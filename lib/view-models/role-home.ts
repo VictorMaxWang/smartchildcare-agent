@@ -20,6 +20,7 @@ import type {
 } from "@/lib/store";
 import { getAgeBandFromBirthDate } from "@/lib/store";
 import { getLocalToday, isDateWithinLastDays } from "@/lib/date";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 
 export type ParentHomeViewModel = {
   child: Child;
@@ -89,6 +90,7 @@ export function buildParentHomeViewModel(feed?: ParentFeed | null): ParentHomeVi
 
   const ageBand = getAgeBandFromBirthDate(feed.child.birthDate);
   const task = getWeeklyTaskForChild(feed.child.id, ageBand);
+  const hydrationDisplay = getHydrationDisplayState(feed.weeklyTrend.hydrationAvg);
   const aiReminder =
     feed.suggestions.find((item) => item.level === "warning") ??
     feed.suggestions[0] ?? {
@@ -122,7 +124,7 @@ export function buildParentHomeViewModel(feed?: ParentFeed | null): ParentHomeVi
     todaySummary: [
       { label: "今日饮食记录", value: `${feed.todayMeals.length} 条`, tone: "info" },
       { label: "今日成长观察", value: `${feed.todayGrowth.length} 条`, tone: "success" },
-      { label: "近 7 天饮水均值", value: `${feed.weeklyTrend.hydrationAvg} ml`, tone: "info" },
+      { label: "近 7 天补水状态", value: hydrationDisplay.statusLabel, tone: hydrationDisplay.tone },
       { label: "当前关注项", value: `${attentionCount} 项`, tone: attentionCount > 0 ? "warning" : "success" },
     ],
     aiReminder,
@@ -137,6 +139,7 @@ export function buildParentHomeViewModel(feed?: ParentFeed | null): ParentHomeVi
       { label: "膳食均衡率", value: `${feed.weeklyTrend.balancedRate}%` },
       { label: "蔬菜摄入天数", value: `${feed.weeklyTrend.vegetableDays} 天` },
       { label: "蛋白摄入天数", value: `${feed.weeklyTrend.proteinDays} 天` },
+      { label: "补水主动性", value: hydrationDisplay.initiativeLabel },
     ],
     interventionPreview: {
       title: interventionPreview.title,
@@ -475,7 +478,7 @@ export function buildAdminAgentReply(
 
   if (legacyAction === "risk-list") {
     return {
-      answer: `建议优先汇总“高关注频次、低饮水、低蔬菜摄入”三类儿童，形成园长每日过目名单。当前可先从 ${context.riskSummary[0]} 开始。`,
+      answer: `建议优先汇总“高关注频次、补水需关注、低蔬菜摄入”三类儿童，形成园长每日过目名单。当前可先从 ${context.riskSummary[0]} 开始。`,
       keyPoints: [
         "名单按风险来源归类，方便后续派单",
         "同一儿童命中多项风险时优先级最高",

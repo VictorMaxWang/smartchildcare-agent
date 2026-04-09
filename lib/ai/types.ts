@@ -137,6 +137,46 @@ export interface ExplainabilityItem {
   detail: string;
 }
 
+export type ConsultationEvidenceSourceType =
+  | "health_check"
+  | "teacher_voice"
+  | "teacher_note"
+  | "guardian_feedback"
+  | "ocr_document"
+  | "trend"
+  | "memory_snapshot"
+  | "consultation_history"
+  | "derived_explainability";
+
+export type ConsultationEvidenceConfidence = "low" | "medium" | "high";
+
+export type ConsultationEvidenceCategory =
+  | "risk_control"
+  | "family_communication"
+  | "daily_care"
+  | "development_support";
+
+export interface ConsultationEvidenceSupportRef {
+  type: "finding" | "action" | "explainability";
+  targetId: string;
+  targetLabel?: string;
+}
+
+export interface ConsultationEvidenceItem {
+  id: string;
+  sourceType: ConsultationEvidenceSourceType;
+  sourceLabel: string;
+  sourceId?: string;
+  summary: string;
+  excerpt?: string;
+  confidence: ConsultationEvidenceConfidence;
+  requiresHumanReview: boolean;
+  evidenceCategory: ConsultationEvidenceCategory;
+  supports: ConsultationEvidenceSupportRef[];
+  timestamp?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ConsultationCoordinatorSummary {
   finalConclusion: string;
   riskLevel: AiRiskLevel;
@@ -169,6 +209,7 @@ export interface HighRiskConsultationResult {
   parentMessageDraft: string;
   directorDecisionCard: DirectorDecisionCard;
   explainability: ExplainabilityItem[];
+  evidenceItems: ConsultationEvidenceItem[];
   nextCheckpoints: string[];
   coordinatorSummary: ConsultationCoordinatorSummary;
   schoolAction: string;
@@ -829,5 +870,105 @@ export interface WeeklyReportResponse {
   memoryMeta?: MemoryContextMeta;
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
+  model?: string;
+}
+
+export type HealthFileBridgeSourceRole = "parent" | "teacher";
+export type HealthFileBridgeSource = "backend-rule" | "next-local-rule";
+export type HealthFileBridgeRiskLevel = "low" | "medium" | "high";
+export type HealthFileBridgeEscalationLevel =
+  | "none"
+  | "teacher-review"
+  | "school-health-review"
+  | "medical-follow-up";
+export type HealthFileBridgeWritebackStatus = "placeholder" | "not-run";
+
+export interface HealthFileBridgeFile {
+  fileId?: string;
+  name: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  pageCount?: number;
+  fileUrl?: string;
+  previewText?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface HealthFileBridgeRequest {
+  childId?: string;
+  sourceRole: HealthFileBridgeSourceRole;
+  files: HealthFileBridgeFile[];
+  fileKind?: string;
+  requestSource: string;
+  optionalNotes?: string;
+  traceId?: string;
+  debugMemory?: boolean;
+}
+
+export interface HealthFileBridgeFact {
+  label: string;
+  detail: string;
+  source: string;
+}
+
+export interface HealthFileBridgeRiskItem {
+  title: string;
+  severity: HealthFileBridgeRiskLevel;
+  detail: string;
+  source: string;
+}
+
+export interface HealthFileBridgeActionItem {
+  title: string;
+  detail: string;
+  ownerRole: "teacher" | "parent" | "family";
+  timing: string;
+  source: string;
+}
+
+export interface HealthFileBridgeFollowUpItem {
+  title: string;
+  detail: string;
+  ownerRole: "teacher" | "parent" | "family";
+  due: string;
+  source: string;
+}
+
+export interface HealthFileBridgeEscalationSuggestion {
+  shouldEscalate: boolean;
+  level: HealthFileBridgeEscalationLevel;
+  reason: string;
+  nextStep: string;
+  source: string;
+}
+
+export interface HealthFileBridgeWritebackSuggestion {
+  shouldWriteback: boolean;
+  destination: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  source: string;
+  status: HealthFileBridgeWritebackStatus;
+}
+
+export interface HealthFileBridgeResponse {
+  childId?: string;
+  sourceRole: HealthFileBridgeSourceRole;
+  fileKind?: string;
+  summary: string;
+  extractedFacts: HealthFileBridgeFact[];
+  riskItems: HealthFileBridgeRiskItem[];
+  schoolTodayActions: HealthFileBridgeActionItem[];
+  familyTonightActions: HealthFileBridgeActionItem[];
+  followUpPlan: HealthFileBridgeFollowUpItem[];
+  escalationSuggestion: HealthFileBridgeEscalationSuggestion;
+  writebackSuggestion: HealthFileBridgeWritebackSuggestion;
+  disclaimer: string;
+  source: HealthFileBridgeSource;
+  fallback: boolean;
+  mock: boolean;
+  liveReadyButNotVerified: boolean;
+  generatedAt: string;
+  provider?: string;
   model?: string;
 }

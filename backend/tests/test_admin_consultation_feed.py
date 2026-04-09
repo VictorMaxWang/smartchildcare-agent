@@ -226,6 +226,8 @@ def test_admin_consultation_feed_reads_snapshots_and_skips_invalid(tmp_path, mon
     assert first_item["directorDecisionCard"]["recommendedOwnerRole"] == "admin"
     assert first_item["explainabilitySummary"]["agentParticipants"]
     assert first_item["explainabilitySummary"]["coordinationConclusion"]
+    assert first_item["evidenceItems"]
+    assert any(item["requiresHumanReview"] for item in first_item["evidenceItems"])
     assert first_item["providerTraceSummary"]["traceId"] == "trace-feed-1"
     assert first_item["providerTraceSummary"]["transport"] == "fastapi-brain"
     assert first_item["memoryMetaSummary"]["backend"] == "sqlite"
@@ -275,6 +277,7 @@ def test_admin_consultation_feed_falls_back_to_demo_items_when_memory_empty(tmp_
     assert [item["childId"] for item in feed["items"]] == ["c-16", "c-15", "c-14"]
     assert all(item["providerTraceSummary"]["fallback"] for item in feed["items"])
     assert all(item["memoryMetaSummary"]["backend"] == "demo_snapshot" for item in feed["items"])
+    assert all(item["evidenceItems"] for item in feed["items"])
 
 
 def test_admin_consultation_feed_demo_fallback_still_applies_filters(tmp_path, monkeypatch):

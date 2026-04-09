@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.providers.base import ProviderAuthenticationError, ProviderConfigurationError, ProviderResponseError
 from app.providers.vivo_tts import VivoTtsProvider
 
-DEFAULT_TEXT = "你好，欢迎来到成长故事时间。"
+DEFAULT_TEXT = "hello story"
 
 
 def parse_args() -> argparse.Namespace:

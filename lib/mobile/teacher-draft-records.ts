@@ -3,6 +3,7 @@ import type {
   TeacherVoiceDraftItem,
   TeacherVoiceUnderstandResponse,
 } from "@/lib/ai/teacher-voice-understand";
+import type { TeacherCopilotPayload } from "@/lib/teacher-copilot/types";
 
 export type DraftRecordStatus = "pending" | "confirmed" | "discarded";
 export type TeacherDraftPersistStatus = "saved" | "local_only" | "failed";
@@ -13,6 +14,10 @@ export interface TeacherDraftUnderstandingSeed {
   router_result: TeacherVoiceUnderstandResponse["router_result"] | null;
   draft_items: TeacherVoiceUnderstandResponse["draft_items"];
   warnings: string[];
+  copilot?: TeacherCopilotPayload | Record<string, unknown> | null;
+  recordCompletionHints?: TeacherCopilotPayload["recordCompletionHints"];
+  microTrainingSOP?: TeacherCopilotPayload["microTrainingSOP"];
+  parentCommunicationScript?: TeacherCopilotPayload["parentCommunicationScript"];
 }
 
 export interface TeacherDraftRecord {
@@ -215,6 +220,22 @@ export function readTeacherDraftUnderstandingSeed(
     draft_items:
       seed.draft_items as TeacherVoiceUnderstandResponse["draft_items"],
     warnings: seed.warnings.filter((item): item is string => typeof item === "string"),
+    copilot:
+      typeof seed.copilot === "object" && seed.copilot !== null
+        ? (seed.copilot as TeacherCopilotPayload | Record<string, unknown>)
+        : undefined,
+    recordCompletionHints: Array.isArray(seed.recordCompletionHints)
+      ? (seed.recordCompletionHints as TeacherCopilotPayload["recordCompletionHints"])
+      : undefined,
+    microTrainingSOP:
+      typeof seed.microTrainingSOP === "object" && seed.microTrainingSOP !== null
+        ? (seed.microTrainingSOP as TeacherCopilotPayload["microTrainingSOP"])
+        : undefined,
+    parentCommunicationScript:
+      typeof seed.parentCommunicationScript === "object" &&
+      seed.parentCommunicationScript !== null
+        ? (seed.parentCommunicationScript as TeacherCopilotPayload["parentCommunicationScript"])
+        : undefined,
   };
 }
 

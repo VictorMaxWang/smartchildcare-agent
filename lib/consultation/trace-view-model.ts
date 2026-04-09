@@ -1,4 +1,12 @@
-import type { HighRiskConsultationResult, MemoryContextMeta } from "@/lib/ai/types";
+import type {
+  ConsultationEvidenceItem,
+  HighRiskConsultationResult,
+  MemoryContextMeta,
+} from "@/lib/ai/types";
+import {
+  buildLegacyTraceEvidenceFromItems,
+  filterConsultationEvidenceItemsByStage,
+} from "@/lib/consultation/evidence";
 import {
   asTraceStringArray,
   buildExplainabilityEvidence,
@@ -221,6 +229,12 @@ function buildCurrentEvidence(result: HighRiskConsultationResult | null) {
       detail,
     })),
   ].slice(0, 4);
+}
+
+function getResultEvidenceItems(
+  result: HighRiskConsultationResult | null
+): ConsultationEvidenceItem[] {
+  return Array.isArray(result?.evidenceItems) ? result.evidenceItems : [];
 }
 
 function buildStageSummary(
@@ -451,11 +465,23 @@ function stageStatus(
   return "pending";
 }
 
+function buildStageEvidenceItems(
+  stage: ConsultationStageKey,
+  result: HighRiskConsultationResult | null
+) {
+  return filterConsultationEvidenceItemsByStage(getResultEvidenceItems(result), stage);
+}
+
 function buildStageEvidence(
   stage: ConsultationStageKey,
   result: HighRiskConsultationResult | null,
   memoryMeta: MemoryContextMeta | Record<string, unknown> | null
 ) {
+  const evidenceItems = buildStageEvidenceItems(stage, result);
+  if (evidenceItems.length > 0) {
+    return buildLegacyTraceEvidenceFromItems(evidenceItems);
+  }
+
   if (stage === "long_term_profile") {
     return buildLongTermEvidence(memoryMeta, result?.continuityNotes ?? []);
   }
@@ -635,6 +661,7 @@ export function buildConsultationTraceViewModel(
       (stage === "current_recommendation" ? providerTrace : null);
 
     const status = stageStatus(stage, state, hasResult);
+    const stageEvidenceItems = buildStageEvidenceItems(stage, state.result);
 
     const stageIndex = CONSULTATION_STAGE_ORDER.indexOf(stage);
     const expandedByDefault =
@@ -658,6 +685,7 @@ export function buildConsultationTraceViewModel(
       source: buildStageSource(stage, state, stageProviderTrace ?? null, memoryState),
       summaryCard,
       followUpCard,
+      evidenceItems: stageEvidenceItems,
       evidence: buildStageEvidence(stage, state.result, stageMemoryMeta),
       callout: buildStageCallout(stage, memoryState, providerState, state),
       expandedByDefault,
@@ -672,12 +700,14 @@ export function buildConsultationTraceViewModel(
     state,
     hasResult,
   });
+  const evidenceItems = getResultEvidenceItems(state.result);
 
   const hasContent =
     callouts.length > 0 ||
     stages.some(
       (stage) =>
         stage.items.length > 0 ||
+        stage.evidenceItems.length > 0 ||
         stage.evidence.length > 0 ||
         Boolean(stage.summaryCard) ||
         Boolean(stage.followUpCard) ||
@@ -700,6 +730,7 @@ export function buildConsultationTraceViewModel(
     providerTrace,
     memoryMeta,
     traceMemoryMeta,
+    evidenceItems,
     stages,
     callouts,
     syncTargets: hasResult ? buildSyncTargets(state.result) : [],

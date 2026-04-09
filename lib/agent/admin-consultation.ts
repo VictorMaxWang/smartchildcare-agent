@@ -1,10 +1,18 @@
-import type { ConsultationResult, ExplainabilityItem } from "@/lib/ai/types";
+import type {
+  ConsultationEvidenceItem,
+  ConsultationResult,
+  ExplainabilityItem,
+} from "@/lib/ai/types";
 import type {
   AdminDispatchCreatePayload,
   AdminDispatchEvent,
   AdminOwnerRole,
   InstitutionPriorityEvidence,
 } from "@/lib/agent/admin-types";
+import {
+  buildConsultationEvidenceHighlights,
+  normalizeConsultationEvidenceItems,
+} from "@/lib/consultation/evidence";
 import { buildConsultationResultTraceViewModel } from "@/lib/consultation/trace-view-model";
 import type {
   ConsultationProviderTrace,
@@ -47,6 +55,7 @@ export interface AdminConsultationTraceViewModel {
   keyFindings: string[];
   collaborationSummary: string;
   explainability: ExplainabilityItem[];
+  evidenceItems: ConsultationEvidenceItem[];
   providerState: ConsultationTraceProviderState;
   providerStateLabel: string;
   providerLabel: string | null;
@@ -117,6 +126,7 @@ export interface AdminConsultationFeedItem {
   followUp48h: string[];
   syncTargets: string[];
   shouldEscalateToAdmin: boolean;
+  evidenceItems: ConsultationEvidenceItem[];
   explainabilitySummary?: AdminConsultationFeedExplainabilitySummary;
   providerTraceSummary?: AdminConsultationFeedProviderTraceSummary;
   memoryMetaSummary?: AdminConsultationFeedMemoryMetaSummary;
@@ -196,6 +206,10 @@ function asStringArray(value: unknown, limit = 8) {
     value.map((item) => (typeof item === "string" ? item : undefined)),
     limit
   );
+}
+
+function buildEvidenceHighlightsFromItems(items: ConsultationEvidenceItem[], limit = 4) {
+  return buildConsultationEvidenceHighlights(items, limit);
 }
 
 function pickFirstText(...values: Array<string | null | undefined>) {
@@ -334,12 +348,15 @@ function buildLocalTraceViewModel(consultation: ConsultationResult): AdminConsul
     streamMessage: "Consultation completed. Admin trace summary.",
   });
   const providerLabel = buildProviderLabel(traceViewModel.providerTrace);
-  const evidenceHighlights = takeUnique(
-    traceViewModel.stages.flatMap((stage) =>
-      stage.evidence.map((item) => `${item.label}: ${item.detail}`)
-    ),
-    4
-  );
+  const evidenceHighlights =
+    traceViewModel.evidenceItems.length > 0
+      ? buildEvidenceHighlightsFromItems(traceViewModel.evidenceItems)
+      : takeUnique(
+          traceViewModel.stages.flatMap((stage) =>
+            stage.evidence.map((item) => `${item.label}: ${item.detail}`)
+          ),
+          4
+        );
 
   return {
     participants: takeUnique(consultation.participants.map((item) => item.label), 5),
@@ -347,6 +364,7 @@ function buildLocalTraceViewModel(consultation: ConsultationResult): AdminConsul
     collaborationSummary:
       consultation.coordinatorSummary.finalConclusion || consultation.summary,
     explainability: consultation.explainability.slice(0, 3),
+    evidenceItems: traceViewModel.evidenceItems,
     providerState: traceViewModel.providerState,
     providerStateLabel: getProviderStateLabel(traceViewModel.providerState),
     providerLabel,
@@ -516,6 +534,10 @@ function normalizeMemoryMetaSummary(
   };
 }
 
+function normalizeFeedEvidenceItems(value: unknown) {
+  return normalizeConsultationEvidenceItems(value);
+}
+
 export function normalizeAdminConsultationFeedItem(
   value: unknown
 ): AdminConsultationFeedItem | null {
@@ -547,6 +569,7 @@ export function normalizeAdminConsultationFeedItem(
     followUp48h: asStringArray(record.followUp48h, 4),
     syncTargets: asStringArray(record.syncTargets, 4),
     shouldEscalateToAdmin: Boolean(record.shouldEscalateToAdmin),
+    evidenceItems: normalizeFeedEvidenceItems(record.evidenceItems),
     explainabilitySummary: normalizeExplainabilitySummary(record.explainabilitySummary),
     providerTraceSummary: normalizeProviderTraceSummary(record.providerTraceSummary),
     memoryMetaSummary: normalizeMemoryMetaSummary(record.memoryMetaSummary),
@@ -723,6 +746,14 @@ function buildFeedTraceViewModel(params: {
     buildMemoryDetailFromSummary(feedItem.memoryMetaSummary) ??
     localTrace?.memoryDetail ??
     null;
+  const evidenceItems =
+    feedItem.evidenceItems.length > 0 ? feedItem.evidenceItems : (localTrace?.evidenceItems ?? []);
+  const evidenceHighlights =
+    evidenceItems.length > 0
+      ? buildEvidenceHighlightsFromItems(evidenceItems)
+      : feedItem.explainabilitySummary?.evidenceHighlights.length
+        ? feedItem.explainabilitySummary.evidenceHighlights
+        : (localTrace?.evidenceHighlights ?? []);
 
   return {
     participants:
@@ -742,6 +773,7 @@ function buildFeedTraceViewModel(params: {
       feedItem.explainabilitySummary,
       localTrace?.explainability ?? []
     ),
+    evidenceItems,
     providerState,
     providerStateLabel: getProviderStateLabel(providerState),
     providerLabel,
@@ -752,10 +784,7 @@ function buildFeedTraceViewModel(params: {
       [feedItem.syncTargets, localTrace?.syncTargets],
       4
     ),
-    evidenceHighlights:
-      feedItem.explainabilitySummary?.evidenceHighlights.length
-        ? feedItem.explainabilitySummary.evidenceHighlights
-        : (localTrace?.evidenceHighlights ?? []),
+    evidenceHighlights,
     providerTrace,
   };
 }

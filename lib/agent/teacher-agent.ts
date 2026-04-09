@@ -6,7 +6,6 @@ import type {
   ConsultationResult,
   MemoryContextEnvelope,
   MemoryContextMeta,
-  PromptMemoryContext,
   RuleFallbackItem,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
@@ -22,6 +21,7 @@ import {
   createEmptyMemoryMeta,
   mergePromptMemoryContexts,
 } from "@/lib/memory/prompt-context";
+import type { TeacherCopilotPayload } from "@/lib/teacher-copilot/types";
 
 export type TeacherAgentWorkflowType = "communication" | "follow-up" | "weekly-summary";
 export type TeacherAgentMode = "class" | "child";
@@ -122,6 +122,10 @@ export interface TeacherAgentResult {
   riskTypes?: string[];
   continuityNotes?: string[];
   memoryMeta?: MemoryContextMeta;
+  copilot?: TeacherCopilotPayload | Record<string, unknown> | null;
+  recordCompletionHints?: TeacherCopilotPayload["recordCompletionHints"];
+  microTrainingSOP?: TeacherCopilotPayload["microTrainingSOP"];
+  parentCommunicationScript?: TeacherCopilotPayload["parentCommunicationScript"];
   source: TeacherAgentResultSource;
   model?: string;
   generatedAt: string;

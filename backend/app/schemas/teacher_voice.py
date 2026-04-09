@@ -66,6 +66,60 @@ class TeacherVoiceDraftItem(TeacherVoiceModel):
     source: str = "rule"
 
 
+class TeacherVoiceRecordCompletionHint(TeacherVoiceModel):
+    label: str
+    reason: str
+    suggested_prompt: str
+
+
+class TeacherVoiceMicroTrainingSOP(TeacherVoiceModel):
+    title: str
+    steps: list[str] = Field(default_factory=list)
+    duration_text: str
+    scenario_tag: Literal["health", "sleep", "diet", "emotion", "separation_anxiety"]
+
+
+class TeacherVoiceParentCommunicationScript(TeacherVoiceModel):
+    short_message: str = ""
+    calm_explanation: str = ""
+    follow_up_reminder: str = ""
+
+
+class TeacherVoiceCompatCopilotHint(TeacherVoiceModel):
+    id: str | None = None
+    title: str
+    detail: str | None = None
+    tone: Literal["info", "warning"] | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class TeacherVoiceCompatCopilotStep(TeacherVoiceModel):
+    title: str
+    detail: str | None = None
+
+
+class TeacherVoiceCompatCopilotSOP(TeacherVoiceModel):
+    title: str
+    summary: str | None = None
+    durationLabel: str | None = None
+    steps: list[TeacherVoiceCompatCopilotStep] = Field(default_factory=list)
+
+
+class TeacherVoiceCompatCommunicationScript(TeacherVoiceModel):
+    title: str = "家长沟通话术卡"
+    opening: str | None = None
+    situation: str | None = None
+    ask: str | None = None
+    closing: str | None = None
+    bullets: list[str] = Field(default_factory=list)
+
+
+class TeacherVoiceCompatPayload(TeacherVoiceModel):
+    recordCompletionHints: list[TeacherVoiceCompatCopilotHint] = Field(default_factory=list)
+    microTrainingSOP: TeacherVoiceCompatCopilotSOP | None = None
+    parentCommunicationScript: TeacherVoiceCompatCommunicationScript | None = None
+
+
 class TeacherVoiceSourceInfo(TeacherVoiceModel):
     asr: str
     router: str
@@ -99,6 +153,15 @@ class TeacherVoiceUnderstandResponse(TeacherVoiceModel):
     router_result: TeacherVoiceRouterResult
     draft_items: list[TeacherVoiceDraftItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    record_completion_hints: list[TeacherVoiceRecordCompletionHint] = Field(default_factory=list)
+    micro_training_sop: list[TeacherVoiceMicroTrainingSOP] = Field(default_factory=list)
+    parent_communication_script: TeacherVoiceParentCommunicationScript = Field(
+        default_factory=TeacherVoiceParentCommunicationScript
+    )
+    copilot: TeacherVoiceCompatPayload | None = None
+    recordCompletionHints: list[TeacherVoiceCompatCopilotHint] = Field(default_factory=list)
+    microTrainingSOP: TeacherVoiceCompatCopilotSOP | None = None
+    parentCommunicationScript: TeacherVoiceCompatCommunicationScript | None = None
     source: TeacherVoiceSourceInfo
     model: TeacherVoiceModelInfo
     generated_at: str

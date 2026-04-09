@@ -76,6 +76,7 @@ function buildLocalConsultation(
     followUp48h: ["48 小时内复盘情绪和家长反馈"],
     parentMessageDraft: "今晚请先关注孩子入睡前情绪。",
     directorDecisionCard: {
+      title: "重点会诊",
       status: "pending",
       reason: "需要园长确认家园协同动作",
       recommendedOwnerRole: "admin",
@@ -87,6 +88,25 @@ function buildLocalConsultation(
       { label: "协调结论", detail: "需要园长牵头同步老师和家长" },
     ],
     nextCheckpoints: ["明早回看情绪状态"],
+    evidenceItems: [
+      {
+        id: "ce:consult-1:teacher_note:multimodal:0",
+        sourceType: "teacher_note",
+        sourceLabel: "教师补充",
+        sourceId: "multimodalNotes.teacherNote",
+        summary: "老师补充孩子今天午休前情绪波动明显。",
+        confidence: "high",
+        requiresHumanReview: false,
+        evidenceCategory: "risk_control",
+        supports: [
+          {
+            type: "finding",
+            targetId: "finding:key:0",
+            targetLabel: "鎯呯华娉㈠姩鎸佺画",
+          },
+        ],
+      },
+    ],
     coordinatorSummary: {
       finalConclusion: "建议园长在今日午间前确认跟进人。",
       riskLevel: "high",
@@ -181,6 +201,7 @@ test("normalizeAdminConsultationFeedItem keeps valid feed payloads and rejects m
     triggerReasons: ["连续两天情绪波动"],
     summary: "需尽快跟进幼儿情绪与家园协同。",
     directorDecisionCard: {
+      title: "Admin Decision Card",
       status: "pending",
       recommendedOwnerName: "陈园长",
       recommendedOwnerRole: "admin",
@@ -196,6 +217,25 @@ test("normalizeAdminConsultationFeedItem keeps valid feed payloads and rejects m
     followUp48h: ["后端 48 小时复查"],
     syncTargets: ["教师端结果卡", "园长端决策卡"],
     shouldEscalateToAdmin: true,
+    evidenceItems: [
+      {
+        id: "ce:consult-1:derived_explainability:feed:0",
+        sourceType: "derived_explainability",
+        sourceLabel: "关键发现推断",
+        sourceId: "finding:key:0",
+        summary: "杩炵画涓ゆ鏅ㄦ寮傚父",
+        confidence: "medium",
+        requiresHumanReview: true,
+        evidenceCategory: "risk_control",
+        supports: [
+          {
+            type: "finding",
+            targetId: "finding:key:0",
+            targetLabel: "杩炵画涓ゆ鏅ㄦ寮傚父",
+          },
+        ],
+      },
+    ],
   });
 
   assert.ok(valid);
@@ -223,6 +263,7 @@ test("buildAdminConsultationPriorityItems prefers backend-native actions, sync t
         triggerReasons: ["连续两天情绪波动", "晨检备注出现异常"],
         summary: "需尽快跟进幼儿情绪与家园协同。",
         directorDecisionCard: {
+          title: "Backend Admin Decision",
           status: "pending",
           reason: "需要园长确认家园协同动作",
           recommendedOwnerName: "陈园长",
@@ -239,6 +280,25 @@ test("buildAdminConsultationPriorityItems prefers backend-native actions, sync t
         followUp48h: ["后端 48 小时复查"],
         syncTargets: ["教师端结果卡", "家长端今晚任务", "园长端决策卡"],
         shouldEscalateToAdmin: true,
+        evidenceItems: [
+          {
+            id: "ce:consult-1:derived_explainability:feed:0",
+            sourceType: "derived_explainability",
+            sourceLabel: "关键发现推断",
+            sourceId: "finding:key:0",
+            summary: "杩炵画涓ゆ鏅ㄦ寮傚父",
+            confidence: "medium",
+            requiresHumanReview: true,
+            evidenceCategory: "risk_control",
+            supports: [
+              {
+                type: "finding",
+                targetId: "finding:key:0",
+                targetLabel: "杩炵画涓ゆ鏅ㄦ寮傚父",
+              },
+            ],
+          },
+        ],
         explainabilitySummary: {
           agentParticipants: ["Health Agent", "Parent Agent"],
           keyFindings: ["情绪波动持续", "需要家园同步观察"],
@@ -360,6 +420,7 @@ test("buildAdminConsultationPriorityItems refuses ambiguous child-level overlay 
         riskLevel: "high",
         summary: "第一条会诊",
         directorDecisionCard: {
+          title: "Consultation Decision",
           status: "pending",
           recommendedOwnerName: "陈园长",
           recommendedOwnerRole: "admin",
@@ -374,6 +435,7 @@ test("buildAdminConsultationPriorityItems refuses ambiguous child-level overlay 
         riskLevel: "medium",
         summary: "第二条会诊",
         directorDecisionCard: {
+          title: "Consultation Decision",
           status: "pending",
           recommendedOwnerName: "陈园长",
           recommendedOwnerRole: "admin",
@@ -408,4 +470,58 @@ test("buildAdminConsultationPriorityItems refuses ambiguous child-level overlay 
   assert.equal(items[1]?.dispatchBindingScope, undefined);
   assert.equal(items[0]?.notificationPayload?.priorityItemId, "consult-1");
   assert.equal(items[1]?.notificationPayload?.priorityItemId, "consult-2");
+});
+
+test("buildAdminConsultationPriorityItems lets admin trace consume structured evidenceItems", () => {
+  const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
+    feedItems: [
+      {
+        consultationId: "consult-evidence",
+        childId: "child-1",
+        generatedAt: "2026-04-08T10:00:00.000Z",
+        riskLevel: "high",
+        triggerReason: "杩炵画涓ゆ鏅ㄦ寮傚父",
+        summary: "闇€瑕佷紭鍏堢淮鎸佸鍥棴鐜€?",
+        directorDecisionCard: {
+          title: "Evidence Decision",
+          status: "pending",
+          recommendedOwnerName: "闄堝洯闀?",
+          recommendedOwnerRole: "admin",
+          recommendedAt: "2026-04-08T12:00:00.000Z",
+        },
+        shouldEscalateToAdmin: true,
+        evidenceItems: [
+          {
+            id: "ce:consult-evidence:teacher_note:multimodal:0",
+            sourceType: "teacher_note",
+            sourceLabel: "教师补充",
+            sourceId: "multimodalNotes.teacherNote",
+            summary: "老师补充孩子午休前情绪更黏老师。",
+            confidence: "high",
+            requiresHumanReview: false,
+            evidenceCategory: "risk_control",
+            supports: [
+              {
+                type: "finding",
+                targetId: "finding:key:0",
+                targetLabel: "杩炵画涓ゆ鏅ㄦ寮傚父",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    children: [{ id: "child-1", name: "瀹夊畨", className: "鍚戞棩钁电彮" }],
+    notificationEvents: [],
+    limit: 4,
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.trace.evidenceItems.length, 1);
+  assert.equal(items[0]?.trace.evidenceItems[0]?.sourceLabel, "教师补充");
+  assert.equal(
+    items[0]?.trace.evidenceHighlights[0],
+    "教师补充: 老师补充孩子午休前情绪更黏老师。"
+  );
 });

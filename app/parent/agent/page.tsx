@@ -54,6 +54,7 @@ import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
 import { buildReminderItems } from "@/lib/mobile/reminders";
 import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
 import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
+import { getHydrationDisplayState } from "@/lib/hydration-display";
 import { formatDisplayDate, getAgeText, useApp } from "@/lib/store";
 
 type HistoryItem = {
@@ -217,6 +218,7 @@ export default function ParentAgentPage() {
     displayInterventionCard?.tomorrowObservationPoint ??
     currentResult?.teacherTomorrowObservation ??
     "明早继续反馈今晚执行结果，方便教师继续观察。";
+  const hydrationDisplay = selectedFeed ? getHydrationDisplayState(selectedFeed.weeklyTrend.hydrationAvg) : null;
   const familyTaskReminder = useMemo(
     () =>
       reminders.find(
@@ -759,8 +761,9 @@ export default function ParentAgentPage() {
                   <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">{baseContext.focusReasons[0]}</p>
                 </div>
                 <div className="rounded-3xl bg-sky-50 p-4">
-                  <p className="text-xs text-sky-700">平均饮水</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900">{selectedFeed.weeklyTrend.hydrationAvg} ml</p>
+                  <p className="text-xs text-sky-700">补水状态</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900">{hydrationDisplay?.statusLabel ?? "暂无"}</p>
+                  <p className="mt-1 text-xs text-sky-800/80">补水主动性：{hydrationDisplay?.initiativeLabel ?? "待观察"}</p>
                 </div>
                 <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
                   <p className="text-xs text-slate-500">最近家长反馈</p>

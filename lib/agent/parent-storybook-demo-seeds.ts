@@ -7,6 +7,7 @@ import type {
   ParentStoryBookRequest,
   ParentStoryBookStylePreset,
 } from "@/lib/ai/types";
+import { buildConsultationEvidenceItems } from "@/lib/consultation/evidence";
 
 export type ParentStoryBookDemoSeedId =
   | "recording-c1-bedtime"
@@ -74,6 +75,28 @@ function buildConsultationSeed(input: {
   generatedAt: string;
 }): ConsultationResult {
   const evidence = input.keyFindings.length > 0 ? input.keyFindings : [input.summary];
+  /*
+  const explainability = [
+    {
+      label: "浠婃櫄鍏堝仛涓€浠跺皬浜?,
+      detail: input.homeAction,
+    },
+    {
+      label: "鏄庢棭缁х画鐪嬩粈涔?,
+      detail: input.reviewIn48h,
+    },
+  ];
+  */
+  const explainability = [
+    {
+      label: "Tonight first step",
+      detail: input.homeAction,
+    },
+    {
+      label: "Next observation",
+      detail: input.reviewIn48h,
+    },
+  ];
   const agentFindings = [
     buildFinding(
       "health-agent",
@@ -160,6 +183,7 @@ function buildConsultationSeed(input: {
       recommendedAt: input.generatedAt,
       status: "pending",
     },
+    /*
     explainability: [
       {
         label: "今晚先做一件小事",
@@ -170,6 +194,23 @@ function buildConsultationSeed(input: {
         detail: input.reviewIn48h,
       },
     ],
+    */
+    explainability,
+    evidenceItems: buildConsultationEvidenceItems({
+      consultationId: input.consultationId,
+      generatedAt: input.generatedAt,
+      keyFindings: input.keyFindings,
+      triggerReasons: [input.triggerReason],
+      todayInSchoolActions: [input.schoolAction],
+      tonightAtHomeActions: [input.homeAction],
+      followUp48h: [input.reviewIn48h],
+      explainability,
+      continuityNotes: input.continuityNotes,
+      memoryMeta: null,
+      providerTrace: null,
+      multimodalNotes: null,
+      rawEvidenceItems: undefined,
+    }),
     nextCheckpoints: [input.reviewIn48h],
     coordinatorSummary: {
       finalConclusion: input.summary,

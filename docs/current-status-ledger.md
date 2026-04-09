@@ -12,6 +12,7 @@
 - 当前最稳定比赛主路径：`/teacher` -> `/teacher/high-risk-consultation` -> `/admin` -> `/parent` -> `/parent/storybook?child=c-1` -> `/parent/agent?child=c-1`
 - 当前第一展示位：高风险会诊
 - 当前第二展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
+- T18 当前事实：底层已接入结构化 `evidenceItems` contract 与 trace/feed 映射，但界面仍主要消费兼容摘要；证据链 UI 继续归 `T19`
 - Parent storybook：已具展示能力，不再允许写回“未开始”
 - Parent trend：已具展示能力，但仍必须保留 `source`、`dataQuality`、`warnings`
 - 前端 36 人 demo：代码中已落地
@@ -121,14 +122,14 @@
 | `T15` | 家长反馈结构化回流：schema / store / normalize | `Planned` | 家长反馈闭环 | - | 中 | schema / store smoke | `TR+A` |
 | `T16` | Parent 结构化反馈填写器 | `Planned` | 家长反馈闭环 | `T15` | 中 | walkthrough / 真机 | `TR+A` |
 | `T17` | 家长反馈写回 memory / trend / weekly report / consultation | `Planned` | 家长反馈闭环 | `T15`、`T16` | 中 | walkthrough / trace 检查 | `TR+L+A` |
-| `T18` | 会诊证据链 contract | `Planned` | 会诊可解释性增强 | - | 中 | contract smoke | `TR+A` |
+| `T18` | 会诊证据链 contract | `Done-code-only` | 会诊可解释性增强 | - | 中 | contract smoke | `TR+A` |
 | `T19` | 会诊证据链 UI | `Planned` | 会诊可解释性增强 | `T18` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T20` | 48 小时干预任务实体与生命周期 | `Planned` | 干预执行与升级 | - | 中 | workflow smoke | `TR+A` |
 | `T21` | 自动升级规则 | `Planned` | 干预执行与升级 | `T20` | 中 | walkthrough / trace 检查 | `TR+L+A` |
 | `T22` | 年龄分层照护引擎：共享策略层 | `Planned` | 年龄分层照护 | - | 中 | contract smoke | `TR+A` |
 | `T23` | 年龄分层照护引擎接入主链路 | `Planned` | 年龄分层照护 | `T22` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T24` | Teacher Copilot：backend 能力包 | `Planned` | Teacher Copilot | - | 中 | service smoke | `TR+A` |
-| `T25` | Teacher Copilot：UI 接入 | `Planned` | Teacher Copilot | `T24` | 中 | walkthrough / 录屏 | `TR+L+A` |
+| `T25` | Teacher Copilot：UI 接入 | `Done-code-only` | Teacher Copilot | `T24` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T26` | Weekly Report V2：三版本行动化 schema / generator | `Planned` | Actionized Weekly Report | - | 中 | generator smoke | `TR+A` |
 | `T27` | Weekly Report V2：前端接入 | `Planned` | Actionized Weekly Report | `T26` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T28` | Admin 质量驾驶舱：metrics engine | `Planned` | Admin 质量治理 | - | 中 | aggregation smoke | `TR+A` |
@@ -151,9 +152,14 @@
 
 - 角色页真实存在：`/teacher`、`/teacher/high-risk-consultation`、`/admin`、`/parent`、`/parent/storybook`、`/parent/agent`
 - Teacher voice、consultation、Admin feed、Parent trend、Parent storybook、follow-up、weekly-report 等 route 已存在
+- 高风险会诊结果、Admin consultation feed、consultation trace view model 已开始共同消费结构化 `evidenceItems`；旧 `keyFindings` / `explainability` / `providerTrace` / `memoryMeta` / `evidenceHighlights` 仍保留兼容
+- Teacher Copilot UI 已接到 `/teacher/agent` 的草稿确认区与结果卡；`/teacher` 继续保持轻入口，不新增第二套 Teacher 页面
 - Parent storybook 页面、route、service、viewer、tests 已存在，当前已具展示能力
 - `GuardianFeedback`、`InterventionCard`、`ReminderItem`、`TaskCheckInRecord` 等 shared contract 锚点已存在
 - 前端 `lib/store.tsx` 已扩到 36 人 demo 基线；后端 `backend/app/db/childcare_repository.py` 的 `_demo_snapshot()` 仍未对齐
+- `T18` 已把 `evidenceItems` contract 接到 consultation normalize、admin feed 与 trace view model；Admin 第二展示位当前仍以兼容投影消费，证据卡片化 UI 留给 `T19`
+
+- `T18` 当前验证基线已通过：`npx tsx --test lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts`、`py -m pytest backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py`、目标文件 `eslint`、`npm run build`
 
 ## 历史 Freeze 构建记录（附录，不是当前主任务表）
 
@@ -172,4 +178,3 @@
 2. `docs/competition-architecture.md`
 3. `docs/task-registry.md`
 4. `AGENTS.md`
-

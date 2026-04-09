@@ -14,6 +14,10 @@ from app.schemas.teacher_voice import (
     TeacherVoiceUnderstandRequest,
     TeacherVoiceUnderstandResponse,
 )
+from app.services.teacher_voice_copilot import (
+    build_teacher_voice_copilot,
+    build_teacher_voice_copilot_compat,
+)
 from app.services.teacher_voice_prompt_chain import build_draft_items
 from app.services.teacher_voice_router import route_teacher_voice
 
@@ -83,12 +87,29 @@ def understand_teacher_voice(
             ),
         ]
     )
+    record_completion_hints, micro_training_sop, parent_communication_script = build_teacher_voice_copilot(
+        transcript_payload,
+        draft_items,
+        warnings,
+    )
+    copilot_payload, compat_hints, compat_sop, compat_script = build_teacher_voice_copilot_compat(
+        record_completion_hints,
+        micro_training_sop,
+        parent_communication_script,
+    )
 
     return TeacherVoiceUnderstandResponse(
         transcript=transcript_payload,
         router_result=router_result,
         draft_items=draft_items,
         warnings=warnings,
+        record_completion_hints=record_completion_hints,
+        micro_training_sop=micro_training_sop,
+        parent_communication_script=parent_communication_script,
+        copilot=copilot_payload,
+        recordCompletionHints=compat_hints,
+        microTrainingSOP=compat_sop,
+        parentCommunicationScript=compat_script,
         source=TeacherVoiceSourceInfo(
             asr=transcript_payload.source,
             router="rule",

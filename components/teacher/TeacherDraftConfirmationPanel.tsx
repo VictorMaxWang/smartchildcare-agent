@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, FileText, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
+import TeacherCopilotPanel from "@/components/teacher/TeacherCopilotPanel";
 import DraftRecordList from "@/components/teacher/DraftRecordList";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,6 +12,12 @@ import {
   type TeacherDraftRecord,
   type TeacherDraftUnderstandingSeed,
 } from "@/lib/mobile/teacher-draft-records";
+import {
+  hasTeacherDraftAttentionSignal,
+  normalizeTeacherCopilotFromDraftPayload,
+  normalizeTeacherCopilotFromDraftSeed,
+} from "@/lib/teacher-copilot/normalize";
+import type { TeacherCopilotSectionId } from "@/lib/teacher-copilot/types";
 
 interface MockPreset {
   id: string;
@@ -26,6 +33,7 @@ export default function TeacherDraftConfirmationPanel({
   sourceModeLabel,
   sourceSyncStatusLabel,
   sourceTranscript,
+  copilotSource,
   seed,
   persistAdapter,
   initialExpandedRecordId,
@@ -38,6 +46,7 @@ export default function TeacherDraftConfirmationPanel({
   sourceModeLabel?: string;
   sourceSyncStatusLabel?: string;
   sourceTranscript?: string;
+  copilotSource?: Record<string, unknown> | null;
   seed: TeacherDraftUnderstandingSeed | null;
   persistAdapter: TeacherDraftPersistAdapter;
   initialExpandedRecordId?: string;
@@ -122,6 +131,22 @@ export default function TeacherDraftConfirmationPanel({
       ),
     [records]
   );
+  const copilotPayload = useMemo(
+    () =>
+      normalizeTeacherCopilotFromDraftPayload(copilotSource) ??
+      normalizeTeacherCopilotFromDraftSeed(seed),
+    [copilotSource, seed]
+  );
+  const defaultOpenSection = useMemo<TeacherCopilotSectionId | null>(() => {
+    if (
+      copilotPayload?.recordCompletionHints?.length &&
+      (hasTeacherDraftAttentionSignal(seed) || visibleItems.length > 0)
+    ) {
+      return "recordCompletionHints";
+    }
+
+    return null;
+  }, [copilotPayload?.recordCompletionHints, seed, visibleItems.length]);
 
   const handleConfirm = useCallback(
     async (recordId: string) => {
@@ -259,6 +284,12 @@ export default function TeacherDraftConfirmationPanel({
           </div>
         ) : null}
       </div>
+
+      <TeacherCopilotPanel
+        payload={copilotPayload}
+        defaultOpenSection={defaultOpenSection}
+        sectionOrder={["recordCompletionHints", "microTrainingSOP"]}
+      />
 
       {error ? (
         <div className="rounded-3xl border border-rose-100 bg-rose-50/70 px-4 py-3 text-sm text-rose-700">
