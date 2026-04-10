@@ -11,6 +11,10 @@ import {
 } from "@/lib/agent/admin-consultation";
 import { cn } from "@/lib/utils";
 
+const PRIMARY_TRIGGER_LIMIT = 2;
+const PRIMARY_FINDING_LIMIT = 2;
+const PRIMARY_ACTION_LIMIT = 2;
+
 function getRiskBadgeVariant(item: AdminConsultationPriorityItem["decision"]["riskLevel"]) {
   if (item === "high") return "warning" as const;
   if (item === "medium") return "info" as const;
@@ -21,6 +25,63 @@ function getStatusBadgeVariant(item: AdminConsultationPriorityItem["decision"]["
   if (item === "completed") return "success" as const;
   if (item === "in_progress") return "info" as const;
   return "outline" as const;
+}
+
+function TextList({
+  items,
+  emptyText,
+  toneClassName = "bg-slate-50",
+}: {
+  items: string[];
+  emptyText: string;
+  toneClassName?: string;
+}) {
+  if (items.length === 0) {
+    return <p className="text-sm leading-6 text-slate-500">{emptyText}</p>;
+  }
+
+  return (
+    <div className="space-y-2 text-sm leading-6 text-slate-600">
+      {items.map((item) => (
+        <p key={item} className={cn("rounded-xl px-3 py-2 whitespace-normal break-words", toneClassName)}>
+          {item}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function ExpandableList({
+  items,
+  visibleCount,
+  emptyText,
+  summaryLabel,
+  toneClassName,
+}: {
+  items: string[];
+  visibleCount: number;
+  emptyText: string;
+  summaryLabel: string;
+  toneClassName?: string;
+}) {
+  const visibleItems = items.slice(0, visibleCount);
+  const extraItems = items.slice(visibleCount);
+
+  return (
+    <div className="space-y-3">
+      <TextList items={visibleItems} emptyText={emptyText} toneClassName={toneClassName} />
+      {extraItems.length > 0 ? (
+        <details className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+            {summaryLabel} {extraItems.length} 条
+          </summary>
+          <div className="mt-3">
+            <TextList items={extraItems} emptyText={emptyText} toneClassName={toneClassName} />
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 function ActionColumn({
@@ -40,16 +101,14 @@ function ActionColumn({
         {icon}
         <p className="text-sm font-semibold text-slate-900">{title}</p>
       </div>
-      <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-        {items.length > 0 ? (
-          items.map((item) => (
-            <p key={item} className="rounded-xl bg-white/70 px-3 py-2">
-              {item}
-            </p>
-          ))
-        ) : (
-          <p>当前暂无明确动作建议。</p>
-        )}
+      <div className="mt-3">
+        <ExpandableList
+          items={items}
+          visibleCount={PRIMARY_ACTION_LIMIT}
+          emptyText="当前暂无明确动作建议。"
+          summaryLabel="查看其余"
+          toneClassName="bg-white/70"
+        />
       </div>
     </div>
   );
@@ -88,29 +147,37 @@ export default function DirectorDecisionCard({
           <Badge variant="outline">{decision.className}</Badge>
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <CardTitle className="text-xl text-slate-900">{decision.childName}</CardTitle>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{decision.summary}</p>
+        <div className="min-w-0 space-y-3">
+          <div className="min-w-0">
+            <CardTitle className="whitespace-normal break-words text-xl text-slate-900">
+              {decision.childName}
+            </CardTitle>
+            <p className="mt-2 whitespace-normal break-words text-sm leading-6 text-slate-600">
+              {decision.summary}
+            </p>
           </div>
 
-          <div className="rounded-2xl border border-amber-100 bg-white/80 p-4">
+          <div className="rounded-2xl border border-amber-100 bg-white/85 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">
               Why High Priority
             </p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">{decision.whyHighPriority}</p>
+            <p className="mt-3 whitespace-normal break-words text-sm leading-7 text-slate-700">
+              {decision.whyHighPriority}
+            </p>
           </div>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 xl:grid-cols-3">
           <div className="rounded-2xl border border-white/80 bg-white/90 p-4">
             <div className="flex items-center gap-2">
               <UserRound className="h-4 w-4 text-indigo-500" />
               <p className="text-sm font-semibold text-slate-900">建议负责人</p>
             </div>
-            <p className="mt-3 text-sm text-slate-600">{decision.recommendedOwnerName}</p>
+            <p className="mt-3 whitespace-normal break-words text-sm text-slate-600">
+              {decision.recommendedOwnerName}
+            </p>
           </div>
 
           <div className="rounded-2xl border border-white/80 bg-white/90 p-4">
@@ -118,7 +185,9 @@ export default function DirectorDecisionCard({
               <CalendarClock className="h-4 w-4 text-sky-500" />
               <p className="text-sm font-semibold text-slate-900">建议截止时间</p>
             </div>
-            <p className="mt-3 text-sm text-slate-600">{decision.recommendedAtLabel}</p>
+            <p className="mt-3 whitespace-normal break-words text-sm text-slate-600">
+              {decision.recommendedAtLabel}
+            </p>
           </div>
 
           <div className="rounded-2xl border border-white/80 bg-white/90 p-4">
@@ -126,47 +195,40 @@ export default function DirectorDecisionCard({
               <ShieldAlert className="h-4 w-4 text-amber-500" />
               <p className="text-sm font-semibold text-slate-900">当前状态</p>
             </div>
-            <p className="mt-3 text-sm text-slate-600">{decision.statusLabel}</p>
+            <p className="mt-3 whitespace-normal break-words text-sm text-slate-600">
+              {decision.statusLabel}
+            </p>
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 xl:grid-cols-2">
           <div className="rounded-2xl border border-white/80 bg-white/90 p-4">
             <p className="text-sm font-semibold text-slate-900">触发原因</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {decision.triggerReasons.length > 0 ? (
-                decision.triggerReasons.map((reason) => (
-                  <Badge
-                    key={reason}
-                    variant="warning"
-                    className="whitespace-normal px-3 py-1 text-left leading-5"
-                  >
-                    {reason}
-                  </Badge>
-                ))
-              ) : (
-                <p className="text-sm text-slate-500">当前没有额外触发原因。</p>
-              )}
+            <div className="mt-3">
+              <ExpandableList
+                items={decision.triggerReasons}
+                visibleCount={PRIMARY_TRIGGER_LIMIT}
+                emptyText="当前没有额外触发原因。"
+                summaryLabel="查看其余"
+                toneClassName="bg-amber-50"
+              />
             </div>
           </div>
 
           <div className="rounded-2xl border border-white/80 bg-white/90 p-4">
             <p className="text-sm font-semibold text-slate-900">关键发现</p>
-            <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-              {decision.keyFindings.length > 0 ? (
-                decision.keyFindings.map((finding) => (
-                  <p key={finding} className="rounded-xl bg-slate-50 px-3 py-2">
-                    {finding}
-                  </p>
-                ))
-              ) : (
-                <p>当前没有额外关键发现。</p>
-              )}
+            <div className="mt-3">
+              <ExpandableList
+                items={decision.keyFindings}
+                visibleCount={PRIMARY_FINDING_LIMIT}
+                emptyText="当前没有额外关键发现。"
+                summaryLabel="查看其余"
+              />
             </div>
           </div>
         </div>
 
-        <div className="grid gap-3 xl:grid-cols-3">
+        <div className="grid gap-3 2xl:grid-cols-3">
           <ActionColumn
             icon={<School className="h-4 w-4 text-emerald-500" />}
             title="今日园内动作"
@@ -187,17 +249,17 @@ export default function DirectorDecisionCard({
           />
         </div>
 
-        <p className="text-xs text-slate-500">
+        <p className="whitespace-normal break-words text-xs text-slate-500">
           会诊生成时间：{decision.generatedAtLabel}
           {decision.statusSource === "dispatch" ? " | 状态已与派单同步" : ""}
-          {hasChildLevelFallbackNotification ? " | 当前仅 child 级绑定" : ""}
+          {hasChildLevelFallbackNotification ? " | 当前以 child 级绑定" : ""}
         </p>
 
         <div className="rounded-2xl border border-slate-100 bg-white/90 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 space-y-1">
               <p className="text-sm font-semibold text-slate-900">会诊派单入口</p>
-              <p className="text-sm text-slate-600">
+              <p className="whitespace-normal break-words text-sm leading-6 text-slate-600">
                 直接把当前会诊沉淀成 consultation-scoped notification，优先绑定 consultationId。
               </p>
             </div>
@@ -214,7 +276,7 @@ export default function DirectorDecisionCard({
               }
             >
               {isCreatingNotification
-                ? "创建中…"
+                ? "创建中"
                 : hasConsultationNotification
                   ? "已创建会诊派单"
                   : "创建会诊派单"}

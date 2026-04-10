@@ -81,6 +81,18 @@ function countRealScenes(story: ParentStoryBookResponse) {
   ).length;
 }
 
+function hasActiveMediaWarming(story: ParentStoryBookResponse) {
+  const diagnostics = story.providerMeta.diagnostics;
+  const imagePending = diagnostics?.image?.pendingSceneCount ?? 0;
+  const audioPending = diagnostics?.audio?.pendingSceneCount ?? 0;
+  return (
+    diagnostics?.image?.jobStatus === "warming" ||
+    diagnostics?.audio?.jobStatus === "warming" ||
+    imagePending > 0 ||
+    audioPending > 0
+  );
+}
+
 function resolveAudioDelivery(story: ParentStoryBookResponse): ParentStoryBookCacheMeta["audioDelivery"] {
   const hasReadyAudio = story.scenes.some(
     (scene) => scene.audioStatus === "ready" && Boolean(scene.audioUrl)
@@ -143,7 +155,7 @@ export function buildParentStoryBookRequestCacheKey(payload: unknown) {
 }
 
 export function shouldCacheParentStoryBookResponse(story: ParentStoryBookResponse) {
-  return countRealScenes(story) > 0;
+  return countRealScenes(story) > 0 && !hasActiveMediaWarming(story);
 }
 
 export function getCachedParentStoryBookResponse(cacheKey: string) {
@@ -316,4 +328,5 @@ export function prepareParentStoryBookResponseForDelivery(
 export const parentStoryBookCacheInternals = {
   storyResponseCache,
   mediaAssetCache,
+  hasActiveMediaWarming,
 };

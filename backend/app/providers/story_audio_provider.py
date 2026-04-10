@@ -97,6 +97,22 @@ class MockStoryAudioProvider:
     mode_name = "fallback"
     model_name = "storybook-audio-v1"
 
+    def read_cached_scene(
+        self,
+        *,
+        story_mode: str,
+        scene_index: int,
+        child_name: str,
+        scene_title: str,
+        scene_text: str,
+        child_id: str | None = None,
+        story_id: str | None = None,
+        audio_script: str | None = None,
+        voice_style: str | None = None,
+    ) -> ProviderResult[dict[str, Any]] | None:
+        del story_mode, scene_index, child_name, scene_title, scene_text, child_id, story_id, audio_script, voice_style
+        return None
+
     def render_scene(
         self,
         *,
@@ -143,6 +159,48 @@ class VivoStoryAudioProvider:
         self.settings = settings
         self._tts_provider = VivoTtsProvider(settings)
 
+    def read_cached_scene(
+        self,
+        *,
+        story_mode: str,
+        scene_index: int,
+        child_name: str,
+        scene_title: str,
+        scene_text: str,
+        child_id: str | None = None,
+        story_id: str | None = None,
+        audio_script: str | None = None,
+        voice_style: str | None = None,
+    ) -> ProviderResult[dict[str, Any]] | None:
+        del story_mode, child_id, story_id
+        script = audio_script or _build_mock_audio_script(
+            child_name=child_name,
+            scene_index=scene_index,
+            scene_title=scene_title,
+            scene_text=scene_text,
+        )
+        resolved_voice_style = voice_style or self.settings.storybook_tts_voice
+        cache_key = _build_story_audio_cache_key(
+            script=script,
+            voice_style=resolved_voice_style,
+            settings=self.settings,
+        )
+        cached_result = get_storybook_runtime_cache().get(cache_key)
+        if not cached_result:
+            return None
+
+        return ProviderResult(
+            output={
+                **cached_result["output"],
+                "cacheHit": True,
+            },
+            provider=self.provider_name,
+            mode=self.mode_name,
+            source="cache",
+            model=cached_result.get("model"),
+            request_id=cached_result.get("requestId"),
+        )
+
     def render_scene(
         self,
         *,
@@ -165,25 +223,19 @@ class VivoStoryAudioProvider:
             scene_title=scene_title,
             scene_text=scene_text,
         )
-        resolved_voice_style = voice_style or self.settings.storybook_tts_voice
-        cache_key = _build_story_audio_cache_key(
-            script=script,
-            voice_style=resolved_voice_style,
-            settings=self.settings,
+        cached_result = self.read_cached_scene(
+            story_mode=story_mode,
+            scene_index=scene_index,
+            child_name=child_name,
+            scene_title=scene_title,
+            scene_text=scene_text,
+            child_id=child_id,
+            story_id=story_id,
+            audio_script=script,
+            voice_style=voice_style,
         )
-        cached_result = get_storybook_runtime_cache().get(cache_key)
         if cached_result:
-            return ProviderResult(
-                output={
-                    **cached_result["output"],
-                    "cacheHit": True,
-                },
-                provider=self.provider_name,
-                mode=self.mode_name,
-                source="cache",
-                model=cached_result.get("model"),
-                request_id=cached_result.get("requestId"),
-            )
+            return cached_result
 
         tts_result = self._tts_provider.synthesize(
             text=script,

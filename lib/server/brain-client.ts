@@ -18,6 +18,8 @@ export interface BrainForwardResult {
   fallbackReason: string | null;
   statusCode: number | null;
   retryStrategy: BrainRetryStrategy;
+  elapsedMs: number | null;
+  timeoutMs: number;
 }
 
 function normalizeBaseUrl(value?: string | null) {
@@ -159,7 +161,10 @@ export function readBrainTransportHeaders(headers: Headers) {
   };
 }
 
-function getBrainTimeoutMs() {
+function getBrainTimeoutMs(overrideTimeoutMs?: number | null) {
+  if (typeof overrideTimeoutMs === "number" && Number.isFinite(overrideTimeoutMs) && overrideTimeoutMs > 0) {
+    return overrideTimeoutMs;
+  }
   const raw = process.env.BRAIN_API_TIMEOUT_MS?.trim();
   const parsed = raw ? Number(raw) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
@@ -202,11 +207,15 @@ function shouldFallback(response: Response) {
 
 export async function forwardBrainRequest(
   request: Request,
-  targetPath: string
+  targetPath: string,
+  options?: {
+    timeoutMs?: number;
+  }
 ): Promise<BrainForwardResult> {
   const baseUrlDetails = resolveBrainBaseUrlDetails();
   const baseUrl = baseUrlDetails.normalizedBaseUrl;
   const upstreamHost = resolveUpstreamHost(baseUrl);
+  const timeoutMs = getBrainTimeoutMs(options?.timeoutMs);
   if (!baseUrl) {
     console.warn(
       `[BRAIN_PROXY] Falling back for ${targetPath}: BRAIN_API_BASE_URL is not configured.`
@@ -218,11 +227,14 @@ export async function forwardBrainRequest(
       fallbackReason: "brain-base-url-missing",
       statusCode: null,
       retryStrategy: "none",
+      elapsedMs: null,
+      timeoutMs,
     };
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getBrainTimeoutMs());
+  const startedAt = Date.now();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const method = request.method.toUpperCase();
   const retryStrategy: BrainRetryStrategy = baseUrlDetails.hadApiV1Suffix
     ? "normalized-base-retry"
@@ -281,6 +293,8 @@ export async function forwardBrainRequest(
           fallbackReason: lastFallbackReason,
           statusCode: lastStatusCode,
           retryStrategy,
+          elapsedMs: Date.now() - startedAt,
+          timeoutMs,
         };
       }
 
@@ -316,6 +330,8 @@ export async function forwardBrainRequest(
         fallbackReason: null,
         statusCode: null,
         retryStrategy,
+        elapsedMs: Date.now() - startedAt,
+        timeoutMs,
       };
     }
 
@@ -326,6 +342,8 @@ export async function forwardBrainRequest(
       fallbackReason: lastFallbackReason ?? "brain-proxy-unavailable",
       statusCode: lastStatusCode,
       retryStrategy,
+      elapsedMs: Date.now() - startedAt,
+      timeoutMs,
     };
   } catch (error) {
     const fallbackReason = fallbackReasonFromError(error);
@@ -340,6 +358,8 @@ export async function forwardBrainRequest(
       fallbackReason,
       statusCode: null,
       retryStrategy,
+      elapsedMs: Date.now() - startedAt,
+      timeoutMs,
     };
   } finally {
     clearTimeout(timeout);

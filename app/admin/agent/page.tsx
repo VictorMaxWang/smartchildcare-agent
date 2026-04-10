@@ -386,20 +386,23 @@ export default function AdminAgentPage() {
       }
     >
       <RoleSplitLayout
+        stacked={isWeeklyMode}
         main={
           <div className="space-y-6">
             {isWeeklyMode ? (
               <div className="rounded-[32px] border border-indigo-100 bg-linear-to-r from-indigo-50 via-white to-sky-50 p-6 shadow-sm">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="space-y-3">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="info">周报模式</Badge>
                       <Badge variant="outline">{INSTITUTION_NAME}</Badge>
-                      <Badge variant="outline">入口稳定地址：/admin/agent?action=weekly-report</Badge>
+                      <Badge variant="outline" className="whitespace-normal text-left leading-5">
+                        入口稳定地址：/admin/agent?action=weekly-report
+                      </Badge>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-lg font-semibold text-slate-900">本周运营周报工作区</p>
-                      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                      <p className="mt-2 max-w-3xl whitespace-normal break-words text-sm leading-6 text-slate-600">
                         当前页面已切换为周报承接模式。这里会先展示本周结论、风险儿童和下周动作，再回到日常优先级与派单闭环，避免“点进来只有空白或异常页”。
                       </p>
                     </div>
@@ -410,7 +413,7 @@ export default function AdminAgentPage() {
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap gap-2 lg:max-w-xs lg:justify-end">
+                  <div className="flex flex-wrap gap-2 xl:max-w-sm xl:justify-end">
                     <Button type="button" variant="outline" onClick={() => switchMode("daily")}>
                       切回日常模式
                     </Button>
@@ -447,14 +450,16 @@ export default function AdminAgentPage() {
                   </div>
                 ) : result ? (
                   <div className="space-y-4">
-                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+                    <div className="space-y-4">
                       <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="info">{result.title}</Badge>
                           <Badge variant="outline">{result.source}</Badge>
                           {result.model ? <Badge variant="outline">{result.model}</Badge> : null}
                         </div>
-                        <p className="mt-4 text-base leading-7 text-slate-800">{result.summary}</p>
+                        <p className="mt-4 whitespace-normal break-words text-base leading-8 text-slate-800">
+                          {result.summary}
+                        </p>
                         {result.continuityNotes?.length ? (
                           <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
                             <p className="text-sm font-semibold text-slate-900">连续性摘要</p>
@@ -467,14 +472,16 @@ export default function AdminAgentPage() {
                         ) : null}
                       </div>
 
-                      <div className="space-y-4">
+                      <div className="grid gap-4 lg:grid-cols-2">
                         <div className="rounded-3xl border border-slate-100 bg-white p-5">
                           <p className="text-sm font-semibold text-slate-900">下周动作</p>
                           <div className="mt-3 space-y-3">
                             {result.actionItems.slice(0, 4).map((item) => (
                               <div key={item.id} className="rounded-2xl bg-slate-50 p-4">
-                                <p className="text-sm font-medium text-slate-900">{item.action}</p>
-                                <p className="mt-1 text-xs leading-5 text-slate-500">
+                                <p className="whitespace-normal break-words text-sm font-medium text-slate-900">
+                                  {item.action}
+                                </p>
+                                <p className="mt-1 whitespace-normal break-words text-xs leading-5 text-slate-500">
                                   {item.ownerLabel} · {item.deadline}
                                 </p>
                               </div>
@@ -487,12 +494,14 @@ export default function AdminAgentPage() {
                           <div className="mt-3 space-y-3">
                             {result.riskChildren.slice(0, 3).map((item) => (
                               <div key={item.childId} className="rounded-2xl bg-slate-50 p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-medium text-slate-900">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="min-w-0">
+                                    <p className="whitespace-normal break-words text-sm font-medium text-slate-900">
                                       {item.childName} · {item.className}
                                     </p>
-                                    <p className="mt-1 text-sm leading-6 text-slate-600">{item.reason}</p>
+                                    <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                                      {item.reason}
+                                    </p>
                                   </div>
                                   <PriorityLevelBadge level={item.priorityLevel} />
                                 </div>
@@ -505,9 +514,12 @@ export default function AdminAgentPage() {
 
                     <div className="rounded-3xl border border-slate-100 bg-white p-5">
                       <p className="text-sm font-semibold text-slate-900">本周结论速览</p>
-                      <ul className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <ul className="mt-3 grid gap-3 xl:grid-cols-2">
                         {result.highlights.slice(0, 6).map((item) => (
-                          <li key={item} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                          <li
+                            key={item}
+                            className="rounded-2xl bg-slate-50 px-4 py-3 whitespace-normal break-words text-sm leading-6 text-slate-600"
+                          >
                             {item}
                           </li>
                         ))}
@@ -527,7 +539,7 @@ export default function AdminAgentPage() {
               description="这里固定展示 Agent 判断优先级时使用的机构级上下文。"
             >
               {scope ? (
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 xl:grid-cols-2">
                   <div className="rounded-3xl border border-slate-100 bg-white p-5">
                     <p className="text-sm font-semibold text-slate-900">近 7 天机构概览</p>
                     <div className="mt-4 space-y-2 text-sm text-slate-600">
@@ -559,6 +571,7 @@ export default function AdminAgentPage() {
             >
               <RiskPriorityBoard
                 items={consultationPriorityItems}
+                layoutVariant={isWeeklyMode ? "stacked" : "split"}
                 isLoading={feedStatus === "loading"}
                 sourceBadgeLabel={feedBadge.label}
                 sourceBadgeVariant={feedBadge.variant}
@@ -604,15 +617,19 @@ export default function AdminAgentPage() {
             >
               {result ? (
                 <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-3">
+                  <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                     {result.priorityTopItems.map((item) => (
                       <div key={item.id} className="rounded-3xl border border-amber-100 bg-amber-50/70 p-5">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <PriorityLevelBadge level={item.priorityLevel} />
                           <span className="text-xs font-medium text-slate-500">分值 {item.priorityScore}</span>
                         </div>
-                        <p className="mt-4 text-lg font-semibold text-slate-900">{item.targetName}</p>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">{item.reason}</p>
+                        <p className="mt-4 whitespace-normal break-words text-lg font-semibold text-slate-900">
+                          {item.targetName}
+                        </p>
+                        <p className="mt-2 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                          {item.reason}
+                        </p>
                         <div className="mt-4 space-y-2 text-sm text-slate-600">
                           <p>负责人：{item.recommendedOwner.label}</p>
                           <p>时限：{item.recommendedDeadline}</p>
@@ -626,12 +643,14 @@ export default function AdminAgentPage() {
                       <div className="mt-4 space-y-3">
                         {result.riskChildren.slice(0, 4).map((item) => (
                           <div key={item.childId} className="rounded-2xl bg-slate-50 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-medium text-slate-900">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="whitespace-normal break-words text-sm font-medium text-slate-900">
                                   {item.childName} · {item.className}
                                 </p>
-                                <p className="mt-1 text-sm text-slate-600">{item.reason}</p>
+                                <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                                  {item.reason}
+                                </p>
                               </div>
                               <PriorityLevelBadge level={item.priorityLevel} />
                             </div>
@@ -644,10 +663,14 @@ export default function AdminAgentPage() {
                       <div className="mt-4 space-y-3">
                         {result.riskClasses.slice(0, 4).map((item) => (
                           <div key={item.className} className="rounded-2xl bg-slate-50 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-medium text-slate-900">{item.className}</p>
-                                <p className="mt-1 text-sm text-slate-600">{item.reason}</p>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="whitespace-normal break-words text-sm font-medium text-slate-900">
+                                  {item.className}
+                                </p>
+                                <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                                  {item.reason}
+                                </p>
                               </div>
                               <PriorityLevelBadge level={item.priorityLevel} />
                             </div>
@@ -722,11 +745,15 @@ export default function AdminAgentPage() {
                       <Badge variant="outline">{result.source}</Badge>
                       {result.model ? <Badge variant="outline">{result.model}</Badge> : null}
                     </div>
-                    <p className="text-base leading-7 text-slate-800">{result.assistantAnswer}</p>
-                    <div className="grid gap-4 lg:grid-cols-2">
+                    <p className="whitespace-normal break-words text-base leading-7 text-slate-800">
+                      {result.assistantAnswer}
+                    </p>
+                    <div className="grid gap-4 xl:grid-cols-2">
                       <div className="rounded-2xl bg-white p-4">
                         <p className="text-sm font-semibold text-slate-900">当前摘要</p>
-                        <p className="mt-3 text-sm leading-6 text-slate-600">{result.summary}</p>
+                        <p className="mt-3 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                          {result.summary}
+                        </p>
                       </div>
                       <div className="rounded-2xl bg-white p-4">
                         <p className="text-sm font-semibold text-slate-900">关键提示</p>
@@ -763,8 +790,8 @@ export default function AdminAgentPage() {
                 <div className="space-y-4">
                   {result.actionItems.map((item) => (
                     <div key={item.id} className="rounded-3xl border border-slate-100 bg-white p-5">
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="space-y-2">
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0 space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <PriorityLevelBadge level={item.priorityLevel} />
                             <EventStatusBadge
@@ -777,8 +804,12 @@ export default function AdminAgentPage() {
                               }
                             />
                           </div>
-                          <p className="text-base font-semibold text-slate-900">{item.title}</p>
-                          <p className="text-sm leading-6 text-slate-600">{item.summary}</p>
+                          <p className="whitespace-normal break-words text-base font-semibold text-slate-900">
+                            {item.title}
+                          </p>
+                          <p className="whitespace-normal break-words text-sm leading-6 text-slate-600">
+                            {item.summary}
+                          </p>
                           <div className="flex flex-wrap gap-4 text-xs text-slate-500">
                             <span>负责人：{item.ownerLabel}</span>
                             <span>时限：{item.deadline}</span>
@@ -817,10 +848,12 @@ export default function AdminAgentPage() {
                 {history.length > 0 ? (
                   history.map((entry) => (
                     <div key={entry.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
+                      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">{entry.label}</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{entry.result.summary}</p>
+                          <p className="mt-2 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                            {entry.result.summary}
+                          </p>
                         </div>
                         <Badge variant="outline">{entry.result.source}</Badge>
                       </div>
@@ -834,7 +867,7 @@ export default function AdminAgentPage() {
           </div>
         }
         aside={
-          <div className="space-y-6">
+          <div className={isWeeklyMode ? "grid gap-6 xl:grid-cols-2" : "space-y-6"}>
             <SectionCard title="当前状态" description="园长 Agent 当前聚焦的机构级结果摘要。">
               {result ? (
                 <div className="space-y-3 text-sm text-slate-600">
@@ -853,12 +886,14 @@ export default function AdminAgentPage() {
                 <div className="space-y-3">
                   {result.feedbackRiskItems.slice(0, 4).map((item) => (
                     <div key={item.childId} className="rounded-2xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="whitespace-normal break-words text-sm font-medium text-slate-900">
                             {item.childName} · {item.className}
                           </p>
-                          <p className="mt-1 text-sm text-slate-600">{item.reason}</p>
+                          <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                            {item.reason}
+                          </p>
                         </div>
                         <Badge variant="outline">{item.priorityLevel}</Badge>
                       </div>
@@ -880,10 +915,12 @@ export default function AdminAgentPage() {
                 <div className="space-y-3">
                   {notificationEvents.slice(0, 6).map((event) => (
                     <div key={event.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
+                      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">{event.title}</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{event.summary}</p>
+                          <p className="mt-2 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                            {event.summary}
+                          </p>
                         </div>
                         <EventStatusBadge status={event.status} />
                       </div>

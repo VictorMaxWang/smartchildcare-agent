@@ -27,9 +27,17 @@ type ParentStoryBookRuntimeProviderMeta = ParentStoryBookResponse["providerMeta"
       reachable?: boolean;
       fallbackReason?: string | null;
       upstreamHost?: string | null;
+      elapsedMs?: number | null;
+      timeoutMs?: number | null;
     } | null;
-    image?: Record<string, unknown> | null;
-    audio?: Record<string, unknown> | null;
+    image?: {
+      jobStatus?: string | null;
+      pendingSceneCount?: number;
+    } | null;
+    audio?: {
+      jobStatus?: string | null;
+      pendingSceneCount?: number;
+    } | null;
   } | null;
 };
 
@@ -41,6 +49,21 @@ type ParentStoryBookRuntimeStory = ParentStoryBookResponse & {
   providerMeta: ParentStoryBookRuntimeProviderMeta;
   scenes: ParentStoryBookRuntimeScene[];
 };
+
+export function hasActiveParentStoryBookMediaWarming(
+  story: ParentStoryBookResponse | null | undefined
+) {
+  if (!story) return false;
+  const runtime = story as ParentStoryBookRuntimeStory;
+  const imagePending = runtime.providerMeta.diagnostics?.image?.pendingSceneCount ?? 0;
+  const audioPending = runtime.providerMeta.diagnostics?.audio?.pendingSceneCount ?? 0;
+  return (
+    runtime.providerMeta.diagnostics?.image?.jobStatus === "warming" ||
+    runtime.providerMeta.diagnostics?.audio?.jobStatus === "warming" ||
+    imagePending > 0 ||
+    audioPending > 0
+  );
+}
 
 export function buildParentStoryBookCacheKey(
   request: ParentStoryBookRequest,
@@ -95,12 +118,19 @@ export function shouldBypassParentStoryBookCacheOnFirstLoad(
   const brainReachable = runtime.providerMeta.diagnostics?.brain?.reachable;
 
   if (brainReachable === false) return true;
+  if (hasActiveParentStoryBookMediaWarming(runtime)) return true;
   if (transport && transport !== "remote-brain-proxy") return true;
   if (imageDelivery && imageDelivery !== "real") return true;
   if (audioDelivery === "preview-only") return true;
 
   if (!transport && !runtime.providerMeta.realProvider) return true;
   return false;
+}
+
+export function shouldPollParentStoryBookMedia(
+  story: ParentStoryBookResponse | null | undefined
+) {
+  return hasActiveParentStoryBookMediaWarming(story);
 }
 
 export function readParentStoryBookCache(cacheKey: string) {

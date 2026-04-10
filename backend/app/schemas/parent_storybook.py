@@ -69,6 +69,13 @@ class ParentStoryBookDiagnosticsMedia(ParentStoryBookModel):
     resolved_provider: str | None = None
     live_enabled: bool = False
     missing_config: list[str] = Field(default_factory=list)
+    job_status: str | None = None
+    pending_scene_count: int = 0
+    ready_scene_count: int = 0
+    error_scene_count: int = 0
+    last_error_stage: str | None = None
+    last_error_reason: str | None = None
+    elapsed_ms: int | None = None
 
 
 class ParentStoryBookDiagnosticsBrain(ParentStoryBookModel):
@@ -77,6 +84,8 @@ class ParentStoryBookDiagnosticsBrain(ParentStoryBookModel):
     upstream_host: str | None = None
     status_code: int | None = None
     retry_strategy: Literal["none", "normalized-base-retry"] | None = None
+    elapsed_ms: int | None = None
+    timeout_ms: int | None = None
 
 
 class ParentStoryBookDiagnostics(ParentStoryBookModel):

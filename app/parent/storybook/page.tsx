@@ -29,6 +29,7 @@ import type {
 import {
   buildParentStoryBookCacheKey,
   readParentStoryBookCache,
+  shouldPollParentStoryBookMedia,
   shouldBypassParentStoryBookCacheOnFirstLoad,
   type ParentStoryBookClientCacheState,
   writeParentStoryBookCache,
@@ -49,6 +50,8 @@ type StoryBookControls = {
 };
 
 const PAGE_COUNT_OPTIONS = [4, 6, 8] as const satisfies readonly ParentStoryBookPageCount[];
+const MEDIA_POLL_INTERVAL_MS = 1_500;
+const MEDIA_POLL_MAX_ATTEMPTS = 10;
 
 function buildInitialControls(input: {
   hasChildContext: boolean;
@@ -98,6 +101,8 @@ export default function ParentStoryBookPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const networkOnlyRef = useRef(false);
   const storyRef = useRef<ParentStoryBookResponse | null>(null);
+  const pollAttemptRef = useRef(0);
+  const pollingStoryIdRef = useRef<string | null>(null);
 
   const feeds = getParentFeed();
   const selectedFeed = useMemo(() => {
@@ -179,6 +184,31 @@ export default function ParentStoryBookPage() {
 
   useEffect(() => {
     storyRef.current = story;
+  }, [story]);
+
+  useEffect(() => {
+    if (!story || !shouldPollParentStoryBookMedia(story)) {
+      pollAttemptRef.current = 0;
+      pollingStoryIdRef.current = story?.storyId ?? null;
+      return;
+    }
+
+    if (pollingStoryIdRef.current !== story.storyId) {
+      pollingStoryIdRef.current = story.storyId;
+      pollAttemptRef.current = 0;
+    }
+
+    if (pollAttemptRef.current >= MEDIA_POLL_MAX_ATTEMPTS) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      pollAttemptRef.current += 1;
+      networkOnlyRef.current = true;
+      setReloadToken((previousToken) => previousToken + 1);
+    }, MEDIA_POLL_INTERVAL_MS);
+
+    return () => window.clearTimeout(timer);
   }, [story]);
 
   const requiresTheme =

@@ -16,6 +16,7 @@ import {
 } from "@/lib/server/brain-client";
 
 export const runtime = "nodejs";
+const PARENT_STORYBOOK_BRAIN_TIMEOUT_MS = 35_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -98,6 +99,8 @@ function attachTransportMetadata(
     upstreamHost: string | null;
     statusCode?: number | null;
     retryStrategy?: "none" | "normalized-base-retry";
+    elapsedMs?: number | null;
+    timeoutMs?: number | null;
   }
 ) {
   return {
@@ -117,6 +120,14 @@ function attachTransportMetadata(
             meta.retryStrategy ??
             story.providerMeta.diagnostics?.brain?.retryStrategy ??
             "none",
+          elapsedMs:
+            meta.elapsedMs ??
+            story.providerMeta.diagnostics?.brain?.elapsedMs ??
+            null,
+          timeoutMs:
+            meta.timeoutMs ??
+            story.providerMeta.diagnostics?.brain?.timeoutMs ??
+            null,
         },
         image: story.providerMeta.diagnostics?.image ?? {
           requestedProvider: story.providerMeta.imageProvider,
@@ -125,6 +136,13 @@ function attachTransportMetadata(
             story.providerMeta.imageDelivery === "real" ||
             story.providerMeta.imageDelivery === "mixed",
           missingConfig: [],
+          jobStatus: "idle",
+          pendingSceneCount: 0,
+          readySceneCount: 0,
+          errorSceneCount: 0,
+          lastErrorStage: null,
+          lastErrorReason: null,
+          elapsedMs: null,
         },
         audio: story.providerMeta.diagnostics?.audio ?? {
           requestedProvider: story.providerMeta.audioProvider,
@@ -133,6 +151,13 @@ function attachTransportMetadata(
             story.providerMeta.audioDelivery === "real" ||
             story.providerMeta.audioDelivery === "mixed",
           missingConfig: [],
+          jobStatus: "idle",
+          pendingSceneCount: 0,
+          readySceneCount: 0,
+          errorSceneCount: 0,
+          lastErrorStage: null,
+          lastErrorReason: null,
+          elapsedMs: null,
         },
       },
     },
@@ -193,7 +218,11 @@ export async function POST(request: Request) {
     });
   }
 
-  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/parent/storybook");
+  const brainForward = await forwardBrainRequest(
+    request,
+    "/api/v1/agents/parent/storybook",
+    { timeoutMs: PARENT_STORYBOOK_BRAIN_TIMEOUT_MS }
+  );
 
   if (brainForward.response) {
     const remoteStory = await parseRemoteStoryResponse(brainForward.response.clone());
@@ -211,6 +240,8 @@ export async function POST(request: Request) {
         upstreamHost: brainForward.upstreamHost,
         statusCode: brainForward.statusCode,
         retryStrategy: brainForward.retryStrategy,
+        elapsedMs: brainForward.elapsedMs,
+        timeoutMs: brainForward.timeoutMs,
       }
     );
 
@@ -255,6 +286,8 @@ export async function POST(request: Request) {
       upstreamHost: brainForward.upstreamHost,
       statusCode: brainForward.statusCode,
       retryStrategy: brainForward.retryStrategy,
+      elapsedMs: brainForward.elapsedMs,
+      timeoutMs: brainForward.timeoutMs,
     }
   );
 

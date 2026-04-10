@@ -5,8 +5,11 @@ import type { ParentStoryBookScene } from "@/lib/ai/types";
 
 import {
   buildCaptionTimeline,
+  getRuntimeBannerItems,
   getCaptionIndexForCharIndex,
   getCaptionIndexForElapsedMs,
+  getStoryAudioRuntimeLabel,
+  resolveRuntimeStoryMode,
   resolveSceneCaptionTiming,
 } from "./StoryBookViewer.tsx";
 
@@ -87,4 +90,83 @@ test("caption helpers map elapsed time and speech boundaries onto the correct se
   assert.equal(getCaptionIndexForElapsedMs(timeline, 3200), 1);
   assert.equal(getCaptionIndexForElapsedMs(timeline, 6800), 2);
   assert.equal(getCaptionIndexForCharIndex(timeline, boundaryIndex), 2);
+});
+
+test("runtime story mode only reports live when both image and audio are real", () => {
+  const fallbackStory = {
+    providerMeta: {
+      imageDelivery: "dynamic-fallback",
+      audioDelivery: "preview-only",
+    },
+  } as any;
+  const mixedStory = {
+    providerMeta: {
+      imageDelivery: "real",
+      audioDelivery: "preview-only",
+    },
+  } as any;
+  const liveStory = {
+    providerMeta: {
+      imageDelivery: "real",
+      audioDelivery: "real",
+    },
+  } as any;
+
+  assert.equal(resolveRuntimeStoryMode(fallbackStory), "fallback");
+  assert.equal(resolveRuntimeStoryMode(mixedStory), "mixed");
+  assert.equal(resolveRuntimeStoryMode(liveStory), "live");
+});
+
+test("audio runtime label keeps preview-only honest about local fallback", () => {
+  assert.equal(
+    getStoryAudioRuntimeLabel("preview-only", true),
+    "后端真实朗读未命中，本地补读"
+  );
+  assert.equal(
+    getStoryAudioRuntimeLabel("preview-only", false),
+    "后端真实朗读未命中，字幕预演"
+  );
+  assert.equal(
+    getStoryAudioRuntimeLabel("mixed", true),
+    "部分真实朗读 + 本地补读"
+  );
+});
+
+test("runtime banners align brain connectivity and warming media states", () => {
+  const items = getRuntimeBannerItems(
+    {
+      providerMeta: {
+        transport: "remote-brain-proxy",
+        imageDelivery: "dynamic-fallback",
+        audioDelivery: "preview-only",
+        diagnostics: {
+          brain: {
+            reachable: true,
+            upstreamHost: "brain.example.com",
+            elapsedMs: 820,
+            timeoutMs: 35000,
+          },
+          image: {
+            jobStatus: "warming",
+            readySceneCount: 2,
+            pendingSceneCount: 4,
+            errorSceneCount: 0,
+            elapsedMs: 1200,
+          },
+          audio: {
+            jobStatus: "disabled",
+            readySceneCount: 0,
+            pendingSceneCount: 0,
+            errorSceneCount: 0,
+          },
+        },
+      },
+    } as any,
+    true
+  );
+
+  assert.ok(items.some((item) => item.label === "FastAPI brain 已接通"));
+  assert.ok(items.some((item) => item.label === "真实插画补齐中"));
+  assert.ok(items.some((item) => item.label === "后端真实朗读未命中，当前为本地补读"));
+  assert.ok(items.every((item) => item.label !== "未接通 FastAPI brain，当前为本地回退链路"));
 });

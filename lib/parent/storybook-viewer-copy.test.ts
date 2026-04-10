@@ -16,18 +16,18 @@ import {
 
 test("describeStoryBookMode maps live mixed fallback to Chinese labels and summaries", () => {
   assert.deepEqual(describeStoryBookMode("live"), {
-    label: "实时生成",
-    summary: "真实插画和真实配音都已生成，当前展示的是完整实时结果。",
+    label: "完整实时结果",
+    summary: "当前已命中真实插画和真实逐页朗读，页面展示的是完整 live 结果。",
     badgeVariant: "success",
   });
   assert.deepEqual(describeStoryBookMode("mixed"), {
-    label: "混合生成",
-    summary: "部分真实媒体已命中，其余由兜底内容补齐，不影响完整演示。",
+    label: "混合交付",
+    summary: "当前只有部分页面命中真实媒体，其余页面仍由兜底图或本地补读/字幕预演补齐。",
     badgeVariant: "warning",
   });
   assert.deepEqual(describeStoryBookMode("fallback"), {
-    label: "动态剧情兜底",
-    summary: "当前走蓝图驱动的动态剧情插画与预览朗读，故事、节奏和交互仍然完整可看。",
+    label: "兜底交付",
+    summary: "当前主要展示动态剧情插画与本地补读/字幕预演，还不是完整 live 媒体结果。",
     badgeVariant: "secondary",
   });
 });

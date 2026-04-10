@@ -60,18 +60,34 @@ type StoryBookRuntimeDiagnostics = {
     reachable?: boolean;
     fallbackReason?: string | null;
     upstreamHost?: string | null;
+    elapsedMs?: number | null;
+    timeoutMs?: number | null;
   } | null;
   image?: {
     requestedProvider?: string;
     resolvedProvider?: string;
     liveEnabled?: boolean;
     missingConfig?: string[];
+    jobStatus?: string | null;
+    pendingSceneCount?: number;
+    readySceneCount?: number;
+    errorSceneCount?: number;
+    lastErrorStage?: string | null;
+    lastErrorReason?: string | null;
+    elapsedMs?: number | null;
   } | null;
   audio?: {
     requestedProvider?: string;
     resolvedProvider?: string;
     liveEnabled?: boolean;
     missingConfig?: string[];
+    jobStatus?: string | null;
+    pendingSceneCount?: number;
+    readySceneCount?: number;
+    errorSceneCount?: number;
+    lastErrorStage?: string | null;
+    lastErrorReason?: string | null;
+    elapsedMs?: number | null;
   } | null;
 } | null;
 type StoryBookRuntimeProviderMeta = ParentStoryBookResponse["providerMeta"] & {
@@ -382,9 +398,9 @@ function getBookPlaybackLabel(
     return "播放全书";
   }
   if (audioDelivery === "mixed") {
-    return canUseLocalSpeech ? "播放全书（含本地朗读）" : "播放全书（含字幕预演页）";
+    return canUseLocalSpeech ? "播放全书（含本地补读）" : "播放全书（含字幕预演页）";
   }
-  if (canUseLocalSpeech) return "播放全书（含本地朗读）";
+  if (canUseLocalSpeech) return "播放全书（本地补读）";
   return "全书字幕预演";
 }
 
@@ -415,17 +431,19 @@ function getSceneAudioPlayingLabel(
   return "字幕预演中";
 }
 
-function getStoryAudioRuntimeLabel(
+export function getStoryAudioRuntimeLabel(
   audioDelivery?: StoryBookAudioDelivery,
   canUseLocalSpeech = false
 ) {
-  if (audioDelivery === "real") {
-    return "真实朗读";
+  if (audioDelivery === "real" || audioDelivery === "stream-url" || audioDelivery === "inline-data-url") {
+    return "真实逐页朗读";
   }
   if (audioDelivery === "mixed") {
-    return canUseLocalSpeech ? "部分真实朗读 + 本地朗读" : "部分真实朗读";
+    return canUseLocalSpeech ? "部分真实朗读 + 本地补读" : "部分真实朗读 + 字幕预演";
   }
-  return canUseLocalSpeech ? "本地朗读" : "字幕预演";
+  return canUseLocalSpeech
+    ? "后端真实朗读未命中，本地补读"
+    : "后端真实朗读未命中，字幕预演";
 }
 
 function getRuntimeStory(story: ParentStoryBookResponse | null | undefined) {
@@ -440,7 +458,51 @@ function getRuntimeSceneImageDelivery(scene: StoryBookRuntimeScene) {
   return "svg-fallback";
 }
 
-function getRuntimeBannerItems(
+function formatWarmProgressDetail(channel?: {
+  pendingSceneCount?: number;
+  readySceneCount?: number;
+  errorSceneCount?: number;
+  elapsedMs?: number | null;
+  lastErrorReason?: string | null;
+}) {
+  if (!channel) return "等待下一次拉取更新。";
+  const parts = [
+    `ready ${channel.readySceneCount ?? 0}`,
+    `pending ${channel.pendingSceneCount ?? 0}`,
+  ];
+  if ((channel.errorSceneCount ?? 0) > 0) {
+    parts.push(`error ${channel.errorSceneCount ?? 0}`);
+  }
+  if (typeof channel.elapsedMs === "number") {
+    parts.push(`elapsed ${channel.elapsedMs}ms`);
+  }
+  if (channel.lastErrorReason) {
+    parts.push(`last error: ${channel.lastErrorReason}`);
+  }
+  return parts.join(" · ");
+}
+
+export function resolveRuntimeStoryMode(
+  story: StoryBookRuntimeResponse | null | undefined
+) {
+  if (!story) return "fallback";
+  const imageDelivery = story.providerMeta.imageDelivery;
+  const audioDelivery = story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery;
+  if (imageDelivery === "real" && audioDelivery === "real") {
+    return "live";
+  }
+  if (
+    imageDelivery === "mixed" ||
+    audioDelivery === "mixed" ||
+    imageDelivery === "real" ||
+    audioDelivery === "real"
+  ) {
+    return "mixed";
+  }
+  return "fallback";
+}
+
+export function getRuntimeBannerItems(
   story: StoryBookRuntimeResponse | null | undefined,
   canUseLocalSpeech: boolean
 ) {
@@ -451,26 +513,41 @@ function getRuntimeBannerItems(
   const transport = story.providerMeta.transport;
   const imageDelivery = story.providerMeta.imageDelivery;
   const audioDelivery = story.providerMeta.audioDelivery;
+  const brainTimingParts = [
+    diagnostics?.brain?.upstreamHost ? `上游：${diagnostics.brain.upstreamHost}` : null,
+    typeof diagnostics?.brain?.elapsedMs === "number" ? `耗时 ${diagnostics.brain.elapsedMs}ms` : null,
+    typeof diagnostics?.brain?.timeoutMs === "number" ? `预算 ${diagnostics.brain.timeoutMs}ms` : null,
+  ].filter(Boolean);
 
-  if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
-    items.push({
-      tone: "warning",
-      label: "未连接到 FastAPI brain，当前为本地演示模式",
-      detail: diagnostics?.brain?.fallbackReason
-        ? `回退原因：${diagnostics.brain.fallbackReason}`
-        : "当前结果来自本地回退链路。",
-    });
-  } else if (transport === "remote-brain-proxy") {
+  if (transport === "remote-brain-proxy") {
     items.push({
       tone: "success",
-      label: "FastAPI 实时链路已连接",
-      detail: diagnostics?.brain?.upstreamHost
-        ? `上游：${diagnostics.brain.upstreamHost}`
-        : "当前绘本来自实时后端链路。",
+      label: "FastAPI brain 已接通",
+      detail: brainTimingParts.join(" · ") || "当前绘本来自远端 brain 链路。",
+    });
+  } else if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
+    items.push({
+      tone: "warning",
+      label: "未接通 FastAPI brain，当前为本地回退链路",
+      detail: diagnostics?.brain?.fallbackReason
+        ? `回退原因：${diagnostics.brain.fallbackReason}${brainTimingParts.length ? ` · ${brainTimingParts.join(" · ")}` : ""}`
+        : brainTimingParts.join(" · ") || "当前结果来自本地回退链路。",
+    });
+  } else {
+    items.push({
+      tone: "info",
+      label: "brain 状态待确认",
+      detail: brainTimingParts.join(" · ") || "当前未收到完整的 transport 诊断。",
     });
   }
 
-  if (imageDelivery === "real") {
+  if (diagnostics?.image?.jobStatus === "warming") {
+    items.push({
+      tone: "info",
+      label: "真实插画补齐中",
+      detail: formatWarmProgressDetail(diagnostics.image),
+    });
+  } else if (imageDelivery === "real") {
     items.push({
       tone: "success",
       label: "真实插画已就绪",
@@ -486,7 +563,9 @@ function getRuntimeBannerItems(
     items.push({
       tone: "info",
       label: "真实图片暂未命中，当前使用动态剧情插画",
-      detail: "当前页先展示由 scene blueprint 驱动的剧情插画，不再默认落回示例图。",
+      detail: diagnostics?.image?.lastErrorReason
+        ? `${formatWarmProgressDetail(diagnostics.image)}`
+        : "当前页先展示由 scene blueprint 驱动的剧情插画，不再默认落回示例图。",
     });
   } else if (imageDelivery === "demo-art") {
     items.push({
@@ -502,26 +581,34 @@ function getRuntimeBannerItems(
     });
   }
 
-  if (audioDelivery === "real") {
+  if (diagnostics?.audio?.jobStatus === "warming") {
+    items.push({
+      tone: "info",
+      label: "真实逐页朗读补齐中",
+      detail: formatWarmProgressDetail(diagnostics.audio),
+    });
+  } else if (audioDelivery === "real") {
     items.push({
       tone: "success",
-      label: "真实朗读已就绪",
+      label: "真实逐页朗读已就绪",
       detail: "每页将优先播放后端生成的真实音频。",
     });
   } else if (audioDelivery === "mixed") {
     items.push({
       tone: "info",
-      label: canUseLocalSpeech ? "部分真实朗读，缺页将使用本地朗读" : "部分真实朗读，缺页将使用字幕预演",
+      label: canUseLocalSpeech ? "部分真实朗读，缺页将使用本地补读" : "部分真实朗读，缺页将使用字幕预演",
       detail: canUseLocalSpeech
-        ? "未命中的页会切到浏览器本地朗读。"
+        ? "未命中的页会切到浏览器本地补读。"
         : "未命中的页会切到字幕预演。",
     });
   } else {
     items.push({
-      tone: canUseLocalSpeech ? "success" : "warning",
-      label: canUseLocalSpeech ? "音频 provider 未就绪，当前使用本地朗读" : "音频 provider 未就绪，当前仅字幕预演",
+      tone: "warning",
+      label: canUseLocalSpeech
+        ? "后端真实朗读未命中，当前为本地补读"
+        : "后端真实朗读未命中，当前仅字幕预演",
       detail: canUseLocalSpeech
-        ? "浏览器 speechSynthesis 可用，仍可完成逐页朗读。"
+        ? "浏览器 speechSynthesis 可用，但当前听到的不是后端真实 TTS。"
         : "当前浏览器不支持本地朗读，只能进行字幕预演。",
     });
   }
@@ -549,15 +636,15 @@ function getRuntimePlaybackActionText(
     return "播放朗读";
   }
   if (isPlaying && playbackSource === "local") {
-    if (playbackState === "paused" && isPlaying) return "继续本地朗读";
-    if (playbackState === "local" && isPlaying) return "暂停本地朗读";
-    return "本地朗读";
+    if (playbackState === "paused" && isPlaying) return "继续本地补读";
+    if (playbackState === "local" && isPlaying) return "暂停本地补读";
+    return "本地补读";
   }
   if (scene.audioStatus === "ready" && scene.audioUrl) {
     return "播放朗读";
   }
   if (canUseLocalSpeech) {
-    return "本地朗读";
+    return "本地补读";
   }
   if (playbackState === "preview") {
     return isPlaying ? "停止预演" : "字幕预演";
@@ -579,10 +666,10 @@ function getRuntimeCaptionStatusText(
     return "真实朗读已就绪";
   }
   if (playbackSource === "local") {
-    if (playbackState === "loading" && isPlaying) return "正在准备本地朗读";
-    if (playbackState === "paused" && isPlaying) return "本地朗读已暂停";
-    if (isPlaying) return "本地朗读播放中";
-    return "当前使用本地朗读";
+    if (playbackState === "loading" && isPlaying) return "正在准备本地补读";
+    if (playbackState === "paused" && isPlaying) return "本地补读已暂停";
+    if (isPlaying) return "本地补读播放中";
+    return "后端真实朗读未命中，当前使用本地补读";
   }
   if (playbackState === "preview") {
     return isPlaying ? "当前仅在进行字幕预演" : "当前仅字幕预演，未生成真实音频";
@@ -604,7 +691,7 @@ function getRuntimePlaybackTimeLabel(
   }
   if (playbackSource === "real") return "可播放";
   if (playbackState === "preview") return "仅字幕预演";
-  if (playbackSource === "local") return playbackState === "local" ? "本地朗读" : "可本地朗读";
+  if (playbackSource === "local") return playbackState === "local" ? "本地补读" : "可本地补读";
   return "仅字幕预演";
 }
 
@@ -617,7 +704,7 @@ function getRuntimeSceneAudioBadgeLabel(
   void canUseLocalSpeech;
   if (isSceneActive) {
     if (playbackSource === "real") return "真实朗读";
-    if (playbackSource === "local") return "本地朗读";
+    if (playbackSource === "local") return "本地补读";
   } else if (scene.audioStatus === "ready" && scene.audioUrl) {
     return "真实朗读";
   }
@@ -635,8 +722,8 @@ function getRuntimeSceneAudioPlayingLabel(
     return "真实朗读中";
   }
   if (playbackSource === "local") {
-    if (playbackState === "paused") return "本地朗读已暂停";
-    return "本地朗读中";
+    if (playbackState === "paused") return "本地补读已暂停";
+    return "本地补读中";
   }
   return "字幕预演中";
 }
@@ -705,7 +792,10 @@ export default function StoryBookViewer({
   parentHref?: string;
 }) {
   const theme = getTheme(story?.stylePreset ?? selectedPresetId);
-  const modeCopy = story ? describeStoryBookMode(story.providerMeta.mode) : null;
+  const runtimeStory = story ? getRuntimeStory(story) : null;
+  const modeCopy = runtimeStory
+    ? describeStoryBookMode(resolveRuntimeStoryMode(runtimeStory))
+    : null;
   const selectedThemeChip = themeChips.includes(manualTheme.trim()) ? manualTheme.trim() : null;
   const requiresTheme =
     generationMode === "manual-theme" || generationMode === "hybrid";
@@ -713,7 +803,6 @@ export default function StoryBookViewer({
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     typeof window.speechSynthesis?.speak === "function";
-  const runtimeStory = story ? getRuntimeStory(story) : null;
   const runtimeBanners = story
     ? getRuntimeBannerItems(runtimeStory, canUseLocalSpeech)
     : [];

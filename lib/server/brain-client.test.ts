@@ -143,3 +143,53 @@ test("brain client returns fallback diagnostics after normalized retry still fai
     globalThis.fetch = originalFetch;
   }
 });
+
+test("brain client surfaces timeout override and elapsed timing on abort", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+
+  globalThis.setTimeout = (((callback: TimerHandler) =>
+    originalSetTimeout(callback, 0)) as unknown) as typeof globalThis.setTimeout;
+  globalThis.fetch = (((_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("missing abort signal"));
+        return;
+      }
+      signal.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    })) as unknown) as typeof fetch;
+
+  try {
+    await withEnv(
+      {
+        BRAIN_API_BASE_URL: "http://brain.example.com",
+        NEXT_PUBLIC_BACKEND_BASE_URL: undefined,
+      },
+      async () => {
+        const request = new Request("http://localhost:3000/api/ai/parent-storybook", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ok: true }),
+        });
+
+        const result = await forwardBrainRequest(
+          request,
+          "/api/v1/agents/parent/storybook",
+          { timeoutMs: 25 }
+        );
+
+        assert.equal(result.response, null);
+        assert.equal(result.fallbackReason, "brain-proxy-timeout");
+        assert.equal(result.timeoutMs, 25);
+        assert.equal(typeof result.elapsedMs, "number");
+        assert.ok((result.elapsedMs ?? -1) >= 0);
+      }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});

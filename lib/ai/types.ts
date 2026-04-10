@@ -619,6 +619,13 @@ export interface ParentStoryBookDiagnosticsChannel {
   resolvedProvider: string;
   liveEnabled: boolean;
   missingConfig: string[];
+  jobStatus?: "disabled" | "idle" | "warming" | "ready" | "partial" | "error";
+  pendingSceneCount?: number;
+  readySceneCount?: number;
+  errorSceneCount?: number;
+  lastErrorStage?: string | null;
+  lastErrorReason?: string | null;
+  elapsedMs?: number | null;
 }
 
 export interface ParentStoryBookDiagnostics {
@@ -628,6 +635,8 @@ export interface ParentStoryBookDiagnostics {
     upstreamHost: string | null;
     statusCode?: number | null;
     retryStrategy?: "none" | "normalized-base-retry";
+    elapsedMs?: number | null;
+    timeoutMs?: number | null;
   };
   image: ParentStoryBookDiagnosticsChannel;
   audio: ParentStoryBookDiagnosticsChannel;

@@ -43,11 +43,23 @@ export function RolePageShell({
 export function RoleSplitLayout({
   main,
   aside,
+  stacked = false,
 }: {
   main: ReactNode;
   aside: ReactNode;
+  stacked?: boolean;
 }) {
-  return <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">{main}{aside}</div>;
+  return (
+    <div
+      className={cn(
+        "grid gap-6",
+        stacked ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]"
+      )}
+    >
+      {main}
+      {aside}
+    </div>
+  );
 }
 
 export function MetricGrid({

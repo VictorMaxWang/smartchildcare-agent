@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 export default function RiskPriorityBoard({
   items,
   className,
+  layoutVariant = "split",
   emptyHref = "/teacher/high-risk-consultation",
   isLoading = false,
   emptyTitle,
@@ -24,6 +25,7 @@ export default function RiskPriorityBoard({
 }: {
   items: AdminConsultationPriorityItem[];
   className?: string;
+  layoutVariant?: "split" | "stacked";
   emptyHref?: string;
   isLoading?: boolean;
   emptyTitle?: string;
@@ -85,7 +87,12 @@ export default function RiskPriorityBoard({
         {items.map((item) => (
           <div
             key={item.consultationId}
-            className="grid min-w-0 gap-4 2xl:items-start 2xl:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]"
+            className={cn(
+              "min-w-0 gap-4",
+              layoutVariant === "stacked"
+                ? "flex flex-col"
+                : "grid min-[1900px]:items-start min-[1900px]:grid-cols-[minmax(0,1.08fr)_minmax(460px,0.92fr)]"
+            )}
           >
             <DirectorDecisionCard
               item={item}
@@ -93,7 +100,10 @@ export default function RiskPriorityBoard({
               isCreatingNotification={isCreatingConsultationNotification?.(item.consultationId) ?? false}
               notificationError={notificationError}
             />
-            <ConsultationTraceCard item={item} className="min-w-0 2xl:self-start" />
+            <ConsultationTraceCard
+              item={item}
+              className={cn("min-w-0", layoutVariant === "split" ? "min-[1900px]:self-start" : undefined)}
+            />
           </div>
         ))}
       </div>

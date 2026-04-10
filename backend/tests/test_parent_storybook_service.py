@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 
 from app.providers.base import ProviderResult
-from app.services.parent_storybook_service import run_parent_storybook
+from app.services.parent_storybook_service import await_storybook_media_warming, run_parent_storybook
 from app.services.storybook_media_cache import get_storybook_media_cache
 
 
@@ -66,13 +67,35 @@ class _SceneProvider:
         self.image_status = image_status
         self.audio_status = audio_status
         self.calls: list[dict] = []
+        self._cached_results: dict[str, ProviderResult[dict]] = {}
+
+    def _cache_key(self, kwargs: dict) -> str:
+        if "image_prompt" in kwargs:
+            return f"image::{kwargs['scene_index']}::{kwargs['image_prompt']}"
+        return f"audio::{kwargs['scene_index']}::{kwargs['audio_script']}"
+
+    def read_cached_scene(self, **kwargs):
+        cached = self._cached_results.get(self._cache_key(kwargs))
+        if not cached:
+            return None
+        return ProviderResult(
+            output={
+                **deepcopy(cached.output),
+                "cacheHit": True,
+            },
+            provider=cached.provider,
+            mode=cached.mode,
+            source="cache",
+            model=cached.model,
+            request_id=cached.request_id,
+        )
 
     def render_scene(self, **kwargs):
         self.calls.append(kwargs)
         if "image_prompt" in kwargs:
             status = self.image_status or "fallback"
             image_url = "https://cdn.example.com/story-1.png" if status == "ready" else None
-            return ProviderResult(
+            result = ProviderResult(
                 output={
                     "imagePrompt": kwargs["image_prompt"],
                     "imageUrl": image_url,
@@ -84,10 +107,12 @@ class _SceneProvider:
                 source="vivo" if status == "ready" else "mock",
                 model="mock-image-v1",
             )
+            self._cached_results[self._cache_key(kwargs)] = result
+            return result
 
         status = self.audio_status or "fallback"
         audio_url = "data:audio/wav;base64,AAAA" if status == "ready" else None
-        return ProviderResult(
+        result = ProviderResult(
             output={
                 "audioUrl": audio_url,
                 "audioRef": "storybook-audio-1",
@@ -102,6 +127,8 @@ class _SceneProvider:
             source="vivo" if status == "ready" else "mock",
             model="mock-audio-v1",
         )
+        self._cached_results[self._cache_key(kwargs)] = result
+        return result
 
 
 def test_parent_storybook_service_returns_six_page_storybook_by_default():
@@ -147,8 +174,16 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
         lambda settings: audio_provider,
     )
 
-    result = asyncio.run(run_parent_storybook(_base_payload()))
+    first = asyncio.run(run_parent_storybook(_base_payload()))
+    assert first["providerMeta"]["mode"] == "fallback"
+    assert first["providerMeta"]["imageDelivery"] == "dynamic-fallback"
+    assert first["providerMeta"]["audioDelivery"] == "preview-only"
+    assert first["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
 
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+    result = asyncio.run(run_parent_storybook(_base_payload()))
     assert result["providerMeta"]["mode"] == "live"
     assert result["providerMeta"]["realProvider"] is True
     assert result["fallback"] is False
@@ -164,6 +199,8 @@ def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch)
     assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "vivo-story-image"
     assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "vivo-story-tts"
+    assert result["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "ready"
+    assert result["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "ready"
 
 
 def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatch):
@@ -179,8 +216,14 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
         lambda settings: audio_provider,
     )
 
-    result = asyncio.run(run_parent_storybook(_base_payload()))
+    first = asyncio.run(run_parent_storybook(_base_payload()))
+    assert first["providerMeta"]["mode"] == "fallback"
+    assert first["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "disabled"
 
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+    result = asyncio.run(run_parent_storybook(_base_payload()))
     assert result["providerMeta"]["mode"] == "mixed"
     assert result["providerMeta"]["realProvider"] is True
     assert result["fallback"] is True
@@ -192,6 +235,7 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
     assert result["scenes"][0]["audioStatus"] == "fallback"
     assert result["scenes"][0]["imageSourceKind"] == "real"
     assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
+    assert result["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "ready"
 
 
 def test_parent_storybook_service_degrades_to_card_when_context_is_sparse():
@@ -274,16 +318,19 @@ def test_parent_storybook_service_reuses_media_cache(monkeypatch):
     media_cache._entries.clear()
 
     first = asyncio.run(run_parent_storybook(_base_payload()))
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
     second = asyncio.run(run_parent_storybook(_base_payload()))
+    third = asyncio.run(run_parent_storybook(_base_payload()))
 
     assert first["providerMeta"]["cacheHitCount"] == 0
-    assert second["providerMeta"]["cacheHitCount"] == 0
-    assert image_provider.calls and len(image_provider.calls) == 12
-    assert audio_provider.calls and len(audio_provider.calls) == 12
-    assert len(media_cache._entries) == 6
-    assert second["scenes"][0]["imageCacheHit"] is False
-    assert second["scenes"][0]["audioCacheHit"] is False
-    assert first["scenes"][0]["audioUrl"] == second["scenes"][0]["audioUrl"]
+    assert second["providerMeta"]["cacheHitCount"] == 12
+    assert third["providerMeta"]["cacheHitCount"] == 12
+    assert image_provider.calls and len(image_provider.calls) == 6
+    assert audio_provider.calls and len(audio_provider.calls) == 6
+    assert len(media_cache._entries) == 12
+    assert second["scenes"][0]["imageCacheHit"] is True
+    assert second["scenes"][0]["audioCacheHit"] is True
+    assert third["scenes"][0]["audioUrl"] == second["scenes"][0]["audioUrl"]
     assert second["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
 
 

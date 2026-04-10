@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.providers.base import ProviderResult
 from app.schemas.parent_storybook import ParentStoryBookRequest
+from app.services.parent_storybook_service import await_storybook_media_warming
 
 
 client = TestClient(app)
@@ -31,6 +34,68 @@ def build_payload() -> dict:
         "requestSource": "pytest-endpoint",
         "stylePreset": "forest-crayon",
     }
+
+
+class _WarmableProvider:
+    def __init__(self, *, provider_name: str, media_kind: str, ready: bool) -> None:
+        self.provider_name = provider_name
+        self.media_kind = media_kind
+        self.ready = ready
+        self._cached_results: dict[str, ProviderResult[dict]] = {}
+
+    def _cache_key(self, kwargs: dict) -> str:
+        if self.media_kind == "image":
+            return f"image::{kwargs['scene_index']}::{kwargs['image_prompt']}"
+        return f"audio::{kwargs['scene_index']}::{kwargs['audio_script']}"
+
+    def read_cached_scene(self, **kwargs):
+        cached = self._cached_results.get(self._cache_key(kwargs))
+        if not cached:
+            return None
+        return ProviderResult(
+            output={
+                **deepcopy(cached.output),
+                "cacheHit": True,
+            },
+            provider=cached.provider,
+            mode=cached.mode,
+            source="cache",
+            model=cached.model,
+            request_id=cached.request_id,
+        )
+
+    def render_scene(self, **kwargs):
+        if self.media_kind == "image":
+            result = ProviderResult(
+                output={
+                    "imagePrompt": kwargs["image_prompt"],
+                    "imageUrl": "https://cdn.example.com/story-live.png" if self.ready else None,
+                    "assetRef": "https://cdn.example.com/story-live.png" if self.ready else None,
+                    "imageStatus": "ready" if self.ready else "fallback",
+                },
+                provider=self.provider_name,
+                mode="live" if self.ready else "fallback",
+                source="vivo" if self.ready else "mock",
+                model="live-image" if self.ready else "fallback-image",
+            )
+        else:
+            result = ProviderResult(
+                output={
+                    "audioUrl": "data:audio/wav;base64,AAAA" if self.ready else None,
+                    "audioRef": "live-audio-1" if self.ready else "story-mixed-audio-1",
+                    "audioScript": kwargs["audio_script"],
+                    "audioStatus": "ready" if self.ready else "fallback",
+                    "voiceStyle": kwargs["voice_style"],
+                    "audioBytes": b"RIFF" if self.ready else None,
+                    "audioContentType": "audio/wav" if self.ready else None,
+                },
+                provider=self.provider_name,
+                mode="live" if self.ready else "fallback",
+                source="vivo" if self.ready else "mock",
+                model="live-audio" if self.ready else "mixed-audio",
+            )
+        self._cached_results[self._cache_key(kwargs)] = result
+        return result
 
 
 def test_parent_storybook_endpoint_returns_structured_response():
@@ -60,49 +125,32 @@ def test_parent_storybook_endpoint_returns_structured_response():
 
 
 def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
-    class _LiveProvider:
-        def __init__(self, *, provider_name: str, media_kind: str):
-            self.provider_name = provider_name
-            self.media_kind = media_kind
-
-        def render_scene(self, **kwargs):
-            if self.media_kind == "image":
-                return ProviderResult(
-                    output={
-                        "imagePrompt": kwargs["image_prompt"],
-                        "imageUrl": "https://cdn.example.com/story-live.png",
-                        "assetRef": "https://cdn.example.com/story-live.png",
-                        "imageStatus": "ready",
-                    },
-                    provider=self.provider_name,
-                    mode="live",
-                    source="vivo",
-                    model="live-image",
-                )
-            return ProviderResult(
-                output={
-                    "audioUrl": "data:audio/wav;base64,AAAA",
-                    "audioRef": "live-audio-1",
-                    "audioScript": kwargs["audio_script"],
-                    "audioStatus": "ready",
-                    "voiceStyle": kwargs["voice_style"],
-                    "audioBytes": b"RIFF",
-                    "audioContentType": "audio/wav",
-                },
-                provider=self.provider_name,
-                mode="live",
-                source="vivo",
-                model="live-audio",
-            )
+    image_provider = _WarmableProvider(
+        provider_name="vivo-story-image",
+        media_kind="image",
+        ready=True,
+    )
+    audio_provider = _WarmableProvider(
+        provider_name="vivo-story-tts",
+        media_kind="audio",
+        ready=True,
+    )
 
     monkeypatch.setattr(
         "app.services.parent_storybook_service.resolve_story_image_provider",
-        lambda settings: _LiveProvider(provider_name="vivo-story-image", media_kind="image"),
+        lambda settings: image_provider,
     )
     monkeypatch.setattr(
         "app.services.parent_storybook_service.resolve_story_audio_provider",
-        lambda settings: _LiveProvider(provider_name="vivo-story-tts", media_kind="audio"),
+        lambda settings: audio_provider,
     )
+
+    first = client.post("/api/v1/agents/parent/storybook", json=build_payload())
+    first_body = first.json()
+    assert first_body["providerMeta"]["mode"] == "fallback"
+    assert first_body["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first_body["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
+    assert await_storybook_media_warming(first_body["storyId"], timeout_seconds=2.0) is True
 
     response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
 
@@ -122,49 +170,29 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
 
 
 def test_parent_storybook_media_endpoint_serves_cached_audio(monkeypatch):
-    class _AudioProvider:
-        def __init__(self, *, provider_name: str, media_kind: str):
-            self.provider_name = provider_name
-            self.media_kind = media_kind
-
-        def render_scene(self, **kwargs):
-            if self.media_kind == "image":
-                return ProviderResult(
-                    output={
-                        "imagePrompt": kwargs["image_prompt"],
-                        "imageUrl": "https://cdn.example.com/story-live.png",
-                        "assetRef": "https://cdn.example.com/story-live.png",
-                        "imageStatus": "ready",
-                    },
-                    provider=self.provider_name,
-                    mode="live",
-                    source="vivo",
-                    model="live-image",
-                )
-            return ProviderResult(
-                output={
-                    "audioUrl": "data:audio/wav;base64,AAAA",
-                    "audioRef": "live-audio-1",
-                    "audioScript": kwargs["audio_script"],
-                    "audioStatus": "ready",
-                    "voiceStyle": kwargs["voice_style"],
-                    "audioBytes": b"RIFF",
-                    "audioContentType": "audio/wav",
-                },
-                provider=self.provider_name,
-                mode="live",
-                source="vivo",
-                model="live-audio",
-            )
+    image_provider = _WarmableProvider(
+        provider_name="vivo-story-image",
+        media_kind="image",
+        ready=True,
+    )
+    audio_provider = _WarmableProvider(
+        provider_name="vivo-story-tts",
+        media_kind="audio",
+        ready=True,
+    )
 
     monkeypatch.setattr(
         "app.services.parent_storybook_service.resolve_story_image_provider",
-        lambda settings: _AudioProvider(provider_name="vivo-story-image", media_kind="image"),
+        lambda settings: image_provider,
     )
     monkeypatch.setattr(
         "app.services.parent_storybook_service.resolve_story_audio_provider",
-        lambda settings: _AudioProvider(provider_name="vivo-story-tts", media_kind="audio"),
+        lambda settings: audio_provider,
     )
+
+    first = client.post("/api/v1/agents/parent/storybook", json=build_payload())
+    first_body = first.json()
+    assert await_storybook_media_warming(first_body["storyId"], timeout_seconds=2.0) is True
 
     response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
     body = response.json()
@@ -232,47 +260,32 @@ def test_parent_storybook_media_endpoint_serves_cached_fallback_svg(monkeypatch)
 
 
 def test_parent_storybook_endpoint_can_return_mixed_media(monkeypatch):
-    class _MixedProvider:
-        def __init__(self, *, provider_name: str, media_kind: str):
-            self.provider_name = provider_name
-            self.media_kind = media_kind
-
-        def render_scene(self, **kwargs):
-            if self.media_kind == "image":
-                return ProviderResult(
-                    output={
-                        "imagePrompt": kwargs["image_prompt"],
-                        "imageUrl": "https://cdn.example.com/story-mixed.png",
-                        "assetRef": "https://cdn.example.com/story-mixed.png",
-                        "imageStatus": "ready",
-                    },
-                    provider=self.provider_name,
-                    mode="live",
-                    source="vivo",
-                    model="mixed-image",
-                )
-            return ProviderResult(
-                output={
-                    "audioUrl": None,
-                    "audioRef": "story-mixed-audio-1",
-                    "audioScript": kwargs["audio_script"],
-                    "audioStatus": "fallback",
-                    "voiceStyle": kwargs["voice_style"],
-                },
-                provider=self.provider_name,
-                mode="fallback",
-                source="mock",
-                model="mixed-audio",
-            )
+    image_provider = _WarmableProvider(
+        provider_name="vivo-story-image",
+        media_kind="image",
+        ready=True,
+    )
+    audio_provider = _WarmableProvider(
+        provider_name="storybook-mock-preview",
+        media_kind="audio",
+        ready=False,
+    )
 
     monkeypatch.setattr(
         "app.services.parent_storybook_service.resolve_story_image_provider",
-        lambda settings: _MixedProvider(provider_name="vivo-story-image", media_kind="image"),
+        lambda settings: image_provider,
     )
     monkeypatch.setattr(
         "app.services.parent_storybook_service.resolve_story_audio_provider",
-        lambda settings: _MixedProvider(provider_name="storybook-mock-preview", media_kind="audio"),
+        lambda settings: audio_provider,
     )
+
+    first = client.post("/api/v1/agents/parent/storybook", json=build_payload())
+    first_body = first.json()
+    assert first_body["providerMeta"]["mode"] == "fallback"
+    assert first_body["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first_body["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "disabled"
+    assert await_storybook_media_warming(first_body["storyId"], timeout_seconds=2.0) is True
 
     response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
 

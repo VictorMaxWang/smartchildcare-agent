@@ -95,6 +95,22 @@ class MockStoryImageProvider:
     mode_name = "fallback"
     model_name = "storybook-asset-v1"
 
+    def read_cached_scene(
+        self,
+        *,
+        story_mode: str,
+        scene_index: int,
+        child_name: str,
+        scene_title: str,
+        scene_text: str,
+        child_id: str | None = None,
+        story_id: str | None = None,
+        class_name: str | None = None,
+        image_prompt: str | None = None,
+    ) -> ProviderResult[dict[str, Any]] | None:
+        del story_mode, scene_index, child_name, scene_title, scene_text, child_id, story_id, class_name, image_prompt
+        return None
+
     def render_scene(
         self,
         *,
@@ -137,6 +153,49 @@ class VivoStoryImageProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    def read_cached_scene(
+        self,
+        *,
+        story_mode: str,
+        scene_index: int,
+        child_name: str,
+        scene_title: str,
+        scene_text: str,
+        child_id: str | None = None,
+        story_id: str | None = None,
+        class_name: str | None = None,
+        image_prompt: str | None = None,
+    ) -> ProviderResult[dict[str, Any]] | None:
+        del story_mode, scene_index, child_id, story_id
+        prompt = image_prompt or _build_default_prompt(
+            child_name=child_name,
+            class_name=class_name,
+            scene_title=scene_title,
+            scene_text=scene_text,
+        )
+        cache_key = _build_story_image_cache_key(
+            prompt=prompt,
+            business_code=self.settings.storybook_image_business_code,
+            style_config=self.settings.storybook_image_style_config,
+            width=self.settings.storybook_image_width,
+            height=self.settings.storybook_image_height,
+        )
+        cached_result = get_storybook_runtime_cache().get(cache_key)
+        if not cached_result:
+            return None
+
+        return ProviderResult(
+            output={
+                **cached_result["output"],
+                "cacheHit": True,
+            },
+            provider=self.provider_name,
+            mode=self.mode_name,
+            source="cache",
+            model=cached_result.get("model"),
+            request_id=cached_result.get("requestId"),
+        )
+
     def render_scene(
         self,
         *,
@@ -166,19 +225,19 @@ class VivoStoryImageProvider:
             width=self.settings.storybook_image_width,
             height=self.settings.storybook_image_height,
         )
-        cached_result = get_storybook_runtime_cache().get(cache_key)
+        cached_result = self.read_cached_scene(
+            story_mode=story_mode,
+            scene_index=scene_index,
+            child_name=child_name,
+            scene_title=scene_title,
+            scene_text=scene_text,
+            child_id=child_id,
+            story_id=story_id,
+            class_name=class_name,
+            image_prompt=prompt,
+        )
         if cached_result:
-            return ProviderResult(
-                output={
-                    **cached_result["output"],
-                    "cacheHit": True,
-                },
-                provider=self.provider_name,
-                mode=self.mode_name,
-                source="cache",
-                model=cached_result.get("model"),
-                request_id=cached_result.get("requestId"),
-            )
+            return cached_result
 
         app_id, app_key = self._require_credentials()
         request_id = uuid4().hex
