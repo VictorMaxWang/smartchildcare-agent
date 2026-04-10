@@ -15,6 +15,7 @@ import type {
   HealthCheckRecord,
   MealRecord,
   ParentFeed,
+  ParentMediaItem,
   SmartInsight,
   WeeklyDietTrend,
 } from "@/lib/store";
@@ -42,6 +43,15 @@ export type ParentHomeViewModel = {
     title: string;
     description: string;
   };
+  growthTimeline: Array<{
+    id: string;
+    recordedAt: string;
+    category: string;
+    description: string;
+    tags: string[];
+    needsAttention: boolean;
+  }>;
+  mediaGallery: ParentMediaItem[];
 };
 
 export type TeacherHomeViewModel = {
@@ -145,6 +155,17 @@ export function buildParentHomeViewModel(feed?: ParentFeed | null): ParentHomeVi
       title: interventionPreview.title,
       description: interventionPreview.description,
     },
+    growthTimeline: feed.weeklyGrowth
+      .slice(0, 4)
+      .map((record) => ({
+        id: record.id,
+        recordedAt: record.createdAt,
+        category: record.category,
+        description: record.description,
+        tags: record.tags,
+        needsAttention: record.needsAttention,
+      })),
+    mediaGallery: feed.mediaGallery,
   };
 }
 

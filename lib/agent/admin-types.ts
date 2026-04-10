@@ -222,6 +222,8 @@ export interface InstitutionScopeSummary {
   date: string;
   visibleChildren: number;
   classCount: number;
+  todayPresentCount: number;
+  todayAttendanceRate: number;
   attendanceRate: number;
   healthAbnormalCount: number;
   growthAttentionCount: number;

@@ -290,11 +290,15 @@ function buildInstitutionScope(payload: AdminAgentRequestPayload, notificationEv
   const today = getLocalToday();
   const visibleChildIds = new Set(payload.visibleChildren.map((child) => child.id));
   const parentLinkedChildren = payload.visibleChildren.filter((child) => Boolean(child.parentUserId));
+  const todayAttendanceRecords = payload.attendanceRecords.filter(
+    (record) => visibleChildIds.has(record.childId) && record.date === today
+  );
 
   const attendanceRecords = payload.attendanceRecords.filter(
     (record) => visibleChildIds.has(record.childId) && isDateWithinLastDays(record.date, 7, today)
   );
   const presentCount = attendanceRecords.filter((record) => record.isPresent).length;
+  const todayPresentCount = todayAttendanceRecords.filter((record) => record.isPresent).length;
   const healthRecords = payload.healthCheckRecords.filter(
     (record) => visibleChildIds.has(record.childId) && isDateWithinLastDays(record.date, 7, today)
   );
@@ -320,6 +324,11 @@ function buildInstitutionScope(payload: AdminAgentRequestPayload, notificationEv
     date: today,
     visibleChildren: payload.visibleChildren.length,
     classCount: new Set(payload.visibleChildren.map((child) => child.className)).size,
+    todayPresentCount,
+    todayAttendanceRate:
+      payload.visibleChildren.length > 0
+        ? Math.round((todayPresentCount / payload.visibleChildren.length) * 100)
+        : 0,
     attendanceRate: attendanceRecords.length > 0 ? Math.round((presentCount / attendanceRecords.length) * 100) : 0,
     healthAbnormalCount: healthRecords.filter((record) => record.isAbnormal).length,
     growthAttentionCount: growthRecords.filter((record) => record.needsAttention).length,
@@ -612,9 +621,12 @@ export function buildAdminHomeViewModel(payload: AdminAgentRequestPayload): Admi
     weeklySummary: weeklyPreview.summary,
     weeklyHighlights: takeUnique([...weeklyPreview.highlights, ...context.weeklyHighlights], 4),
     heroStats: [
+      {
+        label: "今日实到",
+        value: `${context.institutionScope.todayPresentCount}/${context.institutionScope.visibleChildren}`,
+      },
       { label: "今日高优先级事项", value: `${context.priorityTopItems.slice(0, 3).length}` },
       { label: "重点风险儿童", value: `${context.riskChildren.length}` },
-      { label: "家长反馈完成率", value: `${context.institutionScope.feedbackCompletionRate}%` },
       { label: "待推进派单", value: `${pendingDispatches.length}` },
     ],
     priorityTopItems: context.priorityTopItems.slice(0, 3),

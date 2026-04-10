@@ -15,6 +15,7 @@ import { getLocalToday, isDateWithinLastDays, normalizeLocalDate, shiftLocalDate
 import { emptyInstitutionSnapshot } from "@/lib/persistence/bootstrap";
 import { materializeTasksFromLegacy, pickActiveTask } from "@/lib/tasks/task-model";
 import type { CanonicalTask, TaskOwnerRole } from "@/lib/tasks/types";
+import { buildDemoConsultationResults } from "@/lib/demo/demo-consultations";
 
 export type Role = AccountRole;
 export type Gender = "男" | "女";
@@ -51,7 +52,7 @@ export const BEHAVIOR_CATEGORIES: BehaviorCategory[] = [
 export const MEAL_TYPES: MealType[] = ["早餐", "午餐", "晚餐", "加餐"];
 export const FOOD_CATEGORY_OPTIONS: FoodCategory[] = ["蔬果", "蛋白", "主食", "奶制品", "饮品", "其他"];
 export const INSTITUTION_NAME = "春芽普惠托育中心";
-const DEMO_DATASET_VERSION = "v2-36-curated";
+const DEMO_DATASET_VERSION = "v3-role-home-recovery";
 
 const TODAY = getLocalToday();
 const UNAUTHENTICATED_USER: User = {
@@ -162,6 +163,19 @@ export interface GrowthRecord {
   followUpAction?: string;
   reviewDate?: string;
   reviewStatus?: "待复查" | "已完成";
+  mediaUrls?: string[];
+}
+
+export interface ParentMediaItem {
+  id: string;
+  childId: string;
+  recordedAt: string;
+  title: string;
+  summary: string;
+  source: "growth" | "meal";
+  mediaUrl: string;
+  thumbnailUrl: string;
+  tags: string[];
 }
 
 export interface TaskCheckInRecord {
@@ -210,12 +224,14 @@ export interface ParentFeed {
   child: Child;
   todayMeals: MealRecord[];
   todayGrowth: GrowthRecord[];
+  weeklyGrowth: GrowthRecord[];
   weeklyTrend: WeeklyDietTrend;
   suggestions: SmartInsight[];
   feedbacks: GuardianFeedback[];
   recentFeedbacks: GuardianFeedback[];
   latestFeedback?: GuardianFeedback;
   hasFeedbackToday: boolean;
+  mediaGallery: ParentMediaItem[];
 }
 
 export interface AdminBoardData {
@@ -2001,12 +2017,13 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
       ...record,
       tags: [...record.tags],
       selectedIndicators: record.selectedIndicators ? [...record.selectedIndicators] : undefined,
+      mediaUrls: record.mediaUrls ? [...record.mediaUrls] : undefined,
     })),
     feedback: ALL_INITIAL_FEEDBACKS.map((record) => ({ ...record })),
     health: ALL_INITIAL_HEALTH_CHECKS.map((record) => ({ ...record })),
     taskCheckIns: ALL_INITIAL_TASK_CHECKINS.map((record) => ({ ...record })),
     interventionCards: [],
-    consultations: [],
+    consultations: buildDemoConsultationResults(),
     mobileDrafts: [],
     reminders: [],
     tasks: [],
@@ -2015,11 +2032,18 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
 }
 
 const DEMO_MEAL_PHOTO_LIBRARY: Record<MealType, string[]> = {
-  早餐: ["/demo-meals/breakfast-porridge.svg", "/demo-meals/breakfast-sandwich.svg"],
-  午餐: ["/demo-meals/lunch-bento-a.svg", "/demo-meals/lunch-bento-b.svg", "/demo-meals/lunch-bento-c.svg"],
-  晚餐: ["/demo-meals/lunch-bento-b.svg"],
-  加餐: ["/demo-meals/snack-fruit-yogurt.svg", "/demo-meals/snack-corn-milk.svg"],
+  早餐: ["/demo-meals/breakfast-porridge-real.svg", "/demo-meals/breakfast-sandwich-real.svg"],
+  午餐: ["/demo-meals/lunch-bento-a-real.svg", "/demo-meals/lunch-bento-b-real.svg", "/demo-meals/lunch-bento-c-real.svg"],
+  晚餐: ["/demo-meals/dinner-soup-real.svg", "/demo-meals/lunch-bento-b-real.svg"],
+  加餐: ["/demo-meals/snack-fruit-yogurt-real.svg", "/demo-meals/snack-corn-milk-real.svg"],
 };
+
+const DEMO_GROWTH_MEDIA_LIBRARY = [
+  "/demo-growth/growth-reading-corner.svg",
+  "/demo-growth/growth-garden-balance.svg",
+  "/demo-growth/growth-art-table.svg",
+  "/demo-growth/growth-sensory-play.svg",
+];
 
 function buildRecordKey(childId: string, date: string) {
   return `${childId}-${date}`;
@@ -2052,6 +2076,24 @@ function attachDemoMealPhotos(records: MealRecord[]) {
 
     const photoUrls = getDemoMealPhotoPaths(record.meal, record.childId, record.date);
     return photoUrls ? { ...record, photoUrls } : { ...record };
+  });
+}
+
+function getDemoGrowthMediaPaths(childId: string, createdAt: string) {
+  const seed = `${childId}-${createdAt}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return [DEMO_GROWTH_MEDIA_LIBRARY[seed % DEMO_GROWTH_MEDIA_LIBRARY.length]];
+}
+
+function attachDemoGrowthMedia(records: GrowthRecord[]) {
+  return records.map((record) => {
+    if (record.mediaUrls?.length) {
+      return { ...record, mediaUrls: [...record.mediaUrls] };
+    }
+
+    return {
+      ...record,
+      mediaUrls: getDemoGrowthMediaPaths(record.childId, record.createdAt),
+    };
   });
 }
 
@@ -2165,6 +2207,7 @@ function buildFreshDemoSnapshot(targetToday = getLocalToday()): AppStateSnapshot
   const normalizedTemplate: AppStateSnapshot = {
     ...template,
     meals: attachDemoMealPhotos(keepRecordsOnPresentDays(template.meals, attendanceLookup)),
+    growth: attachDemoGrowthMedia(template.growth),
     health: keepRecordsOnPresentDays(template.health, attendanceLookup),
   };
 
@@ -2256,6 +2299,39 @@ function groupRecordsByChildId<T extends { childId: string }>(records: T[]) {
     map.set(record.childId, [...(map.get(record.childId) ?? []), record]);
     return map;
   }, new Map<string, T[]>());
+}
+
+function buildParentMediaGallery(childId: string, growthRecords: GrowthRecord[], mealRecords: MealRecord[]) {
+  const growthItems: ParentMediaItem[] = growthRecords.flatMap((record) =>
+    (record.mediaUrls ?? []).map((mediaUrl, mediaIndex) => ({
+      id: `growth-media-${record.id}-${mediaIndex}`,
+      childId,
+      recordedAt: record.createdAt,
+      title: record.tags[0] ?? record.category,
+      summary: record.description,
+      source: "growth",
+      mediaUrl,
+      thumbnailUrl: mediaUrl,
+      tags: [record.category, ...record.tags].slice(0, 4),
+    }))
+  );
+  const mealItems: ParentMediaItem[] = mealRecords.flatMap((record) =>
+    (record.photoUrls ?? []).map((photoUrl, photoIndex) => ({
+      id: `meal-media-${record.id}-${photoIndex}`,
+      childId,
+      recordedAt: `${record.date}T12:00:00`,
+      title: `${record.meal}餐食记录`,
+      summary: record.foods.map((food) => food.name).slice(0, 3).join(" / "),
+      source: "meal",
+      mediaUrl: photoUrl,
+      thumbnailUrl: photoUrl,
+      tags: [record.meal, record.preference, record.intakeLevel],
+    }))
+  );
+
+  return [...growthItems, ...mealItems]
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+    .slice(0, 8);
 }
 
 type ExtraMealStyle = "balanced" | "gentleRecovery" | "hydrationFocusNeeded" | "positiveHighHydration";
@@ -2653,6 +2729,49 @@ function presentSeed(checkInAt: string, checkOutAt: string): DemoAttendanceSeed 
 
 function absentSeed(absenceReason: string): DemoAttendanceSeed {
   return { isPresent: false, absenceReason };
+}
+
+const DEMO_TODAY_ATTENDANCE_OVERRIDES: Record<string, DemoAttendanceSeed> = {
+  "c-2": presentSeed("08:56", "17:08"),
+  "c-4": absentSeed("家庭观察休息"),
+  "c-6": presentSeed("08:53", "17:05"),
+  "c-7": absentSeed("居家调整作息"),
+  "c-8": presentSeed("08:41", "17:01"),
+  "c-11": absentSeed("晨起咳嗽居家观察"),
+  "c-12": presentSeed("08:58", "17:02"),
+  "c-19": absentSeed("家长请假陪诊"),
+  "c-24": absentSeed("居家补觉恢复状态"),
+  "c-25": absentSeed("家庭出行请假"),
+  "c-28": presentSeed("08:54", "17:04"),
+  "c-30": absentSeed("轻微不适居家观察"),
+  "c-33": absentSeed("家中照护安排请假"),
+};
+
+function applyTodayAttendanceOverrides(records: AttendanceRecord[]) {
+  return records.map((record) => {
+    const override = record.date === DEMO_TEMPLATE_TODAY ? DEMO_TODAY_ATTENDANCE_OVERRIDES[record.childId] : undefined;
+    if (!override) {
+      return { ...record };
+    }
+
+    if (override.isPresent) {
+      return {
+        ...record,
+        isPresent: true,
+        checkInAt: override.checkInAt,
+        checkOutAt: override.checkOutAt,
+        absenceReason: undefined,
+      };
+    }
+
+    return {
+      ...record,
+      isPresent: false,
+      checkInAt: undefined,
+      checkOutAt: undefined,
+      absenceReason: override.absenceReason,
+    };
+  });
 }
 
 const EXTRA_CHILD_SEEDS: ExtraChildSeed[] = [
@@ -3969,10 +4088,10 @@ const EXTRA_TASK_CHECKINS: TaskCheckInRecord[] = EXTRA_CHILD_SEEDS.flatMap((seed
 );
 
 const ALL_INITIAL_CHILDREN = [...INITIAL_CHILDREN, ...EXTRA_CHILDREN];
-const ALL_INITIAL_ATTENDANCE = [...INITIAL_ATTENDANCE, ...EXTRA_ATTENDANCE];
+const ALL_INITIAL_ATTENDANCE = applyTodayAttendanceOverrides([...INITIAL_ATTENDANCE, ...EXTRA_ATTENDANCE]);
 const ALL_INITIAL_MEALS = attachDemoMealPhotos([...INITIAL_MEALS, ...EXTRA_MEALS]);
 const ALL_INITIAL_HEALTH_CHECKS = [...INITIAL_HEALTH_CHECKS, ...EXTRA_HEALTH_CHECKS];
-const ALL_INITIAL_GROWTH = [...INITIAL_GROWTH, ...EXTRA_GROWTH];
+const ALL_INITIAL_GROWTH = attachDemoGrowthMedia([...INITIAL_GROWTH, ...EXTRA_GROWTH]);
 const ALL_INITIAL_FEEDBACKS = [...INITIAL_FEEDBACKS, ...EXTRA_FEEDBACKS];
 const ALL_INITIAL_TASK_CHECKINS = [...INITIAL_TASK_CHECKINS, ...EXTRA_TASK_CHECKINS];
 
@@ -4917,6 +5036,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     return parentChildren.map((child) => {
       const todayMeals = todayMealRecordsMap.get(child.id) ?? [];
       const todayGrowth = todayGrowthRecordsMap.get(child.id) ?? [];
+      const weeklyGrowth = weeklyGrowthRecordsMap.get(child.id) ?? [];
       const suggestions = smartInsights.filter((insight) => !insight.childId || insight.childId === child.id);
       const feedbacks = todayFeedbackMap.get(child.id) ?? [];
       const recentFeedbacks = weeklyFeedbackMap.get(child.id) ?? [];
@@ -4925,15 +5045,17 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
         child,
         todayMeals,
         todayGrowth,
+        weeklyGrowth,
         weeklyTrend: visibleWeeklyTrendMap.get(child.id) ?? getWeeklyDietTrend(child.id),
         suggestions,
         feedbacks,
         recentFeedbacks,
         latestFeedback: recentFeedbacks[0],
         hasFeedbackToday: feedbacks.length > 0,
+        mediaGallery: buildParentMediaGallery(child.id, weeklyGrowth, todayMeals),
       };
     });
-  }, [currentUser.role, getWeeklyDietTrend, smartInsights, todayFeedbackMap, todayGrowthRecordsMap, todayMealRecordsMap, visibleChildren, visibleWeeklyTrendMap, weeklyFeedbackMap]);
+  }, [currentUser.role, getWeeklyDietTrend, smartInsights, todayFeedbackMap, todayGrowthRecordsMap, todayMealRecordsMap, visibleChildren, visibleWeeklyTrendMap, weeklyFeedbackMap, weeklyGrowthRecordsMap]);
 
   const getParentFeed = useCallback(() => parentFeedData, [parentFeedData]);
 

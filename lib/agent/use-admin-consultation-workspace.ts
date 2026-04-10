@@ -46,11 +46,19 @@ function createDefaultFeedBadge(): AdminConsultationFeedBadge {
 export function getAdminConsultationFeedBadge(params: {
   feedStatus: AdminConsultationFeedStatus;
   localConsultationCount: number;
+  fallbackUsed?: boolean;
 }): AdminConsultationFeedBadge {
-  if (params.feedStatus === "ready") {
+  if (params.feedStatus === "ready" && !params.fallbackUsed) {
     return {
       label: "backend feed",
       variant: "success",
+    };
+  }
+
+  if (params.feedStatus === "ready" && params.fallbackUsed) {
+    return {
+      label: "demo-backed feed",
+      variant: "outline",
     };
   }
 
@@ -80,24 +88,26 @@ export function buildAdminConsultationWorkspaceView(params: {
   limit?: number;
 }): AdminConsultationWorkspaceView {
   const localConsultations = params.localConsultations ?? [];
+  const hasBackendItems = params.consultationFeed.items.length > 0;
+  const fallbackUsed =
+    params.consultationFeed.status === "unavailable" ||
+    (params.consultationFeed.status === "ready" && !hasBackendItems);
 
   return {
     priorityItems: buildAdminConsultationPriorityItems({
       institutionName: params.institutionName,
-      feedItems:
-        params.consultationFeed.status === "ready"
-          ? params.consultationFeed.items
-          : undefined,
+      feedItems: hasBackendItems ? params.consultationFeed.items : undefined,
       localConsultations,
       children: params.children,
       notificationEvents: params.notificationEvents,
       limit: params.limit ?? 4,
-      useLocalFallback: params.consultationFeed.status === "unavailable",
+      useLocalFallback: fallbackUsed,
     }),
     feedStatus: params.consultationFeed.status,
     feedBadge: getAdminConsultationFeedBadge({
       feedStatus: params.consultationFeed.status,
       localConsultationCount: localConsultations.length,
+      fallbackUsed,
     }),
   };
 }

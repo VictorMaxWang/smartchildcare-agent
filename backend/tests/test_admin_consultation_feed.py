@@ -287,8 +287,8 @@ def test_admin_consultation_feed_demo_fallback_still_applies_filters(tmp_path, m
     orchestrator = build_orchestrator()
 
     escalated_feed = asyncio.run(orchestrator.high_risk_consultation_feed(limit=10, escalated_only=True))
-    assert [item["childId"] for item in escalated_feed["items"]] == ["c-16", "c-15"]
+    assert [item["childId"] for item in escalated_feed["items"]] == ["c-16", "c-15", "c-14", "c-8"]
 
-    watch_feed = asyncio.run(orchestrator.high_risk_consultation_feed(limit=10, status="watch"))
+    watch_feed = asyncio.run(orchestrator.high_risk_consultation_feed(limit=10, status="in_progress"))
     assert watch_feed["count"] == 1
     assert watch_feed["items"][0]["childId"] == "c-14"

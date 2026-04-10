@@ -14,6 +14,8 @@ DEFAULT_HIGH_RISK_CHILD_ID = "c-8"
 DEFAULT_HYDRATION_CHILD_ID = "c-15"
 
 ATTENDANCE_DAYS = (0, 1, 2, 3)
+TODAY_ABSENT_CHILD_NUMBERS = {4, 7, 11, 19, 24, 25, 30, 33}
+TODAY_LATE_CHILD_NUMBERS = {2, 6, 12, 28}
 DEFAULT_SNAPSHOT_KEYS = (
     "children",
     "attendance",
@@ -115,6 +117,13 @@ ESCALATION_CANDIDATE_IDS = {"c-8", "c-14", "c-15", "c-16"}
 HIGHLIGHT_IDS = {"c-1", "c-2", "c-3", "c-5", "c-7", "c-13", "c-23", "c-29"}
 NO_FEEDBACK_IDS = {"c-4", "c-19", "c-24", "c-25", "c-27", "c-30", "c-31", "c-35"}
 
+DEMO_MEAL_PHOTO_LIBRARY = {
+    "breakfast": ["/demo-meals/breakfast-porridge-real.svg", "/demo-meals/breakfast-sandwich-real.svg"],
+    "lunch": ["/demo-meals/lunch-bento-a-real.svg", "/demo-meals/lunch-bento-b-real.svg", "/demo-meals/lunch-bento-c-real.svg"],
+    "dinner": ["/demo-meals/dinner-soup-real.svg", "/demo-meals/lunch-bento-b-real.svg"],
+    "snack": ["/demo-meals/snack-fruit-yogurt-real.svg", "/demo-meals/snack-corn-milk-real.svg"],
+}
+
 SPECIAL_NOTES_BY_FOCUS = {
     "positive-emotion": "情绪恢复稳定，适合作为家长侧正向亮点。",
     "positive-motor": "大动作与专注表现稳定，适合作为录屏亮点。",
@@ -210,9 +219,13 @@ def _build_attendance_records(child: dict[str, Any], now: datetime) -> list[dict
     records: list[dict[str, Any]] = []
     for days_ago in ATTENDANCE_DAYS:
         status = "present"
-        if days_ago == 1 and child_number in {18, 30}:
+        if days_ago == 0 and child_number in TODAY_ABSENT_CHILD_NUMBERS:
+            status = "absent"
+        elif days_ago == 0 and child_number in TODAY_LATE_CHILD_NUMBERS:
             status = "late"
-        if days_ago == 2 and child_number in {4, 25, 33}:
+        elif days_ago == 1 and child_number in {18, 30}:
+            status = "late"
+        elif days_ago == 2 and child_number in {4, 25, 33}:
             status = "absent"
         records.append(
             {
@@ -224,6 +237,15 @@ def _build_attendance_records(child: dict[str, Any], now: datetime) -> list[dict
             }
         )
     return records
+
+
+def _demo_meal_photo_urls(child_id: str, date_text: str, meal: str) -> list[str]:
+    library = DEMO_MEAL_PHOTO_LIBRARY.get(meal, [])
+    if not library:
+        return []
+
+    seed = sum(ord(char) for char in f"{child_id}-{date_text}-{meal}")
+    return [library[seed % len(library)]]
 
 
 def _meal_record(
@@ -244,6 +266,7 @@ def _meal_record(
         "date": _date_text(now, days_ago),
         "meal": "lunch",
         "foods": foods,
+        "photoUrls": _demo_meal_photo_urls(child["id"], _date_text(now, days_ago), "lunch"),
         "intakeLevel": intake_level,
         "preference": preference,
         "waterMl": water_ml,
@@ -509,12 +532,39 @@ def build_demo_snapshot(now: datetime | None = None) -> dict[str, Any]:
     snapshot["updatedAt"] = current.isoformat()
 
     for child in children:
-        snapshot["attendance"].extend(_build_attendance_records(child, current))
-        snapshot["meals"].extend(_build_meal_records(child, current))
-        snapshot["health"].extend(_build_health_records(child, current))
-        snapshot["growth"].extend(_build_growth_records(child, current))
+        attendance_records = _build_attendance_records(child, current)
+        tracked_dates = {item["date"] for item in attendance_records}
+        present_dates = {
+            item["date"]
+            for item in attendance_records
+            if item.get("status") in {"present", "late"}
+        }
+        snapshot["attendance"].extend(attendance_records)
+        snapshot["meals"].extend(
+            [
+                item
+                for item in _build_meal_records(child, current)
+                if item.get("date") not in tracked_dates or item.get("date") in present_dates
+            ]
+        )
+        snapshot["health"].extend(
+            [
+                item
+                for item in _build_health_records(child, current)
+                if item.get("date") not in tracked_dates or item.get("date") in present_dates
+            ]
+        )
+        snapshot["growth"].extend(
+            [
+                item
+                for item in _build_growth_records(child, current)
+                if str(item.get("createdAt", ""))[:10] not in tracked_dates
+                or str(item.get("createdAt", ""))[:10] in present_dates
+            ]
+        )
         snapshot["feedback"].extend(_build_feedback_records(child, current))
 
+    snapshot["consultations"] = build_demo_consultation_feed_items(current)
     _sort_records(snapshot)
     return snapshot
 
@@ -553,10 +603,13 @@ def _present_children(snapshot: dict[str, Any], selected_child_id: str, now: dat
 
 def _overview() -> dict[str, Any]:
     feedback_children = len(CHILD_SEEDS) - len(NO_FEEDBACK_IDS)
+    today_present_count = len(CHILD_SEEDS) - len(TODAY_ABSENT_CHILD_NUMBERS)
     return {
         "visibleChildren": len(CHILD_SEEDS),
         "classCount": 2,
-        "attendanceRate": 92,
+        "todayPresentCount": today_present_count,
+        "todayAttendanceRate": round(today_present_count * 100 / len(CHILD_SEEDS)),
+        "attendanceRate": 84,
         "healthAbnormalCount": len(HEALTH_ABNORMAL_IDS),
         "growthAttentionCount": len(GROWTH_ATTENTION_IDS),
         "pendingReviewCount": len(PENDING_REVIEW_IDS),
@@ -652,8 +705,7 @@ def build_demo_admin_payload(now: datetime | None = None) -> dict[str, Any]:
 
 def build_demo_consultation_feed_items(now: datetime | None = None) -> list[dict[str, Any]]:
     current = _resolve_now(now)
-    snapshot = build_demo_snapshot(current)
-    child_map = {child["id"]: child for child in snapshot["children"]}
+    child_map = {child["id"]: child for child in _build_children()}
     specs = [
         {
             "childId": "c-16",
@@ -679,25 +731,25 @@ def build_demo_consultation_feed_items(now: datetime | None = None) -> list[dict
         },
         {
             "childId": "c-14",
-            "daysAgo": 2,
+            "daysAgo": 1,
             "riskLevel": "high",
-            "status": "watch",
+            "status": "in_progress",
             "ownerRole": "teacher",
             "ownerName": "班级老师",
             "triggerReason": "午睡和晚间作息波动仍未完全稳定",
             "summary": "睡眠待复查样本需要保留 48 小时复查点，避免过早下结论。",
-            "shouldEscalate": False,
+            "shouldEscalate": True,
         },
         {
             "childId": "c-8",
-            "daysAgo": 3,
+            "daysAgo": 1,
             "riskLevel": "medium",
             "status": "pending",
             "ownerRole": "teacher",
             "ownerName": "班级老师",
             "triggerReason": "午睡前分离焦虑与家庭反馈缺口叠加",
             "summary": "午睡分离焦虑样本适合继续用园内记录加家庭反馈形成闭环。",
-            "shouldEscalate": False,
+            "shouldEscalate": True,
         },
     ]
     items: list[dict[str, Any]] = []

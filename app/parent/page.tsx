@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BookOpenText, BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
@@ -25,6 +26,15 @@ const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
   day: "numeric",
   weekday: "long",
 });
+
+function formatTimelineTime(value: string) {
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function ParentHomePage() {
   const {
@@ -274,6 +284,76 @@ export default function ParentHomePage() {
                 </div>
               </SectionCard>
             </div>
+
+            <SectionCard
+              title="成长行为与影像记录"
+              description="恢复到孩子维度的真实记录流，家长在首页就能看到今天和最近几天的成长观察与影像。"
+            >
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                <div className="space-y-3">
+                  {viewModel.growthTimeline.length > 0 ? (
+                    viewModel.growthTimeline.map((item) => (
+                      <div key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{item.category}</p>
+                            <p className="mt-1 text-xs text-slate-400">{formatTimelineTime(item.recordedAt)}</p>
+                          </div>
+                          <Badge variant={item.needsAttention ? "warning" : "success"}>
+                            {item.needsAttention ? "需继续观察" : "稳定亮点"}
+                          </Badge>
+                        </div>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">{item.description}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {item.tags.slice(0, 4).map((tag) => (
+                            <Badge key={`${item.id}-${tag}`} variant="secondary">{tag}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                      当前还没有可展示的成长行为记录。
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {viewModel.mediaGallery.length > 0 ? (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {viewModel.mediaGallery.slice(0, 4).map((item) => (
+                          <div key={item.id} className="overflow-hidden rounded-3xl border border-slate-100 bg-white">
+                            <div className="relative aspect-[4/3] bg-slate-100">
+                              <Image
+                                src={item.thumbnailUrl}
+                                alt={item.title}
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 768px) 100vw, 320px"
+                              />
+                            </div>
+                            <div className="space-y-2 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                                <Badge variant={item.source === "meal" ? "info" : "secondary"}>
+                                  {item.source === "meal" ? "餐食图" : "成长影像"}
+                                </Badge>
+                              </div>
+                              <p className="text-xs leading-5 text-slate-500">{item.summary}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-400">仅展示当前孩子的 demo 影像，不暴露机构级视角或其他儿童信息。</p>
+                    </>
+                  ) : (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                      当前还没有可展示的图片或影像记录。
+                    </div>
+                  )}
+                </div>
+              </div>
+            </SectionCard>
 
             <SectionCard
               title="最近 7 天趋势入口"

@@ -433,9 +433,13 @@ export default function AdminAgentPage() {
             {scope ? (
               <MetricGrid
                 items={[
-                  { label: "可见儿童", value: `${scope.visibleChildren}`, tone: "sky" },
+                  {
+                    label: "今日实到",
+                    value: `${scope.todayPresentCount}/${scope.visibleChildren}`,
+                    tone: "emerald",
+                  },
                   { label: "重点风险儿童", value: `${scope.riskChildrenCount}`, tone: "amber" },
-                  { label: "反馈完成率", value: `${scope.feedbackCompletionRate}%`, tone: "emerald" },
+                  { label: "反馈完成率", value: `${scope.feedbackCompletionRate}%`, tone: "sky" },
                   { label: "待推进派单", value: `${scope.pendingDispatchCount}`, tone: "indigo" },
                 ]}
               />
@@ -547,7 +551,8 @@ export default function AdminAgentPage() {
                   <div className="rounded-3xl border border-slate-100 bg-white p-5">
                     <p className="text-sm font-semibold text-slate-900">近 7 天机构概览</p>
                     <div className="mt-4 space-y-2 text-sm text-slate-600">
-                      <p>出勤率 {scope.attendanceRate}%</p>
+                      <p>今日实到 {scope.todayPresentCount} / {scope.visibleChildren}</p>
+                      <p>今日出勤率 {scope.todayAttendanceRate}%</p>
                       <p>晨检异常 {scope.healthAbnormalCount} 条</p>
                       <p>成长关注 {scope.growthAttentionCount} 条</p>
                       <p>待复查 {scope.pendingReviewCount} 条</p>

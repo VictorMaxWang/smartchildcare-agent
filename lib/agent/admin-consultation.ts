@@ -991,6 +991,37 @@ function buildPrioritySortValue(item: AdminConsultationPriorityItem) {
   };
 }
 
+function collapsePriorityItemsByChild(items: AdminConsultationPriorityItem[]) {
+  const byChildId = new Map<string, AdminConsultationPriorityItem>();
+
+  for (const item of items) {
+    const existing = byChildId.get(item.childId);
+    if (!existing) {
+      byChildId.set(item.childId, item);
+      continue;
+    }
+
+    const existingSort = buildPrioritySortValue(existing);
+    const nextSort = buildPrioritySortValue(item);
+    const shouldReplace =
+      nextSort.escalation < existingSort.escalation ||
+      (nextSort.escalation === existingSort.escalation && nextSort.risk < existingSort.risk) ||
+      (nextSort.escalation === existingSort.escalation &&
+        nextSort.risk === existingSort.risk &&
+        nextSort.status < existingSort.status) ||
+      (nextSort.escalation === existingSort.escalation &&
+        nextSort.risk === existingSort.risk &&
+        nextSort.status === existingSort.status &&
+        nextSort.generatedAt > existingSort.generatedAt);
+
+    if (shouldReplace) {
+      byChildId.set(item.childId, item);
+    }
+  }
+
+  return Array.from(byChildId.values());
+}
+
 function buildConsultationRecommendedOwnerRole(params: {
   dispatchEvent?: AdminDispatchEvent;
   feedOwnerRole?: AdminOwnerRole;
@@ -1230,7 +1261,7 @@ export function buildAdminConsultationPriorityItems(params: {
           })
       : [];
 
-  return items
+  return collapsePriorityItemsByChild(items)
     .sort((left, right) => {
       const leftSort = buildPrioritySortValue(left);
       const rightSort = buildPrioritySortValue(right);

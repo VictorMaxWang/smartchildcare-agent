@@ -651,6 +651,10 @@ export function buildTeacherCommunicationFollowUpPayload(context: TeacherAgentCh
 export function buildTeacherWeeklyReportSnapshot(context: TeacherAgentClassContext): WeeklyReportSnapshot {
   const weeklyHealthAbnormalCount = context.weeklyHealthChecks.filter((record) => record.isAbnormal).length;
   const weeklyGrowthAttentionCount = context.weeklyGrowthRecords.filter((record) => record.needsAttention).length;
+  const attendanceRate =
+    context.visibleChildren.length > 0
+      ? Math.round((context.presentChildren.length / context.visibleChildren.length) * 100)
+      : 0;
 
   return {
     institutionName: context.className,
@@ -658,7 +662,7 @@ export function buildTeacherWeeklyReportSnapshot(context: TeacherAgentClassConte
     role: "教师班级周总结",
     overview: {
       visibleChildren: context.visibleChildren.length,
-      attendanceRate: 0,
+      attendanceRate,
       mealRecordCount: 0,
       healthAbnormalCount: weeklyHealthAbnormalCount,
       growthAttentionCount: weeklyGrowthAttentionCount,

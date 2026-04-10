@@ -16,6 +16,10 @@ type FeaturedChildTracker = {
   names: Set<string>;
 };
 
+function isChildScopedTarget(targetType: InstitutionPriorityItem["targetType"] | AdminAgentActionItem["targetType"]) {
+  return targetType === "child" || targetType === "family";
+}
+
 function createFeaturedChildTracker(
   consultationPriorityItems: AdminConsultationPriorityItem[]
 ): FeaturedChildTracker {
@@ -39,6 +43,7 @@ function markFeaturedChild(tracker: FeaturedChildTracker, childId: string, child
   if (!childId || !childName) return;
   tracker.ids.add(childId);
   tracker.names.add(childName);
+  tracker.names.add(`${childName}家长`);
 }
 
 function dedupePriorityTopItems(
@@ -49,7 +54,7 @@ function dedupePriorityTopItems(
   const next: InstitutionPriorityItem[] = [];
 
   for (const item of items) {
-    if (item.targetType === "child") {
+    if (isChildScopedTarget(item.targetType)) {
       if (tracker.ids.has(item.targetId)) {
         continue;
       }
@@ -109,7 +114,7 @@ function markActionItemChildren(
   tracker: FeaturedChildTracker
 ) {
   for (const item of items) {
-    if (item.targetType !== "child") {
+    if (!isChildScopedTarget(item.targetType)) {
       continue;
     }
 
