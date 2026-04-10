@@ -25,6 +25,7 @@ import {
 } from "recharts";
 import type { WeeklyReportResponse, WeeklyReportSnapshot } from "@/lib/ai/types";
 import { getLocalToday, isDateWithinLastDays, shiftLocalDate } from "@/lib/date";
+import type { AdminBoardData } from "@/lib/store";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import EmptyState from "@/components/EmptyState";
@@ -58,6 +59,33 @@ const TEMPLATE_ENTRIES = [
   },
 ];
 
+type BoardExposureView = Pick<
+  AdminBoardData,
+  "highAttentionChildren" | "lowHydrationChildren" | "lowVegTrendChildren"
+>;
+
+function dedupeBoardExposure(board: BoardExposureView): BoardExposureView {
+  const seen = new Set<string>();
+
+  const takeUnique = <T extends { childId: string }>(items: T[]) => {
+    const next: T[] = [];
+
+    for (const item of items) {
+      if (seen.has(item.childId)) continue;
+      seen.add(item.childId);
+      next.push(item);
+    }
+
+    return next;
+  };
+
+  return {
+    highAttentionChildren: takeUnique(board.highAttentionChildren),
+    lowHydrationChildren: takeUnique(board.lowHydrationChildren),
+    lowVegTrendChildren: takeUnique(board.lowVegTrendChildren),
+  };
+}
+
 export default function RootOverviewPage() {
   const router = useRouter();
   const {
@@ -90,6 +118,7 @@ export default function RootOverviewPage() {
   const weeklyTrend = getWeeklyDietTrend();
   const insights = getSmartInsights();
   const adminBoard = getAdminBoardData();
+  const uniqueAdminBoard = useMemo(() => dedupeBoardExposure(adminBoard), [adminBoard]);
   const adminChartData = useMemo(() => {
     const merged = new Map<
       string,
@@ -432,19 +461,19 @@ export default function RootOverviewPage() {
               <BoardList
                 title="高频关注儿童"
                 icon={<AlertIcon />}
-                items={adminBoard.highAttentionChildren.map((item) => `${item.childName}（${item.count}次）`)}
+                items={uniqueAdminBoard.highAttentionChildren.map((item) => `${item.childName}（${item.count}次）`)}
                 emptyText="暂无"
               />
               <BoardList
                 title="低饮水提醒"
                 icon={<TrendingDown className="h-4 w-4 text-sky-400" />}
-                items={adminBoard.lowHydrationChildren.map((item) => `${item.childName}（${item.hydrationAvg}ml）`)}
+                items={uniqueAdminBoard.lowHydrationChildren.map((item) => `${item.childName}（${item.hydrationAvg}ml）`)}
                 emptyText="暂无"
               />
               <BoardList
                 title="蔬果不足趋势"
                 icon={<TrendingDown className="h-4 w-4 text-emerald-400" />}
-                items={adminBoard.lowVegTrendChildren.map((item) => `${item.childName}（${item.vegetableDays}天）`)}
+                items={uniqueAdminBoard.lowVegTrendChildren.map((item) => `${item.childName}（${item.vegetableDays}天）`)}
                 emptyText="暂无"
               />
             </div>

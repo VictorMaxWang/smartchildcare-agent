@@ -85,7 +85,7 @@ export default function RiskPriorityBoard({
         {items.map((item) => (
           <div
             key={item.consultationId}
-            className="grid min-w-0 gap-4 2xl:items-start 2xl:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.82fr)]"
+            className="grid min-w-0 gap-4 2xl:items-start 2xl:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]"
           >
             <DirectorDecisionCard
               item={item}

@@ -54,11 +54,29 @@ export default function InstitutionMonitorPage() {
   }, []);
 
   const growthAlerts = useMemo(
-    () =>
-      growthRecords
+    () => {
+      const rankedAlerts = growthRecords
         .filter((record) => record.needsAttention)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 5),
+        .sort((left, right) => {
+          const reviewDiff =
+            Number(right.reviewStatus === "待复查") - Number(left.reviewStatus === "待复查");
+          if (reviewDiff !== 0) return reviewDiff;
+
+          const followUpDiff = Number(Boolean(right.followUpAction)) - Number(Boolean(left.followUpAction));
+          if (followUpDiff !== 0) return followUpDiff;
+
+          return right.createdAt.localeCompare(left.createdAt);
+        });
+
+      const bestByChild = new Map<string, (typeof rankedAlerts)[number]>();
+      rankedAlerts.forEach((record) => {
+        if (!bestByChild.has(record.childId)) {
+          bestByChild.set(record.childId, record);
+        }
+      });
+
+      return Array.from(bestByChild.values()).slice(0, 5);
+    },
     [growthRecords]
   );
 

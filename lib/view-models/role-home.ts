@@ -162,8 +162,16 @@ export function buildTeacherHomeViewModel(params: {
     (record) => record.date === today && childMap.has(record.childId)
   );
 
-  const todayAbnormalChildren = todayHealthChecks
+  const abnormalByChild = new Map<string, HealthCheckRecord>();
+  todayHealthChecks
     .filter((record) => record.isAbnormal)
+    .forEach((record) => {
+      if (!abnormalByChild.has(record.childId)) {
+        abnormalByChild.set(record.childId, record);
+      }
+    });
+
+  const todayAbnormalChildren = Array.from(abnormalByChild.values())
     .map((record) => ({
       child: childMap.get(record.childId)!,
       record,
@@ -174,20 +182,35 @@ export function buildTeacherHomeViewModel(params: {
     (child) => !todayHealthChecks.some((record) => record.childId === child.id)
   );
 
-  const pendingReviews = params.growthRecords
+  const pendingReviewRecords = params.growthRecords
     .filter(
       (record) =>
         childMap.has(record.childId) &&
         record.reviewStatus === "待复查"
     )
-    .sort((left, right) => (left.reviewDate ?? "9999-12-31").localeCompare(right.reviewDate ?? "9999-12-31"))
+    .sort((left, right) => (left.reviewDate ?? "9999-12-31").localeCompare(right.reviewDate ?? "9999-12-31"));
+
+  const pendingReviewByChild = new Map<string, GrowthRecord>();
+  pendingReviewRecords.forEach((record) => {
+    if (!pendingReviewByChild.has(record.childId)) {
+      pendingReviewByChild.set(record.childId, record);
+    }
+  });
+
+  const pendingReviews = Array.from(pendingReviewByChild.values())
     .slice(0, 5)
     .map((record) => ({
       child: childMap.get(record.childId)!,
       record,
     }));
 
+  const exposedChildIds = new Set([
+    ...todayAbnormalChildren.map((item) => item.child.id),
+    ...pendingReviews.map((item) => item.child.id),
+  ]);
+
   const parentsToCommunicate = params.visibleChildren
+    .filter((child) => !exposedChildIds.has(child.id))
     .map((child) => {
       const abnormalRecord = todayAbnormalChildren.find((item) => item.child.id === child.id);
       const pendingReview = pendingReviews.find((item) => item.child.id === child.id);

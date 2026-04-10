@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   BrainCircuit,
@@ -39,6 +39,8 @@ import type {
 import type { AiFollowUpMessage } from "@/lib/ai/types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
 
+type PageMode = "daily" | "weekly";
+
 type HistoryEntry = {
   id: string;
   workflow: AdminAgentRequestPayload["workflow"];
@@ -73,8 +75,58 @@ function buildHistoryMessages(history: HistoryEntry[]) {
   return messages.slice(-8);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isAdminAgentResult(value: unknown): value is AdminAgentResult {
+  if (!isRecord(value)) return false;
+
+  return (
+    typeof value.title === "string" &&
+    typeof value.summary === "string" &&
+    typeof value.assistantAnswer === "string" &&
+    isRecord(value.institutionScope) &&
+    Array.isArray(value.priorityTopItems) &&
+    Array.isArray(value.riskChildren) &&
+    Array.isArray(value.riskClasses) &&
+    Array.isArray(value.feedbackRiskItems) &&
+    isStringArray(value.highlights) &&
+    Array.isArray(value.actionItems) &&
+    Array.isArray(value.recommendedOwnerMap) &&
+    isStringArray(value.quickQuestions) &&
+    Array.isArray(value.notificationEvents) &&
+    typeof value.source === "string" &&
+    typeof value.generatedAt === "string"
+  );
+}
+
+function getPageMode(action: string | null): PageMode {
+  return action === "weekly-report" ? "weekly" : "daily";
+}
+
 export default function AdminAgentPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const pageMode = getPageMode(searchParams.get("action"));
+  const isWeeklyMode = pageMode === "weekly";
+  const modeConfig = isWeeklyMode
+    ? {
+        workflow: "weekly-ops-report" as const,
+        label: "本周运营周报",
+        title: "园长周报 Agent 工作区",
+        description: "先收口本周结论，再安排下周动作、责任人和回到日常优先级的承接路径。",
+      }
+    : {
+        workflow: "daily-priority" as const,
+        label: "今日机构优先事项",
+        title: "从识别问题，到生成动作，再到派单闭环",
+        description: "园长 Agent 会基于全园近 7 天数据判断优先级、给出责任人和时限，并把动作沉淀成可持续追踪的通知事件。",
+      };
   const {
     currentUser,
     visibleChildren,
@@ -113,7 +165,7 @@ export default function AdminAgentPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
-  const initializedRef = useRef(false);
+  const lastAutoRunModeRef = useRef<PageMode | null>(null);
 
   const payload = useMemo<AdminAgentRequestPayload>(
     () => ({
@@ -152,6 +204,13 @@ export default function AdminAgentPage() {
     ]
   );
 
+  const switchMode = useCallback(
+    (nextMode: PageMode) => {
+      router.push(nextMode === "weekly" ? "/admin/agent?action=weekly-report" : "/admin/agent");
+    },
+    [router]
+  );
+
   const runWorkflow = useCallback(async (
     workflow: AdminAgentRequestPayload["workflow"],
     options?: { question?: string; label?: string }
@@ -173,10 +232,23 @@ export default function AdminAgentPage() {
         },
         body: JSON.stringify(requestPayload),
       });
-      const data = (await response.json()) as AdminAgentResult & { error?: string };
+      const data = (await response.json()) as unknown;
 
       if (!response.ok) {
-        setRequestError(data.error ?? "园长 Agent 请求失败");
+        const errorMessage =
+          isRecord(data) && typeof data.error === "string" ? data.error : "园长 Agent 请求失败";
+        setRequestError(errorMessage);
+        setResult(null);
+        return;
+      }
+
+      if (!isAdminAgentResult(data)) {
+        setResult(null);
+        setRequestError(
+          workflow === "weekly-ops-report"
+            ? "周报模式返回结构不完整，请重试或切回日常模式。"
+            : "园长 Agent 返回结构异常，请稍后重试。"
+        );
         return;
       }
 
@@ -219,15 +291,13 @@ export default function AdminAgentPage() {
   }, []);
 
   useEffect(() => {
-    if (visibleChildren.length === 0 || initializedRef.current) return;
+    if (visibleChildren.length === 0 || lastAutoRunModeRef.current === pageMode) return;
 
-    initializedRef.current = true;
-    const preloadAction = searchParams.get("action");
-    const workflow = preloadAction === "weekly-report" ? "weekly-ops-report" : "daily-priority";
-    const label = preloadAction === "weekly-report" ? "本周运营周报" : "今日机构优先事项";
-
-    void runWorkflow(workflow, { label });
-  }, [runWorkflow, searchParams, visibleChildren.length]);
+    lastAutoRunModeRef.current = pageMode;
+    setResult(null);
+    setRequestError(null);
+    void runWorkflow(modeConfig.workflow, { label: modeConfig.label });
+  }, [modeConfig.label, modeConfig.workflow, pageMode, runWorkflow, visibleChildren.length]);
 
   useEffect(() => {
     if (!notificationReady) return;
@@ -297,22 +367,62 @@ export default function AdminAgentPage() {
 
   const quickQuestions = result?.quickQuestions ?? [...ADMIN_AGENT_QUICK_QUESTIONS];
   const scope = result?.institutionScope;
+  const rerunCurrentMode = () => void runWorkflow(modeConfig.workflow, { label: modeConfig.label });
 
   return (
     <RolePageShell
       badge={`机构运营 AI 助手 · ${INSTITUTION_NAME}`}
-      title="从识别问题，到生成动作，再到派单闭环"
-      description="园长 Agent 会基于全园近 7 天数据判断优先级、给出责任人和时限，并把动作沉淀成可持续追踪的通知事件。"
+      title={modeConfig.title}
+      description={modeConfig.description}
       actions={
         <>
           <InlineLinkButton href="/admin" label="返回园长首页" />
-          <InlineLinkButton href="/admin/agent?action=weekly-report" label="打开周报模式" variant="premium" />
+          {isWeeklyMode ? (
+            <InlineLinkButton href="/admin/agent" label="切回日常模式" />
+          ) : (
+            <InlineLinkButton href="/admin/agent?action=weekly-report" label="打开周报模式" variant="premium" />
+          )}
         </>
       }
     >
       <RoleSplitLayout
         main={
           <div className="space-y-6">
+            {isWeeklyMode ? (
+              <div className="rounded-[32px] border border-indigo-100 bg-linear-to-r from-indigo-50 via-white to-sky-50 p-6 shadow-sm">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="info">周报模式</Badge>
+                      <Badge variant="outline">{INSTITUTION_NAME}</Badge>
+                      <Badge variant="outline">入口稳定地址：/admin/agent?action=weekly-report</Badge>
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-slate-900">本周运营周报工作区</p>
+                      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                        当前页面已切换为周报承接模式。这里会先展示本周结论、风险儿童和下周动作，再回到日常优先级与派单闭环，避免“点进来只有空白或异常页”。
+                      </p>
+                    </div>
+                    {requestError ? (
+                      <div className="flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <p>{requestError}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2 lg:max-w-xs lg:justify-end">
+                    <Button type="button" variant="outline" onClick={() => switchMode("daily")}>
+                      切回日常模式
+                    </Button>
+                    <Button type="button" variant="premium" onClick={rerunCurrentMode} disabled={loading}>
+                      <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                      重新生成周报
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {scope ? (
               <MetricGrid
                 items={[
@@ -322,6 +432,94 @@ export default function AdminAgentPage() {
                   { label: "待推进派单", value: `${scope.pendingDispatchCount}`, tone: "indigo" },
                 ]}
               />
+            ) : null}
+
+            {isWeeklyMode ? (
+              <SectionCard
+                title="周报 Agent 工作区"
+                description="周报模式下，先聚焦本周总结、下周动作和风险承接，再决定是否继续追问。"
+                actions={<Badge variant="info">最小稳定承接</Badge>}
+              >
+                {loading && !result ? (
+                  <div className="flex items-center gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-5 text-sm text-slate-600">
+                    <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+                    正在生成本周运营周报…
+                  </div>
+                ) : result ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+                      <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="info">{result.title}</Badge>
+                          <Badge variant="outline">{result.source}</Badge>
+                          {result.model ? <Badge variant="outline">{result.model}</Badge> : null}
+                        </div>
+                        <p className="mt-4 text-base leading-7 text-slate-800">{result.summary}</p>
+                        {result.continuityNotes?.length ? (
+                          <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
+                            <p className="text-sm font-semibold text-slate-900">连续性摘要</p>
+                            <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                              {result.continuityNotes.slice(0, 3).map((item) => (
+                                <li key={item}>• {item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                          <p className="text-sm font-semibold text-slate-900">下周动作</p>
+                          <div className="mt-3 space-y-3">
+                            {result.actionItems.slice(0, 4).map((item) => (
+                              <div key={item.id} className="rounded-2xl bg-slate-50 p-4">
+                                <p className="text-sm font-medium text-slate-900">{item.action}</p>
+                                <p className="mt-1 text-xs leading-5 text-slate-500">
+                                  {item.ownerLabel} · {item.deadline}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                          <p className="text-sm font-semibold text-slate-900">本周风险儿童</p>
+                          <div className="mt-3 space-y-3">
+                            {result.riskChildren.slice(0, 3).map((item) => (
+                              <div key={item.childId} className="rounded-2xl bg-slate-50 p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-medium text-slate-900">
+                                      {item.childName} · {item.className}
+                                    </p>
+                                    <p className="mt-1 text-sm leading-6 text-slate-600">{item.reason}</p>
+                                  </div>
+                                  <PriorityLevelBadge level={item.priorityLevel} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                      <p className="text-sm font-semibold text-slate-900">本周结论速览</p>
+                      <ul className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {result.highlights.slice(0, 6).map((item) => (
+                          <li key={item} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">
+                    等待周报模式返回第一轮机构周报结果。
+                  </div>
+                )}
+              </SectionCard>
             ) : null}
 
             <SectionCard
@@ -385,18 +583,22 @@ export default function AdminAgentPage() {
             </SectionCard>
 
             <SectionCard
-              title="当前优先事项"
-              description="结构化展示当前最重要的机构级问题。"
+              title={isWeeklyMode ? "周报关联优先事项" : "当前优先事项"}
+              description={
+                isWeeklyMode
+                  ? "周报结论最终仍会落到具体优先事项、风险儿童和高压力班级。"
+                  : "结构化展示当前最重要的机构级问题。"
+              }
               actions={
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => void runWorkflow("daily-priority", { label: "今日机构优先事项" })}
+                  onClick={rerunCurrentMode}
                   disabled={loading}
                 >
                   <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-                  重新生成
+                  {isWeeklyMode ? "刷新周报关联优先级" : "重新生成"}
                 </Button>
               }
             >
@@ -461,8 +663,12 @@ export default function AdminAgentPage() {
             </SectionCard>
 
             <AgentWorkspaceCard
-              title="快捷问题"
-              description="用园长常见问题直接驱动 follow-up，输出仍保持结构化结果。"
+              title={isWeeklyMode ? "周报追问与模式切换" : "快捷问题"}
+              description={
+                isWeeklyMode
+                  ? "周报模式下支持继续追问，也保留回到日常优先级的稳定入口。"
+                  : "用园长常见问题直接驱动 follow-up，输出仍保持结构化结果。"
+              }
               promptButtons={
                 <>
                   {quickQuestions.map((question) => (
@@ -481,14 +687,25 @@ export default function AdminAgentPage() {
                       {question}
                     </Button>
                   ))}
-                  <Button
-                    variant="secondary"
-                    className="rounded-full"
-                    onClick={() => void runWorkflow("weekly-ops-report", { label: "本周运营周报" })}
-                    disabled={loading}
-                  >
-                    生成本周运营周报
-                  </Button>
+                  {isWeeklyMode ? (
+                    <Button
+                      variant="secondary"
+                      className="rounded-full"
+                      onClick={() => switchMode("daily")}
+                      disabled={loading}
+                    >
+                      切回日常模式
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      className="rounded-full"
+                      onClick={() => switchMode("weekly")}
+                      disabled={loading}
+                    >
+                      打开本周运营周报
+                    </Button>
+                  )}
                 </>
               }
             >
@@ -528,8 +745,12 @@ export default function AdminAgentPage() {
             </AgentWorkspaceCard>
 
             <SectionCard
-              title="结构化行动建议"
-              description="每条建议都带责任人、截止时间和派单入口。"
+              title={isWeeklyMode ? "周报落地动作" : "结构化行动建议"}
+              description={
+                isWeeklyMode
+                  ? "把周报结论直接转成下周动作、责任人和派单入口。"
+                  : "每条建议都带责任人、截止时间和派单入口。"
+              }
               actions={
                 notificationError ? (
                   <Badge variant="outline">{notificationError}</Badge>
@@ -695,52 +916,74 @@ export default function AdminAgentPage() {
             </SectionCard>
 
             {requestError ? (
-              <SectionCard title="运行状态" description="请求失败时保留错误提示，便于演示时说明 fallback。">
+              <SectionCard title="运行状态" description="请求失败时保留错误提示，便于说明当前兜底状态。">
                 <div className="flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <p>{requestError}</p>
                 </div>
               </SectionCard>
-            ) : (
-              <SectionCard title="推荐入口" description="常用机构级工作流入口。">
-                <div className="space-y-3">
+            ) : null}
+
+            <SectionCard
+              title={isWeeklyMode ? "周报入口与返回路径" : "推荐入口"}
+              description={
+                isWeeklyMode
+                  ? "保留周报重试、返回日常模式和追问入口，避免用户进入后没有承接路径。"
+                  : "常用机构级工作流入口。"
+              }
+            >
+              <div className="space-y-3">
+                {isWeeklyMode ? (
                   <button
                     type="button"
                     className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                    onClick={() => void runWorkflow("weekly-ops-report", { label: "本周运营周报" })}
+                    onClick={rerunCurrentMode}
+                  >
+                    <RefreshCw className="h-4 w-4 text-indigo-500" />
+                    重新生成本周运营周报
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                    onClick={() => switchMode("weekly")}
                   >
                     <FileText className="h-4 w-4 text-indigo-500" />
-                    生成本周运营周报
+                    打开本周运营周报
                   </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                    onClick={() =>
-                      void runWorkflow("question-follow-up", {
-                        question: "今天最该优先处理的 3 件事是什么？",
-                        label: "今天最该优先处理的 3 件事是什么？",
-                      })
-                    }
-                  >
-                    <ClipboardList className="h-4 w-4 text-amber-500" />
-                    查看机构优先级 TOP 3
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                    onClick={() =>
-                      void runWorkflow("question-follow-up", {
-                        question: "哪些家长反馈长期缺失？",
-                        label: "哪些家长反馈长期缺失？",
-                      })
-                    }
-                  >
-                    <Sparkles className="h-4 w-4 text-emerald-500" />
-                    看家长协同薄弱点
-                  </button>
-                </div>
-              </SectionCard>
-            )}
+                )}
+
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                  onClick={() =>
+                    isWeeklyMode
+                      ? switchMode("daily")
+                      : void runWorkflow("question-follow-up", {
+                          question: "今天最该优先处理的 3 件事是什么？",
+                          label: "今天最该优先处理的 3 件事是什么？",
+                        })
+                  }
+                >
+                  <ClipboardList className="h-4 w-4 text-amber-500" />
+                  {isWeeklyMode ? "切回日常优先级模式" : "查看机构优先级 TOP 3"}
+                </button>
+
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                  onClick={() =>
+                    void runWorkflow("question-follow-up", {
+                      question: "哪些家长反馈长期缺失？",
+                      label: "哪些家长反馈长期缺失？",
+                    })
+                  }
+                >
+                  <Sparkles className="h-4 w-4 text-emerald-500" />
+                  看家长协同薄弱点
+                </button>
+              </div>
+            </SectionCard>
           </div>
         }
       />

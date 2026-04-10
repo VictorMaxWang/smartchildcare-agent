@@ -118,7 +118,7 @@ function DesktopMetaCard({
         {icon}
         <span>{title}</span>
       </div>
-      <p className="mt-2 break-words text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">
+      <p className="mt-2 whitespace-normal break-words text-sm leading-6 text-slate-600">
         {detail}
       </p>
     </div>
@@ -144,7 +144,7 @@ function DesktopExplainabilityList({
           className="rounded-2xl border border-slate-100 bg-white/90 px-3 py-3"
         >
           <p className="text-sm font-semibold text-slate-900">{itemExplainability.label}</p>
-          <p className="mt-1 break-words text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">
+          <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-slate-600">
             {itemExplainability.detail}
           </p>
         </div>
@@ -180,11 +180,11 @@ function EvidenceCard({
         </Badge>
       </div>
 
-      <p className="mt-3 break-words text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">
+      <p className="mt-3 whitespace-normal break-words text-sm leading-6 text-slate-700">
         {evidence.item.summary}
       </p>
       {excerpt ? (
-        <p className="mt-2 break-words text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{excerpt}</p>
+        <p className="mt-2 whitespace-normal break-words text-xs leading-5 text-slate-500">{excerpt}</p>
       ) : null}
 
       {evidence.supportLabels.length > 0 ? (
@@ -341,7 +341,7 @@ export default function ConsultationTraceCard({
               <SearchCheck className="h-4 w-4 text-emerald-500" />
               <p className="text-sm font-semibold text-slate-900">协作摘要</p>
             </div>
-            <p className="mt-3 break-words text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">
+            <p className="mt-3 whitespace-normal break-words text-sm leading-6 text-slate-600">
               {trace.collaborationSummary}
             </p>
           </div>
@@ -402,7 +402,7 @@ export default function ConsultationTraceCard({
                 <Network className="h-4 w-4 text-sky-500" />
                 <p className="text-sm font-semibold text-slate-900">Provider 状态</p>
               </div>
-              <p className="mt-3 break-words text-sm text-slate-600 [overflow-wrap:anywhere]">
+              <p className="mt-3 whitespace-normal break-words text-sm text-slate-600">
                 {trace.providerLabel ?? trace.providerStateLabel}
               </p>
             </div>
@@ -412,7 +412,7 @@ export default function ConsultationTraceCard({
                 <Database className="h-4 w-4 text-emerald-500" />
                 <p className="text-sm font-semibold text-slate-900">Memory 状态</p>
               </div>
-              <p className="mt-3 break-words text-sm text-slate-600 [overflow-wrap:anywhere]">
+              <p className="mt-3 whitespace-normal break-words text-sm text-slate-600">
                 {trace.memoryDetail ?? trace.memoryStateLabel}
               </p>
             </div>
@@ -433,7 +433,7 @@ export default function ConsultationTraceCard({
         </div>
 
         <div className="hidden 2xl:block">
-          <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(250px,0.85fr)]">
+          <div className="grid min-w-0 gap-4 min-[1750px]:grid-cols-[minmax(0,1.12fr)_minmax(280px,0.88fr)]">
             <div className="min-w-0 space-y-4">
               <div className="rounded-3xl border border-indigo-100 bg-linear-to-br from-indigo-50 via-white to-slate-50 p-5">
                 <SectionHeading
@@ -441,12 +441,12 @@ export default function ConsultationTraceCard({
                   title="协作摘要"
                   toneClassName="bg-emerald-100 text-emerald-700"
                 />
-                <p className="mt-3 break-words text-sm leading-7 text-slate-700 [overflow-wrap:anywhere]">
+                <p className="mt-3 whitespace-normal break-words text-sm leading-7 text-slate-700">
                   {summaryPreview}
                 </p>
               </div>
 
-              <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
+              <div className="grid min-w-0 gap-4 min-[1750px]:grid-cols-2">
                 <div className="min-w-0 rounded-3xl border border-slate-100 bg-white p-4">
                   <SectionHeading
                     icon={<BrainCircuit className="h-4 w-4 text-indigo-500" />}
@@ -546,7 +546,7 @@ export default function ConsultationTraceCard({
                 {summaryPreview !== trace.collaborationSummary ? (
                   <div>
                     <p className="text-sm font-semibold text-slate-900">完整协作摘要</p>
-                    <p className="mt-2 break-words text-sm leading-7 text-slate-600 [overflow-wrap:anywhere]">
+                    <p className="mt-2 whitespace-normal break-words text-sm leading-7 text-slate-600">
                       {trace.collaborationSummary}
                     </p>
                   </div>
