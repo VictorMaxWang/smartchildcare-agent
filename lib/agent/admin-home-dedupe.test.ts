@@ -2,219 +2,353 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AdminConsultationPriorityItem } from "./admin-consultation.ts";
-import { dedupeAdminHomeExposure } from "./admin-home-dedupe.ts";
-import type { AdminHomeViewModel } from "./admin-types.ts";
+import {
+  dedupeAdminAgentResultExposure,
+  dedupeAdminHomeExposure,
+} from "./admin-home-dedupe.ts";
+import type {
+  AdminAgentResult,
+  AdminDispatchEvent,
+  AdminFeedbackRiskSummary,
+  AdminHomeViewModel,
+  AdminRiskChildSummary,
+  InstitutionPriorityItem,
+} from "./admin-types.ts";
 
-function buildHomeViewModel(): AdminHomeViewModel {
+function buildPriorityItem(
+  overrides: Partial<InstitutionPriorityItem> & Pick<InstitutionPriorityItem, "id" | "targetType" | "targetId" | "targetName">
+): InstitutionPriorityItem {
   return {
-    riskChildrenCount: 2,
-    feedbackCompletionRate: 100,
-    pendingItems: ["林小雨需要优先处理会诊派单", "向阳班晨检闭环已完成"],
-    weeklySummary: "本周整体稳定",
-    weeklyHighlights: ["林小雨存在过敏联动风险", "今日运营顺畅"],
-    heroStats: [
-      { label: "今日高优先级事项", value: "3" },
-      { label: "重点风险儿童", value: "2" },
-      { label: "家长反馈完成率", value: "100%" },
-      { label: "待推进派单", value: "1" },
-    ],
-    priorityTopItems: [
-      {
-        id: "priority-child-lxy",
-        targetType: "child",
-        targetId: "c-1",
-        targetName: "林小雨",
-        priorityScore: 95,
-        priorityLevel: "P1",
-        reason: "连续两次待复查",
-        evidence: [],
-        recommendedOwner: { role: "admin", label: "陈园长" },
-        recommendedAction: "立即跟进",
-        recommendedDeadline: "今天 12:00",
-        relatedChildIds: ["c-1"],
-        relatedClassNames: ["向阳班"],
-        dispatchPayload: {
-          eventType: "admin_action",
-          priorityItemId: "priority-child-lxy",
-          title: "林小雨重点跟进",
-          summary: "连续两次待复查",
-          targetType: "child",
-          targetId: "c-1",
-          targetName: "林小雨",
-          priorityLevel: "P1",
-          priorityScore: 95,
-          recommendedOwnerRole: "admin",
-          recommendedOwnerName: "陈园长",
-          recommendedAction: "立即跟进",
-          recommendedDeadline: "今天 12:00",
-          reasonText: "连续两次待复查",
-          evidence: [],
-          source: {
-            institutionName: "SmartChildcare",
-            workflow: "daily-priority",
-            relatedChildIds: ["c-1"],
-            relatedClassNames: ["向阳班"],
-          },
-        },
+    id: overrides.id,
+    targetType: overrides.targetType,
+    targetId: overrides.targetId,
+    targetName: overrides.targetName,
+    priorityScore: overrides.priorityScore ?? 90,
+    priorityLevel: overrides.priorityLevel ?? "P1",
+    reason: overrides.reason ?? `${overrides.targetName} needs follow-up`,
+    evidence: overrides.evidence ?? [],
+    recommendedOwner: overrides.recommendedOwner ?? { role: "admin", label: "Director Chen" },
+    recommendedAction: overrides.recommendedAction ?? "Follow up today",
+    recommendedDeadline: overrides.recommendedDeadline ?? "Today 18:00",
+    relatedChildIds: overrides.relatedChildIds ?? (overrides.targetType === "child" ? [overrides.targetId] : []),
+    relatedClassNames: overrides.relatedClassNames ?? ["Sun Class"],
+    dispatchPayload: overrides.dispatchPayload ?? {
+      eventType: "admin_action",
+      priorityItemId: overrides.id,
+      title: `${overrides.targetName} follow-up`,
+      summary: overrides.reason ?? `${overrides.targetName} needs follow-up`,
+      targetType: overrides.targetType,
+      targetId: overrides.targetId,
+      targetName: overrides.targetName,
+      priorityLevel: overrides.priorityLevel ?? "P1",
+      priorityScore: overrides.priorityScore ?? 90,
+      recommendedOwnerRole: overrides.recommendedOwner?.role ?? "admin",
+      recommendedOwnerName: overrides.recommendedOwner?.label ?? "Director Chen",
+      recommendedAction: overrides.recommendedAction ?? "Follow up today",
+      recommendedDeadline: overrides.recommendedDeadline ?? "Today 18:00",
+      reasonText: overrides.reason ?? `${overrides.targetName} needs follow-up`,
+      evidence: overrides.evidence ?? [],
+      source: {
+        institutionName: "SmartChildcare",
+        workflow: "daily-priority",
+        relatedChildIds:
+          overrides.relatedChildIds ?? (overrides.targetType === "child" ? [overrides.targetId] : []),
+        relatedClassNames: overrides.relatedClassNames ?? ["Sun Class"],
       },
-      {
-        id: "priority-class-sun",
-        targetType: "class",
-        targetId: "class-1",
-        targetName: "向阳班",
-        priorityScore: 72,
-        priorityLevel: "P2",
-        reason: "班级闭环需补齐",
-        evidence: [],
-        recommendedOwner: { role: "teacher", label: "李老师" },
-        recommendedAction: "补齐晨检",
-        recommendedDeadline: "今天放学前",
-        relatedChildIds: ["c-1", "c-2"],
-        relatedClassNames: ["向阳班"],
-        dispatchPayload: {
-          eventType: "admin_action",
-          priorityItemId: "priority-class-sun",
-          title: "向阳班闭环补齐",
-          summary: "班级闭环需补齐",
-          targetType: "class",
-          targetId: "class-1",
-          targetName: "向阳班",
-          priorityLevel: "P2",
-          priorityScore: 72,
-          recommendedOwnerRole: "teacher",
-          recommendedOwnerName: "李老师",
-          recommendedAction: "补齐晨检",
-          recommendedDeadline: "今天放学前",
-          reasonText: "班级闭环需补齐",
-          evidence: [],
-          source: {
-            institutionName: "SmartChildcare",
-            workflow: "daily-priority",
-            relatedClassNames: ["向阳班"],
-          },
-        },
-      },
-    ],
-    riskChildren: [
-      {
-        childId: "c-1",
-        childName: "林小雨",
-        className: "向阳班",
-        priorityLevel: "P1",
-        priorityScore: 95,
-        reason: "连续两次待复查",
-        ownerLabel: "陈园长",
-        deadline: "今天 12:00",
-      },
-      {
-        childId: "c-2",
-        childName: "王小明",
-        className: "向阳班",
-        priorityLevel: "P2",
-        priorityScore: 72,
-        reason: "蔬果摄入偏低",
-        ownerLabel: "李老师",
-        deadline: "今天放学前",
-      },
-    ],
-    riskClasses: [],
-    pendingDispatches: [
-      {
-        id: "dispatch-consultation-lxy",
-        institutionId: "inst-1",
-        eventType: "admin_action",
-        status: "pending",
-        priorityItemId: "consult-lxy-1",
-        title: "林小雨重点会诊派单",
-        summary: "林小雨需要继续跟进会诊结论并安排家园协同。",
-        targetType: "child",
-        targetId: "c-1",
-        targetName: "林小雨",
-        priorityLevel: "P1",
-        priorityScore: 95,
-        recommendedOwnerRole: "admin",
-        recommendedOwnerName: "陈园长",
-        recommendedAction: "继续跟进",
-        recommendedDeadline: "今天 12:00",
-        reasonText: "连续两次待复查",
-        evidence: [],
-        source: {
-          institutionName: "SmartChildcare",
-          workflow: "daily-priority",
-          consultationId: "consult-lxy-1",
-          relatedConsultationIds: ["consult-lxy-1"],
-          relatedChildIds: ["c-1"],
-          relatedClassNames: ["向阳班"],
-        },
-        createdBy: "system",
-        updatedBy: "system",
-        createdAt: "2026-04-09T08:00:00.000Z",
-        updatedAt: "2026-04-09T08:00:00.000Z",
-        completedAt: null,
-      },
-    ],
-    actionEntrySummary: "建议园长先推动林小雨相关事项。",
-    adminContext: {} as AdminHomeViewModel["adminContext"],
+    },
+  };
+}
+
+function buildRiskChild(
+  childId: string,
+  childName: string,
+  overrides: Partial<AdminRiskChildSummary> = {}
+): AdminRiskChildSummary {
+  return {
+    childId,
+    childName,
+    className: overrides.className ?? "Sun Class",
+    priorityLevel: overrides.priorityLevel ?? "P1",
+    priorityScore: overrides.priorityScore ?? 88,
+    reason: overrides.reason ?? `${childName} remains high risk`,
+    ownerLabel: overrides.ownerLabel ?? "Director Chen",
+    deadline: overrides.deadline ?? "Today 18:00",
+  };
+}
+
+function buildFeedbackRisk(
+  childId: string,
+  childName: string,
+  overrides: Partial<AdminFeedbackRiskSummary> = {}
+): AdminFeedbackRiskSummary {
+  return {
+    childId,
+    childName,
+    className: overrides.className ?? "Sun Class",
+    priorityLevel: overrides.priorityLevel ?? "P2",
+    reason: overrides.reason ?? `${childName} family feedback is missing`,
+    lastFeedbackDate: overrides.lastFeedbackDate,
+    recommendedOwner: overrides.recommendedOwner ?? "Teacher Li",
+  };
+}
+
+function buildDispatchEvent(overrides: Partial<AdminDispatchEvent> = {}): AdminDispatchEvent {
+  return {
+    id: overrides.id ?? "dispatch-1",
+    institutionId: overrides.institutionId ?? "inst-1",
+    eventType: overrides.eventType ?? "admin_action",
+    status: overrides.status ?? "pending",
+    priorityItemId: overrides.priorityItemId ?? "consult-ava",
+    title: overrides.title ?? "Ava consultation dispatch",
+    summary: overrides.summary ?? "Ava still needs consultation follow-up",
+    targetType: overrides.targetType ?? "child",
+    targetId: overrides.targetId ?? "child-1",
+    targetName: overrides.targetName ?? "Ava",
+    priorityLevel: overrides.priorityLevel ?? "P1",
+    priorityScore: overrides.priorityScore ?? 92,
+    recommendedOwnerRole: overrides.recommendedOwnerRole ?? "admin",
+    recommendedOwnerName: overrides.recommendedOwnerName ?? "Director Chen",
+    recommendedAction: overrides.recommendedAction ?? "Follow up",
+    recommendedDeadline: overrides.recommendedDeadline ?? "Today 18:00",
+    reasonText: overrides.reasonText ?? "Consultation still open",
+    evidence: overrides.evidence ?? [],
+    source: overrides.source ?? {
+      institutionName: "SmartChildcare",
+      workflow: "daily-priority",
+      consultationId: "consult-ava",
+      relatedConsultationIds: ["consult-ava"],
+      relatedChildIds: ["child-1"],
+      relatedClassNames: ["Sun Class"],
+    },
+    createdBy: overrides.createdBy ?? "system",
+    updatedBy: overrides.updatedBy ?? "system",
+    createdAt: overrides.createdAt ?? "2026-04-09T08:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-04-09T08:00:00.000Z",
+    completedAt: overrides.completedAt ?? null,
   };
 }
 
 function buildConsultationPriorityItem(): AdminConsultationPriorityItem {
   return {
-    consultationId: "consult-lxy-1",
-    childId: "c-1",
+    consultationId: "consult-ava",
+    childId: "child-1",
     riskLevel: "high",
     generatedAt: "2026-04-09T08:00:00.000Z",
     shouldEscalateToAdmin: true,
     decision: {
-      consultationId: "consult-lxy-1",
-      childId: "c-1",
-      childName: "林小雨",
-      className: "向阳班",
+      consultationId: "consult-ava",
+      childId: "child-1",
+      childName: "Ava",
+      className: "Sun Class",
       riskLevel: "high",
-      riskLabel: "高风险预警",
+      riskLabel: "High Risk",
       priorityLabel: "P1",
       status: "pending",
-      statusLabel: "待分派",
+      statusLabel: "Pending",
       statusSource: "consultation",
-      summary: "需要优先跟进",
-      whyHighPriority: "连续两次待复查",
-      recommendedOwnerName: "陈园长",
+      summary: "Ava needs escalation",
+      whyHighPriority: "Repeated abnormal follow-up",
+      recommendedOwnerName: "Director Chen",
       recommendedAt: "2026-04-09T12:00:00.000Z",
-      recommendedAtLabel: "4月9日 12:00",
-      generatedAtLabel: "4月9日 08:00",
-      triggerReasons: ["连续两次待复查"],
-      keyFindings: ["情绪波动明显"],
-      schoolActions: ["午睡前安抚"],
-      homeActions: ["家长晚上反馈"],
-      followUpActions: ["48 小时复盘"],
+      recommendedAtLabel: "Apr 9 12:00",
+      generatedAtLabel: "Apr 9 08:00",
+      triggerReasons: ["Repeated abnormal follow-up"],
+      keyFindings: ["Mood fluctuations are increasing"],
+      schoolActions: ["Observe at noon"],
+      homeActions: ["Request parent feedback tonight"],
+      followUpActions: ["Review within 48 hours"],
     },
     trace: {
-      participants: ["健康观察", "饮食行为"],
-      keyFindings: ["情绪波动明显"],
-      collaborationSummary: "需要优先跟进",
+      participants: ["Health", "Diet"],
+      keyFindings: ["Mood fluctuations are increasing"],
+      collaborationSummary: "Ava needs escalation",
       explainability: [],
       evidenceItems: [],
       providerState: "real",
-      providerStateLabel: "真实 Provider",
+      providerStateLabel: "Real Provider",
       providerLabel: "provider/model",
       memoryState: "ready",
-      memoryStateLabel: "记忆已命中",
-      memoryDetail: "命中 1 个 memory source",
+      memoryStateLabel: "Memory Ready",
+      memoryDetail: "1 source matched",
       syncTargets: [],
       evidenceHighlights: [],
       providerTrace: null,
     },
     recommendedOwnerRole: "admin",
+    dispatchBindingScope: "consultation",
+    dispatchEvent: buildDispatchEvent(),
+  };
+}
+
+function buildHomeViewModel(): AdminHomeViewModel {
+  return {
+    riskChildrenCount: 2,
+    feedbackCompletionRate: 100,
+    pendingItems: ["Ava still needs follow-up today", "Sun Class morning loop is complete"],
+    weeklySummary: "Weekly summary",
+    weeklyHighlights: ["Ava remains the top concern", "Overall operations are stable"],
+    heroStats: [
+      { label: "Top priorities", value: "2" },
+      { label: "Risk children", value: "2" },
+      { label: "Feedback rate", value: "100%" },
+      { label: "Pending dispatches", value: "1" },
+    ],
+    priorityTopItems: [
+      buildPriorityItem({
+        id: "priority-ava",
+        targetType: "child",
+        targetId: "child-1",
+        targetName: "Ava",
+      }),
+      buildPriorityItem({
+        id: "priority-sun-class",
+        targetType: "class",
+        targetId: "class-sun",
+        targetName: "Sun Class",
+        priorityLevel: "P2",
+        priorityScore: 72,
+      }),
+    ],
+    riskChildren: [buildRiskChild("child-1", "Ava"), buildRiskChild("child-2", "Ben")],
+    riskClasses: [],
+    pendingDispatches: [buildDispatchEvent()],
+    actionEntrySummary: "Director should push Ava related actions first.",
+    adminContext: {} as AdminHomeViewModel["adminContext"],
+  };
+}
+
+function buildAgentResult(): AdminAgentResult {
+  return {
+    title: "Daily institution priorities",
+    summary: "Ava is the top institution risk today.",
+    assistantAnswer: "Start with Ava and coordinate the next loop.",
+    institutionScope: {
+      institutionName: "SmartChildcare",
+      date: "2026-04-10",
+      visibleChildren: 2,
+      classCount: 1,
+      attendanceRate: 100,
+      healthAbnormalCount: 1,
+      growthAttentionCount: 1,
+      pendingReviewCount: 1,
+      feedbackCount: 1,
+      feedbackCompletionRate: 100,
+      riskChildrenCount: 2,
+      riskClassCount: 1,
+      pendingDispatchCount: 1,
+    },
+    priorityTopItems: [
+      buildPriorityItem({
+        id: "priority-ava",
+        targetType: "child",
+        targetId: "child-1",
+        targetName: "Ava",
+      }),
+      buildPriorityItem({
+        id: "priority-ben",
+        targetType: "child",
+        targetId: "child-2",
+        targetName: "Ben",
+        priorityLevel: "P2",
+        priorityScore: 70,
+      }),
+    ],
+    riskChildren: [buildRiskChild("child-1", "Ava"), buildRiskChild("child-2", "Ben")],
+    riskClasses: [],
+    feedbackRiskItems: [
+      buildFeedbackRisk("child-1", "Ava"),
+      buildFeedbackRisk("child-3", "Cara"),
+    ],
+    highlights: ["Ava still needs escalation", "Ben is improving"],
+    actionItems: [
+      {
+        id: "action-ava",
+        title: "Follow up Ava",
+        targetType: "child",
+        targetId: "child-1",
+        targetName: "Ava",
+        priorityLevel: "P1",
+        ownerRole: "admin",
+        ownerLabel: "Director Chen",
+        action: "Follow up today",
+        deadline: "Today 18:00",
+        summary: "Follow up Ava today",
+        dispatchPayload: buildPriorityItem({
+          id: "priority-ava-action",
+          targetType: "child",
+          targetId: "child-1",
+          targetName: "Ava",
+        }).dispatchPayload,
+        status: "suggested",
+      },
+    ],
+    recommendedOwnerMap: [],
+    quickQuestions: ["What should I do first?"],
+    notificationEvents: [buildDispatchEvent()],
+    source: "rule",
+    generatedAt: "2026-04-10T08:00:00.000Z",
   };
 }
 
 test("dedupeAdminHomeExposure removes repeated child exposure outside consultation primary section", () => {
   const deduped = dedupeAdminHomeExposure(buildHomeViewModel(), [buildConsultationPriorityItem()]);
 
-  assert.equal(deduped.priorityTopItems.some((item) => item.targetType === "child" && item.targetId === "c-1"), false);
-  assert.equal(deduped.priorityTopItems.some((item) => item.targetType === "class" && item.targetId === "class-1"), true);
-  assert.equal(deduped.riskChildren.some((item) => item.childId === "c-1"), false);
-  assert.equal(deduped.riskChildren.some((item) => item.childId === "c-2"), true);
-  assert.equal(deduped.weeklyHighlights.some((item) => item.includes("林小雨")), false);
-  assert.equal(deduped.pendingDispatches[0]?.summary, "重点会诊事项待派发跟进。");
+  assert.equal(
+    deduped.priorityTopItems.some((item) => item.targetType === "child" && item.targetId === "child-1"),
+    false
+  );
+  assert.equal(deduped.priorityTopItems.some((item) => item.targetId === "class-sun"), true);
+  assert.equal(deduped.riskChildren.some((item) => item.childId === "child-1"), false);
+  assert.equal(deduped.riskChildren.some((item) => item.childId === "child-2"), true);
+  assert.equal(deduped.weeklyHighlights.some((item) => item.includes("Ava")), false);
+  assert.equal(deduped.pendingDispatches[0]?.summary.includes("Ava"), false);
+});
+
+test("dedupeAdminHomeExposure still dedupes cross-block child exposure without consultation items", () => {
+  const deduped = dedupeAdminHomeExposure(buildHomeViewModel(), []);
+
+  assert.equal(deduped.priorityTopItems[0]?.targetId, "child-1");
+  assert.deepEqual(
+    deduped.riskChildren.map((item) => item.childId),
+    ["child-2"]
+  );
+  assert.deepEqual(deduped.pendingItems, ["Sun Class morning loop is complete"]);
+  assert.equal(deduped.actionEntrySummary.includes("Ava"), false);
+  assert.notEqual(deduped.actionEntrySummary, buildHomeViewModel().actionEntrySummary);
+});
+
+test("dedupeAdminAgentResultExposure keeps consultation child only in the highest-priority section", () => {
+  const deduped = dedupeAdminAgentResultExposure(buildAgentResult(), [buildConsultationPriorityItem()]);
+
+  assert.deepEqual(
+    deduped.priorityTopItems.map((item) => item.targetId),
+    ["child-2"]
+  );
+  assert.deepEqual(deduped.riskChildren.map((item) => item.childId), []);
+  assert.deepEqual(
+    deduped.feedbackRiskItems.map((item) => item.childId),
+    ["child-3"]
+  );
+  assert.deepEqual(deduped.highlights, []);
+});
+
+test("dedupeAdminAgentResultExposure removes child highlights already surfaced by action items", () => {
+  const result = buildAgentResult();
+  result.priorityTopItems = [
+    buildPriorityItem({
+      id: "priority-sun-class",
+      targetType: "class",
+      targetId: "class-sun",
+      targetName: "Sun Class",
+      priorityLevel: "P2",
+      priorityScore: 72,
+    }),
+  ];
+  result.riskChildren = [];
+  result.feedbackRiskItems = [];
+  result.highlights = ["Ava still needs escalation", "Overall operations are stable"];
+
+  const deduped = dedupeAdminAgentResultExposure(result, []);
+
+  assert.deepEqual(deduped.highlights, ["Overall operations are stable"]);
 });

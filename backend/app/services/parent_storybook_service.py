@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 import hashlib
 from datetime import UTC, datetime, timedelta
@@ -87,6 +87,7 @@ STYLE_PALETTES: dict[str, dict[str, str]] = {
 }
 STORYBOOK_MEDIA_WARM_JOB_TTL_SECONDS = 20 * 60
 STORYBOOK_MEDIA_WARM_MAX_WORKERS = 4
+STORYBOOK_MEDIA_WARM_PRIORITY_SCENE_COUNT = 2
 
 MediaWarmJobStatus = Literal["disabled", "idle", "warming", "ready", "partial", "error"]
 
@@ -1778,6 +1779,56 @@ def _complete_storybook_media_warm_job(story_id: str) -> None:
         job.completed.set()
 
 
+def _prioritize_storybook_media_scene_requests(
+    scene_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return sorted(
+        scene_requests,
+        key=lambda scene_request: (
+            0
+            if int(scene_request["sceneIndex"]) <= STORYBOOK_MEDIA_WARM_PRIORITY_SCENE_COUNT
+            else 1,
+            int(scene_request["sceneIndex"]),
+        ),
+    )
+
+
+def _run_storybook_media_warm_task(
+    *,
+    story_id: str,
+    media_kind: Literal["image", "audio"],
+    provider: Any,
+    kwargs: dict[str, Any],
+) -> None:
+    try:
+        result = provider.render_scene(**kwargs)
+        if media_kind == "image":
+            if _scene_has_real_image(result):
+                _update_storybook_media_warm_channel(story_id, media_kind, success=True)
+                return
+            error = RuntimeError("image provider returned without ready image")
+            error.stage = "image_not_ready"  # type: ignore[attr-defined]
+        else:
+            if _scene_has_real_audio(result):
+                _update_storybook_media_warm_channel(story_id, media_kind, success=True)
+                return
+            error = RuntimeError("audio provider returned without ready audio")
+            error.stage = "audio_not_ready"  # type: ignore[attr-defined]
+        _update_storybook_media_warm_channel(
+            story_id,
+            media_kind,
+            success=False,
+            error=error,
+        )
+    except Exception as error:
+        _update_storybook_media_warm_channel(
+            story_id,
+            media_kind,
+            success=False,
+            error=error,
+        )
+
+
 def _warm_storybook_media_job(
     *,
     story_id: str,
@@ -1788,47 +1839,36 @@ def _warm_storybook_media_job(
     audio_pending_scene_indices: set[int],
 ) -> None:
     try:
-        for scene_request in scene_requests:
+        prioritized_scene_requests = _prioritize_storybook_media_scene_requests(scene_requests)
+        warm_tasks: list[tuple[Literal["image", "audio"], Any, dict[str, Any]]] = []
+
+        for scene_request in prioritized_scene_requests:
             scene_index = int(scene_request["sceneIndex"])
             if scene_index in image_pending_scene_indices:
-                try:
-                    image_result = image_provider.render_scene(**scene_request["image_kwargs"])
-                    if _scene_has_real_image(image_result):
-                        _update_storybook_media_warm_channel(story_id, "image", success=True)
-                    else:
-                        _update_storybook_media_warm_channel(
-                            story_id,
-                            "image",
-                            success=False,
-                            error=RuntimeError("image provider returned without ready image"),
-                        )
-                except Exception as error:
-                    _update_storybook_media_warm_channel(
-                        story_id,
-                        "image",
-                        success=False,
-                        error=error,
-                    )
-
+                warm_tasks.append(("image", image_provider, scene_request["image_kwargs"]))
             if scene_index in audio_pending_scene_indices:
-                try:
-                    audio_result = audio_provider.render_scene(**scene_request["audio_kwargs"])
-                    if _scene_has_real_audio(audio_result):
-                        _update_storybook_media_warm_channel(story_id, "audio", success=True)
-                    else:
-                        _update_storybook_media_warm_channel(
-                            story_id,
-                            "audio",
-                            success=False,
-                            error=RuntimeError("audio provider returned without ready audio"),
-                        )
-                except Exception as error:
-                    _update_storybook_media_warm_channel(
-                        story_id,
-                        "audio",
-                        success=False,
-                        error=error,
-                    )
+                warm_tasks.append(("audio", audio_provider, scene_request["audio_kwargs"]))
+
+        if not warm_tasks:
+            return
+
+        max_workers = max(1, min(STORYBOOK_MEDIA_WARM_MAX_WORKERS, len(warm_tasks)))
+        with ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="storybook-media-warm",
+        ) as executor:
+            futures = [
+                executor.submit(
+                    _run_storybook_media_warm_task,
+                    story_id=story_id,
+                    media_kind=media_kind,
+                    provider=provider,
+                    kwargs=kwargs,
+                )
+                for media_kind, provider, kwargs in warm_tasks
+            ]
+            for future in as_completed(futures):
+                future.result()
     finally:
         _complete_storybook_media_warm_job(story_id)
 

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeAdminNotificationSource } from "./notification-events";
+import { normalizeAdminNotificationSource } from "./notification-event-source";
 
-test("normalizeAdminNotificationSource keeps valid consultation binding and drops empty source", () => {
+test("normalizeAdminNotificationSource keeps task metadata and drops empty source", () => {
   assert.equal(normalizeAdminNotificationSource(undefined), null);
   assert.equal(normalizeAdminNotificationSource({ relatedChildIds: ["", "  "] }), null);
 
@@ -15,6 +15,10 @@ test("normalizeAdminNotificationSource keeps valid consultation binding and drop
       relatedClassNames: ["向日葵班", ""],
       consultationId: "consult-1",
       relatedConsultationIds: ["consult-1", "consult-1"],
+      taskId: "task-child-1",
+      sourceType: "consultation",
+      sourceId: "consult-1",
+      relatedTaskIds: ["task-child-1", "task-child-1"],
     }),
     {
       institutionName: "SmartChildcare",
@@ -23,6 +27,10 @@ test("normalizeAdminNotificationSource keeps valid consultation binding and drop
       relatedClassNames: ["向日葵班"],
       consultationId: "consult-1",
       relatedConsultationIds: ["consult-1"],
+      taskId: "task-child-1",
+      sourceType: "consultation",
+      sourceId: "consult-1",
+      relatedTaskIds: ["task-child-1"],
     }
   );
 });

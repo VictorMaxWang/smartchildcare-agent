@@ -28,6 +28,7 @@ from app.db.repositories import (
 from app.memory.session_memory import SessionMemory
 from app.memory.vector_store import SimpleVectorStore
 from app.providers.mock import build_mock_diet_evaluation, build_mock_vision_meal
+from app.services.demand_insight_engine import build_demand_insight_engine
 from app.services.memory_service import MemoryService
 from app.services.admin_consultation_feed import list_high_risk_consultation_feed
 from app.services.health_file_bridge_service import run_health_file_bridge
@@ -662,6 +663,22 @@ class Orchestrator:
             status=status,
             owner_name=owner_name,
             escalated_only=escalated_only,
+            brain_provider=self._brain_provider(),
+        )
+
+    async def demand_insights(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        effective_payload = payload or {}
+        return await build_demand_insight_engine(
+            repositories=self.repositories,
+            app_snapshot=safe_dict(effective_payload.get("appSnapshot")) or None,
+            institution_id=_coerce_string(effective_payload.get("institutionId")),
+            window_days=int(effective_payload.get("windowDays") or 14),
+            limit_per_category=int(effective_payload.get("limitPerCategory") or 5),
+            consultation_limit=int(effective_payload.get("consultationLimit") or 40),
+            today=_coerce_string(effective_payload.get("today")),
+            include_weekly_signals=bool(
+                effective_payload.get("includeWeeklySignals", True)
+            ),
             brain_provider=self._brain_provider(),
         )
 

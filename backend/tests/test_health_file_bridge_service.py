@@ -29,10 +29,14 @@ def test_health_file_bridge_service_returns_extraction_only_output_for_metadata_
     assert result["mock"] is True
     assert result["liveReadyButNotVerified"] is True
     assert result["fileType"] == "pdf"
-    assert "T8 extraction only" in result["disclaimer"]
+    assert "T9 bridge" in result["disclaimer"]
     assert result["extractedFacts"]
     assert result["riskItems"][0]["title"] == "Low-confidence extraction from limited text hints"
     assert result["followUpHints"]
+    assert result["actionMapping"]["schoolTodayActions"]
+    assert result["actionMapping"]["familyTonightActions"]
+    assert result["actionMapping"]["followUpPlan"]
+    assert result["actionMapping"]["escalationSuggestion"]["level"] == "routine"
     assert isinstance(result["confidence"], float)
 
 
@@ -68,4 +72,47 @@ def test_health_file_bridge_service_extracts_fever_medication_and_allergy_hints_
     assert "Temperature-related signal needs manual confirmation" in risk_titles
     assert "Potential allergy-related instruction detected" in risk_titles
     assert "Do not infer a daycare medication plan from the file alone" in contraindication_titles
+    assert result["actionMapping"]["escalationSuggestion"]["level"] == "same-day-review"
+    assert any(
+        item["title"] == "Temporarily avoid unverified allergen exposure today"
+        for item in result["actionMapping"]["schoolTodayActions"]
+    )
+    assert any(
+        item["title"] == "Do not administer medicine from the file alone"
+        for item in result["actionMapping"]["schoolTodayActions"]
+    )
     assert result["confidence"] >= 0.6
+
+
+def test_health_file_bridge_service_filters_out_risky_actions_when_contraindications_exist():
+    result = asyncio.run(
+        run_health_file_bridge(
+            {
+                "childId": "child-3",
+                "sourceRole": "teacher",
+                "files": [
+                    {
+                        "fileId": "file-3",
+                        "name": "allergy-note.png",
+                        "mimeType": "image/png",
+                        "previewText": "allergy medication fever 38.2 follow-up tomorrow",
+                    }
+                ],
+                "requestSource": "pytest-service",
+            }
+        )
+    )
+
+    flattened_action_text = " ".join(
+        f"{item['title']} {item['detail']}".lower()
+        for bucket in (
+            result["actionMapping"]["schoolTodayActions"],
+            result["actionMapping"]["familyTonightActions"],
+            result["actionMapping"]["followUpPlan"],
+        )
+        for item in bucket
+    )
+
+    assert "resume normal activity" not in flattened_action_text
+    assert "allergen exposure is acceptable" not in flattened_action_text
+    assert "administer medicine based on the file" not in flattened_action_text

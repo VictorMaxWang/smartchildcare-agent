@@ -1,8 +1,35 @@
 import type { ConsultationResult, ReminderItem } from "@/lib/ai/types";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
+import {
+  buildConsultationAdminTask,
+  buildInterventionTasksFromCard,
+  buildReminderFromTask,
+} from "@/lib/tasks/task-model";
+import type { CanonicalTask } from "@/lib/tasks/types";
 
-function createReminderId(prefix: string, targetId: string) {
-  return `${prefix}-${targetId}-${Date.now()}`;
+function dedupeReminders(items: ReminderItem[]) {
+  const reminderMap = new Map<string, ReminderItem>();
+  for (const item of items) {
+    reminderMap.set(item.reminderId, item);
+  }
+  return Array.from(reminderMap.values());
+}
+
+export function buildReminderItemsFromTasks(params: {
+  tasks: CanonicalTask[];
+  childName: string;
+  targetId?: string;
+}) {
+  return dedupeReminders(
+    params.tasks
+      .map((task) =>
+        buildReminderFromTask(task, {
+          childName: params.childName,
+          targetId: task.ownerRole === "admin" ? task.childId : params.targetId ?? task.childId,
+        })
+      )
+      .filter((item): item is ReminderItem => Boolean(item))
+  );
 }
 
 export function buildReminderItems(params: {
@@ -13,53 +40,23 @@ export function buildReminderItems(params: {
   interventionCard?: InterventionCard | null;
   consultation?: ConsultationResult | null;
 }): ReminderItem[] {
-  const scheduledAt = new Date().toISOString();
-  const items: ReminderItem[] = [];
+  const tasks: CanonicalTask[] = [];
 
   if (params.interventionCard) {
-    items.push({
-      reminderId: createReminderId("task", params.targetId),
-      reminderType: "family-task",
-      targetRole: params.targetRole,
-      targetId: params.targetId,
-      childId: params.childId,
-      title: `${params.childName} 今晚任务提醒`,
-      description: params.interventionCard.tonightHomeAction,
-      scheduledAt,
-      status: "pending",
-      sourceId: params.interventionCard.id,
-    });
-
-    items.push({
-      reminderId: createReminderId("review", params.targetId),
-      reminderType: "review-48h",
-      targetRole: params.targetRole,
-      targetId: params.targetId,
-      childId: params.childId,
-      title: `${params.childName} 48 小时复查提醒`,
-      description: params.interventionCard.reviewIn48h,
-      scheduledAt,
-      status: "pending",
-      sourceId: params.interventionCard.id,
-    });
+    const taskSet = buildInterventionTasksFromCard(params.interventionCard);
+    tasks.push(...taskSet.tasks.filter((task) => task.ownerRole === params.targetRole));
   }
 
-  if (params.consultation?.shouldEscalateToAdmin) {
-    items.push({
-      reminderId: createReminderId("admin", params.targetId),
-      reminderType: "admin-focus",
-      targetRole: "admin",
-      targetId: params.childId,
-      childId: params.childId,
-      title: `${params.childName} 需升级关注`,
-      description: params.consultation.coordinatorSummary.finalConclusion,
-      scheduledAt,
-      status: "pending",
-      sourceId: params.consultation.consultationId,
-    });
+  const adminTask = params.consultation ? buildConsultationAdminTask(params.consultation) : null;
+  if (adminTask) {
+    tasks.push(adminTask);
   }
 
-  return items;
+  return buildReminderItemsFromTasks({
+    tasks,
+    childName: params.childName,
+    targetId: params.targetId,
+  });
 }
 
 export function getReminderStatusLabel(status: ReminderItem["status"]) {

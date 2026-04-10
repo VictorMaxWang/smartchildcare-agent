@@ -136,7 +136,7 @@
 | `T27` | Weekly Report V2：前端接入 | `Planned` | Actionized Weekly Report | `T26` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T28` | Admin 质量驾驶舱：metrics engine | `Planned` | Admin 质量治理 | - | 中 | aggregation smoke | `TR+A` |
 | `T29` | Admin 质量驾驶舱：UI | `Planned` | Admin 质量治理 | `T28` | 中 | walkthrough / 录屏 | `TR+L+A` |
-| `T30` | 需求洞察引擎 | `Planned` | 需求洞察与信任透明 | - | 中 | aggregation smoke / walkthrough | `TR+A` |
+| `T30` | 需求洞察引擎 | `Done-code-only` | 需求洞察与信任透明 | - | 中 | aggregation smoke / walkthrough | `TR+A` |
 | `T31` | 信任透明层 | `Planned` | 需求洞察与信任透明 | `T18`、`T19`、`T30` | 中低 | walkthrough / 录屏 | `TR+L+A` |
 
 ## 当前验证边界
@@ -163,8 +163,11 @@
 - `T7` 已落地 `/teacher/health-file-bridge` 页面、`/api/ai/health-file-bridge` 桥接与 backend `health_file_bridge` schema/service skeleton；当前仍是 skeleton，不宣称 OCR / writeback / escalation 已闭环
 - `T6` 已把主视角补水表达收敛到状态化文案；底层 hydration 数据仍保留给趋势、聚合与风险判断链路
 - `T26` 已把 weekly report shared contract 扩到 `schemaVersion / role / sections / primaryAction`，并保持旧 `summary / highlights / risks / nextWeekActions / trendPrediction` 字段兼容；三角色 backend section ids 已固定，但页面级 walkthrough 与 UI shape 细化仍未开始，不写成 `T27` 已完成
+- `T30` 已落地 `backend/app/services/demand_insight_engine.py`、`backend/app/schemas/demand_insight.py` 与 `/api/v1/agents/insights/demand`；当前稳定输出 `topConcernTopics`、`consultationTriggerHeat`、`actionDifficultyTopics`、`weakFeedbackSegments`、`recurringIssueClusters`，并附带 `window / sourceSummary / dataQuality / source / fallback / warnings`
+- `T30` 当前主数据链路来自 `backend/app/db/childcare_repository.py` 的 `children / feedback / growth / health / meals / taskCheckIns / interventionCards / reminders`，叠加 memory snapshots 里的 `consultation-result`；`weekly-report-result` 与 `parent-follow-up-result` 仅作为辅助来源统计或弱信号，不宣称真实机构运营洞察
 
 - 本轮 post-merge integration sweep 与 `T19` 的本地静态与定向测试已通过：`npm run lint`、`npm run build`、`npx --yes tsx --test lib/consultation/evidence-display.test.ts lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts lib/agent/health-file-bridge.test.ts`、`npx --yes tsx --test lib/teacher-copilot/normalize.test.ts`、`py -m pytest backend/tests/test_teacher_voice_understand.py backend/tests/test_health_file_bridge_service.py backend/tests/test_health_file_bridge_endpoint.py backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py backend/tests/test_parent_trend_service.py backend/tests/test_childcare_repository.py -q`；`/teacher/high-risk-consultation`、`/admin`、`/admin/agent`、`/teacher/agent`、`/teacher/health-file-bridge`、`/parent/agent` 的页面级 HTTP / 浏览器 walkthrough 仍未计为已通过
+- 本轮 `T30` backend aggregation smoke 已通过：`py -m pytest backend/tests/test_demand_insight_engine.py backend/tests/test_admin_consultation_feed.py backend/tests/test_childcare_repository.py backend/tests/test_orchestrator_memory.py backend/tests/test_parent_trend_service.py backend/tests/test_high_risk_consultation_stream.py -q`；`/api/v1/agents/insights/demand` 的 API smoke 已纳入 `backend/tests/test_demand_insight_engine.py`，但 Admin / T31 页面级消费 walkthrough 仍未计为已通过
 
 ## 历史 Freeze 构建记录（附录，不是当前主任务表）
 

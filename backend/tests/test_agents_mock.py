@@ -117,7 +117,7 @@ def test_teacher_run():
     assert "interventionCard" in body
 
 
-def test_health_file_bridge():
+def test_health_file_bridge_smoke_with_preview_text():
     response = client.post(
         "/api/v1/agents/health-file-bridge",
         json={
@@ -139,6 +139,8 @@ def test_health_file_bridge():
     assert body["mock"] is True
     assert body["extractedFacts"]
     assert body["followUpHints"]
+    assert body["actionMapping"]["schoolTodayActions"]
+    assert body["actionMapping"]["followUpPlan"]
     assert "confidence" in body
 
 
@@ -211,6 +213,8 @@ def test_health_file_bridge():
     assert body["mock"] is True
     assert body["riskItems"]
     assert body["contraindications"] is not None
+    assert body["actionMapping"]["schoolTodayActions"]
+    assert body["actionMapping"]["familyTonightActions"]
 
 
 def test_weekly_report_legacy_snapshot_role_normalizes_admin():

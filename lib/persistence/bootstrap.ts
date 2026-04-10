@@ -22,6 +22,7 @@ export function emptyInstitutionSnapshot(): AppStateSnapshot {
     consultations: [],
     mobileDrafts: [],
     reminders: [],
+    tasks: [],
     updatedAt: new Date().toISOString(),
   };
 }

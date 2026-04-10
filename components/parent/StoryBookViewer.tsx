@@ -41,6 +41,7 @@ import type {
 import {
   describeStoryBookMode,
   formatStoryBookClientCache,
+  formatStoryBookFallbackReason,
   formatStoryBookHighlightSource,
   formatStoryBookProviderLabel,
   formatStoryBookResponseCache,
@@ -55,6 +56,7 @@ type PlaybackState = "idle" | "loading" | "playing" | "paused" | "preview" | "lo
 type StoryBookTheme = ReturnType<typeof getTheme>;
 type StoryBookRuntimeTransport = "remote-brain-proxy" | "next-json-fallback" | "next-stream-fallback";
 type StoryBookRuntimeImageDelivery = "real" | "dynamic-fallback" | "demo-art" | "svg-fallback";
+type StoryBookPublicImageDelivery = "real" | "mixed" | "dynamic-fallback" | "svg-fallback";
 type StoryBookRuntimeDiagnostics = {
   brain?: {
     reachable?: boolean;
@@ -106,6 +108,24 @@ type StoryBookAudioDelivery =
   | ParentStoryBookResponse["providerMeta"]["audioDelivery"]
   | NonNullable<ParentStoryBookResponse["cacheMeta"]>["audioDelivery"];
 type PlaybackSource = "real" | "local" | "preview";
+type StoryBookRuntimeAudioDelivery = "real" | "mixed" | "preview-only" | "local-speech";
+type StoryBookRuntimeOverrides = {
+  canUseLocalSpeech?: boolean;
+  playbackSource?: PlaybackSource;
+  playbackSceneIndex?: number | null;
+  imageFallbackMap?: Record<string, boolean>;
+};
+type StoryBookResolvedRuntimeState = {
+  imageDelivery: StoryBookPublicImageDelivery;
+  audioDelivery: StoryBookRuntimeAudioDelivery;
+  mode: "live" | "mixed" | "fallback";
+};
+type StoryBookSceneRuntimeState = {
+  storyId: string | null;
+  playbackSource: PlaybackSource;
+  playbackSceneIndex: number | null;
+  imageFallbackMap: Record<string, boolean>;
+};
 type StoryBookImageProps = {
   src: string;
   alt: string;
@@ -616,6 +636,7 @@ export function getRuntimeBannerItems(
   return items;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getSceneImageDeliveryLabel(scene: ParentStoryBookScene) {
   return formatStoryBookSceneImageDelivery(
     getRuntimeSceneImageDelivery(scene as StoryBookRuntimeScene)
@@ -695,6 +716,7 @@ function getRuntimePlaybackTimeLabel(
   return "仅字幕预演";
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getRuntimeSceneAudioBadgeLabel(
   scene: ParentStoryBookScene,
   playbackSource: PlaybackSource,
@@ -726,6 +748,280 @@ function getRuntimeSceneAudioPlayingLabel(
     return "本地补读中";
   }
   return "字幕预演中";
+}
+
+function getSceneImageFallbackKeyHotfix(storyId: string, sceneIndex: number) {
+  return `${storyId}:${sceneIndex}`;
+}
+
+function normalizeImageDeliveryHotfix(
+  value?: StoryBookRuntimeImageDelivery | "mixed" | "real"
+): Exclude<StoryBookPublicImageDelivery, "mixed"> {
+  if (value === "real") return "real";
+  if (value === "svg-fallback") return "svg-fallback";
+  return "dynamic-fallback";
+}
+
+export function resolveRuntimeSceneImageDeliveryHotfix(
+  scene: StoryBookRuntimeScene,
+  options?: { useAssetFallback?: boolean }
+): Exclude<StoryBookPublicImageDelivery, "mixed"> {
+  if (options?.useAssetFallback) {
+    return scene.assetRef && scene.assetRef !== scene.imageUrl
+      ? "dynamic-fallback"
+      : "svg-fallback";
+  }
+  if (scene.imageSourceKind) return normalizeImageDeliveryHotfix(scene.imageSourceKind);
+  if (scene.imageStatus === "ready") return "real";
+  if (scene.imageStatus === "fallback" && (scene.imageUrl || scene.assetRef)) {
+    return "dynamic-fallback";
+  }
+  return "svg-fallback";
+}
+
+function resolveRuntimeImageDeliveryHotfix(
+  story: StoryBookRuntimeResponse,
+  imageFallbackMap: Record<string, boolean> = {}
+): StoryBookPublicImageDelivery {
+  const imageDeliveries = story.scenes.map((scene) =>
+    resolveRuntimeSceneImageDeliveryHotfix(scene, {
+      useAssetFallback: Boolean(
+        imageFallbackMap[getSceneImageFallbackKeyHotfix(story.storyId, scene.sceneIndex)] &&
+          scene.assetRef &&
+          scene.assetRef !== scene.imageUrl
+      ),
+    })
+  );
+  const uniqueDeliveries = [...new Set(imageDeliveries)];
+  if (uniqueDeliveries.length === 0) return "svg-fallback";
+  if (uniqueDeliveries.length === 1) return uniqueDeliveries[0];
+  return uniqueDeliveries.includes("real") ? "mixed" : uniqueDeliveries[0];
+}
+
+function resolveRuntimeAudioDeliveryHotfix(
+  story: StoryBookRuntimeResponse,
+  options?: StoryBookRuntimeOverrides
+): StoryBookRuntimeAudioDelivery {
+  if (options?.playbackSource === "local") {
+    return "local-speech";
+  }
+  const audioDelivery = story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery;
+  if (audioDelivery === "real" || audioDelivery === "mixed") {
+    return audioDelivery;
+  }
+  return options?.canUseLocalSpeech ? "local-speech" : "preview-only";
+}
+
+export function resolveRuntimeStoryStateHotfix(
+  story: StoryBookRuntimeResponse | null | undefined,
+  options?: StoryBookRuntimeOverrides
+): StoryBookResolvedRuntimeState {
+  if (!story) {
+    return {
+      imageDelivery: "svg-fallback",
+      audioDelivery: options?.canUseLocalSpeech ? "local-speech" : "preview-only",
+      mode: "fallback",
+    };
+  }
+
+  const imageDelivery = resolveRuntimeImageDeliveryHotfix(story, options?.imageFallbackMap);
+  const audioDelivery = resolveRuntimeAudioDeliveryHotfix(story, options);
+  if (imageDelivery === "real" && audioDelivery === "real") {
+    return { imageDelivery, audioDelivery, mode: "live" };
+  }
+  if (imageDelivery === "mixed" || imageDelivery === "real" || audioDelivery === "mixed") {
+    return { imageDelivery, audioDelivery, mode: "mixed" };
+  }
+  return { imageDelivery, audioDelivery, mode: "fallback" };
+}
+
+export function resolveRuntimeStoryModeHotfix(
+  story: StoryBookRuntimeResponse | null | undefined,
+  options?: StoryBookRuntimeOverrides
+) {
+  return resolveRuntimeStoryStateHotfix(story, options).mode;
+}
+
+function getStoryAudioRuntimeLabelHotfix(
+  audioDelivery?: StoryBookRuntimeAudioDelivery | StoryBookAudioDelivery,
+  canUseLocalSpeech = false
+) {
+  if (audioDelivery === "local-speech") {
+    return "当前为本地补读";
+  }
+  if (audioDelivery === "real" || audioDelivery === "stream-url" || audioDelivery === "inline-data-url") {
+    return "真实逐页朗读";
+  }
+  if (audioDelivery === "mixed") {
+    return canUseLocalSpeech ? "部分真实朗读 + 本地补读" : "部分真实朗读 + 字幕预演";
+  }
+  return canUseLocalSpeech
+    ? "后端真实朗读未命中，当前将使用本地补读"
+    : "后端真实朗读未命中，当前仅字幕预演";
+}
+
+export function getRuntimeBannerItemsHotfix(
+  story: StoryBookRuntimeResponse | null | undefined,
+  canUseLocalSpeech: boolean,
+  runtimeOverrides?: Omit<StoryBookRuntimeOverrides, "canUseLocalSpeech">
+) {
+  if (!story) return [];
+
+  const items: Array<{ tone: "warning" | "success" | "info"; label: string; detail: string }> = [];
+  const diagnostics = story.providerMeta.diagnostics;
+  const transport = story.providerMeta.transport;
+  const runtimeState = resolveRuntimeStoryStateHotfix(story, {
+    ...runtimeOverrides,
+    canUseLocalSpeech,
+  });
+  const imageDelivery = runtimeState.imageDelivery;
+  const audioDelivery = runtimeState.audioDelivery;
+  const brainTimingParts = [
+    diagnostics?.brain?.upstreamHost ? `upstream ${diagnostics.brain.upstreamHost}` : null,
+    typeof diagnostics?.brain?.elapsedMs === "number" ? `elapsed ${diagnostics.brain.elapsedMs}ms` : null,
+    typeof diagnostics?.brain?.timeoutMs === "number" ? `timeout ${diagnostics.brain.timeoutMs}ms` : null,
+  ].filter(Boolean);
+
+  if (transport === "remote-brain-proxy") {
+    items.push({
+      tone: "success",
+      label: "FastAPI brain 已接通",
+      detail: brainTimingParts.join(" 路 ") || "当前绘本来自远端 brain 主链路。",
+    });
+  } else if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
+    items.push({
+      tone: "warning",
+      label: "未接通 FastAPI brain，当前为本地回退链路",
+      detail: diagnostics?.brain?.fallbackReason
+        ? `回退原因：${formatStoryBookFallbackReason(diagnostics.brain.fallbackReason)}${
+            brainTimingParts.length ? ` 路 ${brainTimingParts.join(" 路 ")}` : ""
+          }`
+        : brainTimingParts.join(" 路 ") || "当前结果来自本地回退链路。",
+    });
+  } else {
+    items.push({
+      tone: "info",
+      label: "brain 状态待确认",
+      detail: brainTimingParts.join(" 路 ") || "当前还没有完整的 transport 诊断信息。",
+    });
+  }
+
+  if (diagnostics?.image?.jobStatus === "warming") {
+    items.push({
+      tone: "info",
+      label: "真实图片补齐中",
+      detail: formatWarmProgressDetail(diagnostics.image),
+    });
+  }
+
+  if (imageDelivery === "real") {
+    items.push({
+      tone: "success",
+      label: "真实图片已就绪",
+      detail: "每一页都在显示真实图片结果。",
+    });
+  } else if (imageDelivery === "mixed") {
+    items.push({
+      tone: "info",
+      label: "图片为 mixed",
+      detail: "部分页面命中真实图片，其余页面仍在使用回退插画。",
+    });
+  } else if (imageDelivery === "dynamic-fallback") {
+    items.push({
+      tone: "info",
+      label: "当前图片为 dynamic-fallback",
+      detail:
+        diagnostics?.image?.lastErrorReason ??
+        "当前展示的是动态剧情插画，不宣称真实图片已命中。",
+    });
+  } else {
+    items.push({
+      tone: "warning",
+      label: "当前图片为 svg-fallback",
+      detail: "图片链路尚未就绪，当前只保留 SVG 兜底插画。",
+    });
+  }
+
+  if (diagnostics?.audio?.jobStatus === "warming" && audioDelivery !== "local-speech") {
+    items.push({
+      tone: "info",
+      label: "真实朗读补齐中",
+      detail: formatWarmProgressDetail(diagnostics.audio),
+    });
+  }
+
+  if (audioDelivery === "real") {
+    items.push({
+      tone: "success",
+      label: "真实朗读已就绪",
+      detail: "每一页都会优先播放后端真实朗读。",
+    });
+  } else if (audioDelivery === "mixed") {
+    items.push({
+      tone: "info",
+      label: "音频为 mixed",
+      detail: canUseLocalSpeech
+        ? "部分页面命中真实朗读，其余页面会降级到本地补读。"
+        : "部分页面命中真实朗读，其余页面仍是字幕预演。",
+    });
+  } else if (audioDelivery === "local-speech") {
+    items.push({
+      tone: "warning",
+      label: "当前音频为 local speech",
+      detail: "当前听到的是浏览器本地补读，不是后端真实朗读。",
+    });
+  } else {
+    items.push({
+      tone: "warning",
+      label: "当前音频未命中真实朗读，仅字幕预演",
+      detail: "当前浏览器也无法提供本地补读，所以只能展示字幕预演。",
+    });
+  }
+
+  return items;
+}
+
+function getSceneImageDeliveryLabelHotfix(
+  scene: StoryBookRuntimeScene,
+  options?: { useAssetFallback?: boolean }
+) {
+  return formatStoryBookSceneImageDelivery(
+    resolveRuntimeSceneImageDeliveryHotfix(scene, options)
+  );
+}
+
+function resolveRuntimeSceneAudioDeliveryHotfix(
+  scene: ParentStoryBookScene,
+  {
+    playbackSource,
+    isSceneActive,
+    canUseLocalSpeech,
+  }: {
+    playbackSource: PlaybackSource;
+    isSceneActive: boolean;
+    canUseLocalSpeech: boolean;
+  }
+): StoryBookRuntimeAudioDelivery {
+  if (isSceneActive && playbackSource === "real") return "real";
+  if (isSceneActive && playbackSource === "local") return "local-speech";
+  if (scene.audioStatus === "ready" && scene.audioUrl) return "real";
+  return canUseLocalSpeech ? "local-speech" : "preview-only";
+}
+
+function getRuntimeSceneAudioBadgeLabelHotfix(
+  scene: ParentStoryBookScene,
+  playbackSource: PlaybackSource,
+  isSceneActive: boolean,
+  canUseLocalSpeech: boolean
+) {
+  const audioDelivery = resolveRuntimeSceneAudioDeliveryHotfix(scene, {
+    playbackSource,
+    isSceneActive,
+    canUseLocalSpeech,
+  });
+  if (audioDelivery === "real") return "真实朗读";
+  if (audioDelivery === "local-speech") return "本地补读";
+  return "字幕预演";
 }
 
 export default function StoryBookViewer({
@@ -793,9 +1089,6 @@ export default function StoryBookViewer({
 }) {
   const theme = getTheme(story?.stylePreset ?? selectedPresetId);
   const runtimeStory = story ? getRuntimeStory(story) : null;
-  const modeCopy = runtimeStory
-    ? describeStoryBookMode(resolveRuntimeStoryMode(runtimeStory))
-    : null;
   const selectedThemeChip = themeChips.includes(manualTheme.trim()) ? manualTheme.trim() : null;
   const requiresTheme =
     generationMode === "manual-theme" || generationMode === "hybrid";
@@ -803,8 +1096,39 @@ export default function StoryBookViewer({
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     typeof window.speechSynthesis?.speak === "function";
+  const [sceneRuntimeState, setSceneRuntimeState] = useState<StoryBookSceneRuntimeState>({
+    storyId: story?.storyId ?? null,
+    playbackSource: "preview",
+    playbackSceneIndex: null,
+    imageFallbackMap: {},
+  });
+  const activeSceneRuntimeState =
+    sceneRuntimeState.storyId === (story?.storyId ?? null)
+      ? sceneRuntimeState
+      : {
+          storyId: story?.storyId ?? null,
+          playbackSource: "preview" as const,
+          playbackSceneIndex: null,
+          imageFallbackMap: {},
+        };
+
+  const runtimeState = runtimeStory
+    ? resolveRuntimeStoryStateHotfix(runtimeStory, {
+        canUseLocalSpeech,
+        playbackSource: activeSceneRuntimeState.playbackSource,
+        playbackSceneIndex: activeSceneRuntimeState.playbackSceneIndex,
+        imageFallbackMap: activeSceneRuntimeState.imageFallbackMap,
+      })
+    : null;
+  const modeCopy = runtimeState
+    ? describeStoryBookMode(runtimeState.mode)
+    : null;
   const runtimeBanners = story
-    ? getRuntimeBannerItems(runtimeStory, canUseLocalSpeech)
+    ? getRuntimeBannerItemsHotfix(runtimeStory, canUseLocalSpeech, {
+        playbackSource: activeSceneRuntimeState.playbackSource,
+        playbackSceneIndex: activeSceneRuntimeState.playbackSceneIndex,
+        imageFallbackMap: activeSceneRuntimeState.imageFallbackMap,
+      })
     : [];
 
   const bodyContent = !story ? (
@@ -817,7 +1141,12 @@ export default function StoryBookViewer({
       accentClass={theme.accent}
     />
   ) : (
-    <StoryBookSceneStream key={story.storyId} story={story} theme={theme} />
+    <StoryBookSceneStream
+      key={story.storyId}
+      story={story}
+      theme={theme}
+      onRuntimeStateChange={setSceneRuntimeState}
+    />
   );
 
   return (
@@ -1144,8 +1473,10 @@ export default function StoryBookViewer({
                   <CardContent className="space-y-3 p-4">
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline">
-                        {getStoryAudioRuntimeLabel(
-                          story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery,
+                        {getStoryAudioRuntimeLabelHotfix(
+                          runtimeState?.audioDelivery ??
+                            story.providerMeta.audioDelivery ??
+                            story.cacheMeta?.audioDelivery,
                           canUseLocalSpeech
                         )}
                       </Badge>
@@ -1165,8 +1496,10 @@ export default function StoryBookViewer({
                       {formatStoryBookProviderLabel("audio", story.providerMeta.audioProvider)}
                     </p>
                     <p className="text-sm leading-7 text-slate-600">
-                      音频状态：{getStoryAudioRuntimeLabel(
-                        story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery,
+                      音频状态：{getStoryAudioRuntimeLabelHotfix(
+                        runtimeState?.audioDelivery ??
+                          story.providerMeta.audioDelivery ??
+                          story.cacheMeta?.audioDelivery,
                         canUseLocalSpeech
                       )}
                     </p>
@@ -1184,9 +1517,11 @@ export default function StoryBookViewer({
 function StoryBookSceneStream({
   story,
   theme,
+  onRuntimeStateChange,
 }: {
   story: ParentStoryBookResponse;
   theme: StoryBookTheme;
+  onRuntimeStateChange?: (state: StoryBookSceneRuntimeState) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -1211,6 +1546,15 @@ function StoryBookSceneStream({
     typeof window.speechSynthesis?.speak === "function";
 
   const scenes = useMemo(() => story.scenes ?? [], [story.scenes]);
+
+  useEffect(() => {
+    onRuntimeStateChange?.({
+      storyId: story.storyId,
+      playbackSource,
+      playbackSceneIndex,
+      imageFallbackMap,
+    });
+  }, [imageFallbackMap, onRuntimeStateChange, playbackSceneIndex, playbackSource, story.storyId]);
 
   function invalidate() {
     tokenRef.current += 1;
@@ -1676,7 +2020,10 @@ function StoryBookSceneStream({
           )}
         </Button>
         <p className="text-xs text-slate-500">
-          {getStoryAudioRuntimeLabel(story.providerMeta.audioDelivery, canUseLocalSpeech)}
+          {getStoryAudioRuntimeLabelHotfix(
+            playbackSource === "local" ? "local-speech" : story.providerMeta.audioDelivery,
+            canUseLocalSpeech
+          )}
         </p>
       </div>
 
@@ -1684,16 +2031,22 @@ function StoryBookSceneStream({
         {scenes.map((scene, index) => {
           const isPlaying = playbackSceneIndex === index && playbackState !== "idle";
           const isSceneActive = playbackSceneIndex === index;
-          const imageDelivery = getRuntimeSceneImageDelivery(scene as StoryBookRuntimeScene);
+          const sceneRuntime = scene as StoryBookRuntimeScene;
           const captionTimeline = buildCaptionTimeline(scene);
           const segments = captionTimeline.segments.length
             ? captionTimeline.segments
             : [scene.audioScript || scene.sceneText].filter(Boolean);
-          const sceneImageFallbackKey = `${story.storyId}:${scene.sceneIndex}`;
+          const sceneImageFallbackKey = getSceneImageFallbackKeyHotfix(
+            story.storyId,
+            scene.sceneIndex
+          );
           const useAssetFallback =
             Boolean(imageFallbackMap[sceneImageFallbackKey]) &&
             Boolean(scene.assetRef) &&
             scene.assetRef !== scene.imageUrl;
+          const imageDelivery = resolveRuntimeSceneImageDeliveryHotfix(sceneRuntime, {
+            useAssetFallback,
+          });
           const sceneImageSrc = useAssetFallback
             ? scene.assetRef || "/storybook/card.svg"
             : scene.imageUrl || scene.assetRef || "/storybook/card.svg";
@@ -1745,12 +2098,10 @@ function StoryBookSceneStream({
                         ? "success"
                         : imageDelivery === "dynamic-fallback"
                           ? "info"
-                        : imageDelivery === "demo-art"
-                          ? "info"
                           : "warning"
                     }
                   >
-                    {getSceneImageDeliveryLabel(scene)}
+                    {getSceneImageDeliveryLabelHotfix(sceneRuntime, { useAssetFallback })}
                   </Badge>
                   <Badge
                     variant={
@@ -1767,7 +2118,7 @@ function StoryBookSceneStream({
                           : "warning"
                     }
                   >
-                    {getRuntimeSceneAudioBadgeLabel(
+                    {getRuntimeSceneAudioBadgeLabelHotfix(
                       scene,
                       playbackSource,
                       isSceneActive,

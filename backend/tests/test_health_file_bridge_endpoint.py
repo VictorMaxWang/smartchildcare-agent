@@ -36,6 +36,9 @@ def test_health_file_bridge_endpoint_accepts_camel_case_payload():
     assert body["fileType"] in {"pdf", "mixed"}
     assert body["contraindications"] is not None
     assert body["followUpHints"]
+    assert body["actionMapping"]["schoolTodayActions"]
+    assert body["actionMapping"]["familyTonightActions"]
+    assert "escalationSuggestion" in body["actionMapping"]
     assert isinstance(body["confidence"], float)
 
 
@@ -66,6 +69,9 @@ def test_health_file_bridge_endpoint_accepts_snake_case_payload():
     assert body["riskItems"]
     assert body["contraindications"]
     assert body["followUpHints"]
+    assert body["actionMapping"]["schoolTodayActions"]
+    assert body["actionMapping"]["familyTonightActions"]
+    assert body["actionMapping"]["followUpPlan"]
 
 
 def test_health_file_bridge_endpoint_rejects_empty_files():

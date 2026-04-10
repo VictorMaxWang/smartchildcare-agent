@@ -50,8 +50,8 @@ type StoryBookControls = {
 };
 
 const PAGE_COUNT_OPTIONS = [4, 6, 8] as const satisfies readonly ParentStoryBookPageCount[];
-const MEDIA_POLL_INTERVAL_MS = 1_500;
-const MEDIA_POLL_MAX_ATTEMPTS = 10;
+const MEDIA_POLL_INTERVAL_MS = 2_000;
+const MEDIA_POLL_MAX_ATTEMPTS = 24;
 
 function buildInitialControls(input: {
   hasChildContext: boolean;

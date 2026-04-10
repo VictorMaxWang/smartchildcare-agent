@@ -136,6 +136,7 @@ export default function AdminHomePage() {
       }
     >
       <RoleSplitLayout
+        stacked
         main={
           <div className="space-y-6">
             <MetricGrid
@@ -152,6 +153,7 @@ export default function AdminHomePage() {
             >
               <RiskPriorityBoard
                 items={consultationPriorityItems}
+                layoutVariant="stacked"
                 isLoading={feedStatus === "loading"}
                 sourceBadgeLabel={feedBadge.label}
                 sourceBadgeVariant={feedBadge.variant}
@@ -229,8 +231,8 @@ export default function AdminHomePage() {
                 description="用班级维度看闭环压力和整改优先级。"
               >
                 <div className="space-y-3">
-                  {home.riskClasses.length > 0 ? (
-                    home.riskClasses.map((item) => (
+                  {displayHome.riskClasses.length > 0 ? (
+                    displayHome.riskClasses.map((item) => (
                       <div key={item.className} className="rounded-3xl border border-slate-100 bg-white p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -264,11 +266,17 @@ export default function AdminHomePage() {
             >
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="space-y-3">
-                  {displayHome.pendingItems.map((item) => (
-                    <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-700">
-                      {item}
+                  {displayHome.pendingItems.length > 0 ? (
+                    displayHome.pendingItems.map((item) => (
+                      <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-700">
+                        {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                      当前没有新的待处理事项需要园长首页继续承接。
                     </div>
-                  ))}
+                  )}
                 </div>
                 <div className="space-y-3">
                   {displayHome.pendingDispatches.length > 0 ? (
@@ -310,14 +318,20 @@ export default function AdminHomePage() {
 
             <SectionCard title="本周运营亮点" description="用于周报和大屏复用的高层摘要。">
               <div className="space-y-3">
-                {displayHome.weeklyHighlights.map((item) => (
-                  <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4">
-                    <div className="flex items-start gap-3">
-                      <TrendingUp className="mt-0.5 h-4 w-4 text-indigo-500" />
-                      <p className="text-sm leading-6 text-slate-700">{item}</p>
+                {displayHome.weeklyHighlights.length > 0 ? (
+                  displayHome.weeklyHighlights.map((item) => (
+                    <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <TrendingUp className="mt-0.5 h-4 w-4 text-indigo-500" />
+                        <p className="text-sm leading-6 text-slate-700">{item}</p>
+                      </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                    当前没有新的周报高层亮点需要额外展示。
                   </div>
-                ))}
+                )}
               </div>
             </SectionCard>
 

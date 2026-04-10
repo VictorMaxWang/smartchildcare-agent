@@ -8,7 +8,11 @@ import {
   decodeDatabaseJson,
   encodeDatabaseJson,
 } from "@/lib/db/server";
-import { isAppStateSnapshot, type AppStateSnapshot } from "@/lib/persistence/snapshot";
+import {
+  isAppStateSnapshot,
+  normalizeAppStateSnapshot,
+  type AppStateSnapshot,
+} from "@/lib/persistence/snapshot";
 
 export const runtime = "nodejs";
 
@@ -45,7 +49,7 @@ export async function GET() {
       return NextResponse.json({ ok: true, snapshot: null });
     }
 
-    const snapshot = decodeDatabaseJson<AppStateSnapshot>(rawSnapshot);
+    const snapshot = normalizeAppStateSnapshot(decodeDatabaseJson<AppStateSnapshot>(rawSnapshot));
     if (!snapshot || !isAppStateSnapshot(snapshot)) {
       return NextResponse.json({ ok: false, error: INVALID_REMOTE_SNAPSHOT_ERROR }, { status: 500 });
     }
@@ -83,11 +87,12 @@ export async function PUT(request: Request) {
       return NextResponse.json({ ok: false, error: INVALID_SNAPSHOT_FORMAT_ERROR }, { status: 400 });
     }
 
-    if (!body?.snapshot || !isAppStateSnapshot(body.snapshot)) {
+    const normalizedSnapshot = normalizeAppStateSnapshot(body?.snapshot);
+    if (!normalizedSnapshot || !isAppStateSnapshot(normalizedSnapshot)) {
       return NextResponse.json({ ok: false, error: INVALID_SNAPSHOT_FORMAT_ERROR }, { status: 400 });
     }
 
-    const encodedSnapshot = encodeDatabaseJson(body.snapshot);
+    const encodedSnapshot = encodeDatabaseJson(normalizedSnapshot);
 
     await dbQuery(
       `

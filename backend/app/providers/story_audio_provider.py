@@ -15,6 +15,10 @@ def _normalize_text(value: Any) -> str:
     return " ".join(str(value).split())
 
 
+def _safe_setting_text(settings: Settings, field_name: str) -> str:
+    return _normalize_text(getattr(settings, field_name, ""))
+
+
 def _split_caption_segments(text: str) -> list[str]:
     normalized = _normalize_text(text)
     if not normalized:
@@ -85,8 +89,13 @@ def _build_story_audio_cache_key(
             settings.storybook_tts_voice,
             settings.storybook_tts_fallback_engineid,
             settings.storybook_tts_fallback_voice,
-            settings.storybook_tts_model,
-            settings.storybook_tts_product,
+            _safe_setting_text(settings, "storybook_tts_model"),
+            _safe_setting_text(settings, "storybook_tts_product"),
+            _safe_setting_text(settings, "storybook_tts_package"),
+            _safe_setting_text(settings, "storybook_tts_client_version"),
+            _safe_setting_text(settings, "storybook_tts_system_version"),
+            _safe_setting_text(settings, "storybook_tts_sdk_version"),
+            _safe_setting_text(settings, "storybook_tts_android_version"),
         ]
     )
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -223,6 +232,12 @@ class VivoStoryAudioProvider:
             scene_title=scene_title,
             scene_text=scene_text,
         )
+        resolved_voice_style = voice_style or self.settings.storybook_tts_voice
+        cache_key = _build_story_audio_cache_key(
+            script=script,
+            voice_style=resolved_voice_style,
+            settings=self.settings,
+        )
         cached_result = self.read_cached_scene(
             story_mode=story_mode,
             scene_index=scene_index,
@@ -232,7 +247,7 @@ class VivoStoryAudioProvider:
             child_id=child_id,
             story_id=story_id,
             audio_script=script,
-            voice_style=voice_style,
+            voice_style=resolved_voice_style,
         )
         if cached_result:
             return cached_result
@@ -251,7 +266,7 @@ class VivoStoryAudioProvider:
             "audioScript": script,
             "audioStatus": "ready",
             "captionTiming": tts_result.get("captionTiming") or build_story_caption_timing(script),
-            "voiceStyle": tts_result.get("voiceStyle") or voice_style or self.settings.storybook_tts_voice,
+            "voiceStyle": tts_result.get("voiceStyle") or resolved_voice_style,
             "audioBytes": tts_result.get("audioBytes"),
             "audioContentType": tts_result.get("audioContentType") or "audio/wav",
             "cacheHit": False,

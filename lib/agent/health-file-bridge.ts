@@ -1,4 +1,6 @@
 import type {
+  HealthFileBridgeActionItem,
+  HealthFileBridgeActionMapping,
   HealthFileBridgeContraindication,
   HealthFileBridgeFact,
   HealthFileBridgeFile,
@@ -11,7 +13,7 @@ import type {
 } from "../ai/types";
 
 const HEALTH_FILE_BRIDGE_DISCLAIMER =
-  "T8 extraction only: this bridge returns structured facts from file metadata and text hints. It does not perform verified binary OCR, medical diagnosis, daycare action mapping, writeback, or escalation dispatch.";
+  "T9 bridge returns structured facts plus conservative childcare action suggestions from file metadata and text hints. It does not perform verified binary OCR, medical diagnosis, medication authorization, clearance decisions, writeback, or escalation dispatch.";
 
 const REPORT_KEYWORDS = ["report", "lab", "result", "检验", "检查", "报告"];
 const CHECKLIST_KEYWORDS = ["checklist", "form", "sheet", "单", "表"];
@@ -32,6 +34,11 @@ const MEDICATION_KEYWORDS = [
 const ABNORMAL_KEYWORDS = ["abnormal", "positive", "elevated", "high", "low", "异常", "偏高", "偏低", "阳性"];
 const FOLLOW_UP_HINT_KEYWORDS = [...RECHECK_KEYWORDS, "review", "随访", "明天", "tomorrow", "48h", "48小时"];
 const TEMPERATURE_PATTERN = /(?<!\d)(3[5-9](?:\.\d)?)(?:\s*(?:°?\s*[cC]|℃))?/;
+const DANGEROUS_ACTION_PATTERNS = {
+  allergy: ["allergen exposure is acceptable", "resume suspect food", "resume shared food"],
+  medication: ["administer medicine based on the file", "start a medication plan from this file"],
+  clearance: ["resume normal activity", "treat the file as clearance", "cleared for regular activity"],
+} as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
@@ -320,6 +327,307 @@ function dedupeByLabel<T extends { label: string }>(items: T[]) {
   });
 }
 
+function uniqueStrings(items: Array<string | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items) {
+    const normalized = safeText(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function buildActionItem(
+  title: string,
+  detail: string,
+  source: string,
+  basedOn: Array<string | undefined>
+): HealthFileBridgeActionItem {
+  return {
+    title,
+    detail,
+    source,
+    basedOn: uniqueStrings(basedOn),
+  };
+}
+
+function dedupeActionItems(items: HealthFileBridgeActionItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.title)) return false;
+    seen.add(item.title);
+    return true;
+  });
+}
+
+function hasFactLabel(facts: HealthFileBridgeFact[], label: string) {
+  return facts.some((fact) => fact.label === label);
+}
+
+function hasRiskTitle(risks: HealthFileBridgeRiskItem[], pattern: string) {
+  return risks.some((risk) => risk.title.toLowerCase().includes(pattern.toLowerCase()));
+}
+
+function hasContraindicationText(
+  contraindications: HealthFileBridgeContraindication[],
+  pattern: string
+) {
+  return contraindications.some((item) =>
+    `${item.title} ${item.detail}`.toLowerCase().includes(pattern.toLowerCase())
+  );
+}
+
+function hasFollowUpTitle(hints: HealthFileBridgeFollowUpHint[], pattern: string) {
+  return hints.some((hint) => hint.title.toLowerCase().includes(pattern.toLowerCase()));
+}
+
+function filterUnsafeActionItems(
+  items: HealthFileBridgeActionItem[],
+  contraindications: HealthFileBridgeContraindication[]
+) {
+  const hasAllergyContra = hasContraindicationText(contraindications, "allergy");
+  const hasMedicationContra = hasContraindicationText(contraindications, "medication");
+  const hasClearanceContra =
+    hasContraindicationText(contraindications, "clearance") ||
+    hasContraindicationText(contraindications, "normal activity");
+
+  return items.filter((item) => {
+    const text = `${item.title} ${item.detail}`.toLowerCase();
+    if (hasAllergyContra && DANGEROUS_ACTION_PATTERNS.allergy.some((pattern) => text.includes(pattern))) {
+      return false;
+    }
+    if (
+      hasMedicationContra &&
+      DANGEROUS_ACTION_PATTERNS.medication.some((pattern) => text.includes(pattern))
+    ) {
+      return false;
+    }
+    if (
+      hasClearanceContra &&
+      DANGEROUS_ACTION_PATTERNS.clearance.some((pattern) => text.includes(pattern))
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function buildHealthFileActionMapping(input: {
+  fileType: HealthFileBridgeFileType;
+  extractedFacts: HealthFileBridgeFact[];
+  riskItems: HealthFileBridgeRiskItem[];
+  contraindications: HealthFileBridgeContraindication[];
+  followUpHints: HealthFileBridgeFollowUpHint[];
+  confidence: number;
+}): HealthFileBridgeActionMapping {
+  const { fileType, extractedFacts, riskItems, contraindications, followUpHints, confidence } = input;
+  const schoolTodayActions: HealthFileBridgeActionItem[] = [];
+  const familyTonightActions: HealthFileBridgeActionItem[] = [];
+  const followUpPlan: HealthFileBridgeActionItem[] = [];
+
+  const hasTemperature = hasFactLabel(extractedFacts, "Temperature mention");
+  const hasAllergy = hasFactLabel(extractedFacts, "Allergy mention");
+  const hasMedication = hasFactLabel(extractedFacts, "Medication mention");
+  const hasFollowUp =
+    fileType === "recheck-slip" ||
+    hasFactLabel(extractedFacts, "Follow-up wording") ||
+    hasFollowUpTitle(followUpHints, "follow-up") ||
+    hasFollowUpTitle(followUpHints, "timing");
+  const hasAbnormal = hasFactLabel(extractedFacts, "Abnormal result wording");
+  const hasHighRisk = riskItems.some((item) => item.severity === "high");
+  const hasMediumRisk = riskItems.some((item) => item.severity === "medium");
+  const lowConfidence =
+    confidence < 0.45 ||
+    hasRiskTitle(riskItems, "low-confidence extraction") ||
+    (!hasTemperature && !hasAllergy && !hasMedication && !hasFollowUp && !hasAbnormal);
+
+  if (lowConfidence) {
+    schoolTodayActions.push(
+      buildActionItem(
+        "Verify the original file and log today's observation window",
+        "Before using the upload operationally, compare it with the original file and log today's temperature, energy, eating, and comfort observations.",
+        "rule:low-confidence-review",
+        ["Low-confidence extraction from limited text hints", "File type", "Extraction mode"]
+      )
+    );
+    familyTonightActions.push(
+      buildActionItem(
+        "Send a clearer file or wording tonight and share the child's current status",
+        "Ask the family to resend the clearest available file or wording tonight and add a short update on temperature, energy, sleep, and appetite.",
+        "rule:low-confidence-review",
+        ["Low-confidence extraction from limited text hints", "Preserve the original file for manual walkthrough"]
+      )
+    );
+  }
+
+  if (hasTemperature) {
+    schoolTodayActions.push(
+      buildActionItem(
+        "Recheck today and keep activity calm",
+        "Recheck the child's temperature and comfort today, reduce strenuous activity, offer fluids, and keep an observation note for the next handoff.",
+        "rule:temperature",
+        ["Temperature mention", "Temperature-related signal needs manual confirmation"]
+      )
+    );
+    familyTonightActions.push(
+      buildActionItem(
+        "Watch temperature, energy, and sleep tonight",
+        "Ask the family to watch temperature, energy, breathing comfort, sleep, and appetite tonight and send an update before the next attendance.",
+        "rule:temperature",
+        ["Temperature mention", "Temperature-related signal needs manual confirmation"]
+      )
+    );
+    followUpPlan.push(
+      buildActionItem(
+        "Confirm the latest temperature before next arrival",
+        "Keep the next check-in anchored to the most recent temperature and whether the child settled overnight.",
+        "rule:temperature-follow-up",
+        ["Temperature mention", "Temperature-related signal needs manual confirmation"]
+      )
+    );
+  }
+
+  if (hasAllergy) {
+    schoolTodayActions.push(
+      buildActionItem(
+        "Temporarily avoid unverified allergen exposure today",
+        "Until the original allergen wording is confirmed, avoid introducing suspect foods, materials, or other trigger exposure in school.",
+        "rule:allergy",
+        ["Allergy mention", "Potential allergy-related instruction detected", "Do not assume allergen exposure is acceptable"]
+      )
+    );
+    familyTonightActions.push(
+      buildActionItem(
+        "Confirm the exact allergen wording with the family",
+        "Ask the family to send the exact allergen, trigger, and source wording from the original file tonight.",
+        "rule:allergy",
+        ["Allergy mention", "Potential allergy-related instruction detected"]
+      )
+    );
+  }
+
+  if (hasMedication) {
+    schoolTodayActions.push(
+      buildActionItem(
+        "Do not administer medicine from the file alone",
+        "Do not turn the upload into a school medication plan until written authorization and the exact original wording are confirmed.",
+        "rule:medication",
+        ["Medication mention", "Medication wording should not be treated as verified administration guidance", "Do not infer a daycare medication plan from the file alone"]
+      )
+    );
+    familyTonightActions.push(
+      buildActionItem(
+        "If school coordination is needed, provide authorization and label wording",
+        "Ask the family to provide the written authorization path and the original label or prescription wording before any next-day school coordination.",
+        "rule:medication",
+        ["Medication mention", "Medication wording should not be treated as verified administration guidance"]
+      )
+    );
+  }
+
+  if (hasFollowUp) {
+    followUpPlan.push(
+      buildActionItem(
+        "Keep the original follow-up timing visible",
+        "Carry forward the follow-up or recheck timing exactly as written and use it as the next observation deadline.",
+        "rule:follow-up",
+        ["Follow-up wording", "Keep the original follow-up timing visible"]
+      )
+    );
+  }
+
+  if (followUpPlan.length === 0) {
+    followUpPlan.push(
+      buildActionItem(
+        "Do a manual review before tomorrow check-in",
+        "Before the next arrival, confirm the original file wording and whether any new symptoms or follow-up instructions appeared overnight.",
+        "rule:next-day-review",
+        ["Preserve the original file for manual walkthrough", "Extraction mode"]
+      )
+    );
+  }
+
+  const filteredSchoolTodayActions = filterUnsafeActionItems(
+    dedupeActionItems(schoolTodayActions),
+    contraindications
+  );
+  const filteredFamilyTonightActions = filterUnsafeActionItems(
+    dedupeActionItems(familyTonightActions),
+    contraindications
+  );
+  const filteredFollowUpPlan = filterUnsafeActionItems(dedupeActionItems(followUpPlan), contraindications);
+
+  const schoolActions =
+    filteredSchoolTodayActions.length > 0
+      ? filteredSchoolTodayActions
+      : [
+          buildActionItem(
+            "Verify the original file and keep today's observation brief",
+            "Use the file only as a prompt to verify the original wording and keep a brief observation note today.",
+            "rule:fallback-review",
+            ["File type", "Extraction mode"]
+          ),
+        ];
+  const familyActions =
+    filteredFamilyTonightActions.length > 0
+      ? filteredFamilyTonightActions
+      : [
+          buildActionItem(
+            "Share a factual status update tonight",
+            "Ask the family for a factual update tonight so tomorrow's school handoff does not depend on guesswork.",
+            "rule:fallback-review",
+            ["Extraction mode"]
+          ),
+        ];
+  const reviewActions =
+    filteredFollowUpPlan.length > 0
+      ? filteredFollowUpPlan
+      : [
+          buildActionItem(
+            "Keep the next check-in manual",
+            "Before the next attendance, manually confirm the file wording and any change in the child's status.",
+            "rule:fallback-review",
+            ["Extraction mode"]
+          ),
+        ];
+
+  let escalationSuggestion: HealthFileBridgeActionMapping["escalationSuggestion"] = {
+    shouldUpgradeAttention: false,
+    level: "routine",
+    reason: "Current extraction supports conservative observation and document verification without triggering a same-day escalation flow.",
+  };
+
+  if (hasHighRisk) {
+    escalationSuggestion = {
+      shouldUpgradeAttention: true,
+      level: "same-day-review",
+      reason:
+        "A high-risk extraction signal needs same-day teacher-family review before normal routine decisions are treated as safe.",
+    };
+  } else if (hasMedication || hasAllergy || (hasFollowUp && (hasMediumRisk || hasHighRisk)) || hasMediumRisk) {
+    escalationSuggestion = {
+      shouldUpgradeAttention: true,
+      level: "heightened",
+      reason:
+        "The file contains medium-risk or coordination-sensitive signals that need tighter observation and a clearer handoff.",
+    };
+  }
+
+  const teacherDraftHint = `Teacher handoff hint: ${schoolActions[0]?.title ?? "Verify the original file"} Follow ${reviewActions[0]?.title ?? "keep the next check-in manual"}, keep the wording operational, and avoid diagnosis or medication promises.`;
+  const parentCommunicationDraftHint = `Parent communication hint: ${familyActions[0]?.title ?? "Share a factual status update tonight"} Please keep the update factual and support ${reviewActions[0]?.title?.toLowerCase() ?? "the next manual check-in"}.`;
+
+  return {
+    schoolTodayActions: schoolActions,
+    familyTonightActions: familyActions,
+    followUpPlan: reviewActions,
+    escalationSuggestion,
+    teacherDraftHint,
+    parentCommunicationDraftHint,
+  };
+}
+
 function computeConfidence(
   signals: ReturnType<typeof collectSignals>,
   facts: HealthFileBridgeFact[],
@@ -347,18 +655,31 @@ export function buildHealthFileBridgeResponse(
   const signals = collectSignals(request);
   const fileType = detectFileType(request, signals);
   const extractedFacts = dedupeByLabel([...baseFacts(request, signals, fileType), ...signalFacts(signals.haystack)]);
+  const extractedRiskItems = riskItems(signals.haystack);
+  const extractedContraindications = contraindications(signals.haystack);
+  const extractedFollowUpHints = followUpHints(signals.haystack, fileType);
+  const confidence = computeConfidence(signals, extractedFacts, fileType);
+  const actionMapping = buildHealthFileActionMapping({
+    fileType,
+    extractedFacts,
+    riskItems: extractedRiskItems,
+    contraindications: extractedContraindications,
+    followUpHints: extractedFollowUpHints,
+    confidence,
+  });
   return {
     childId: request.childId,
     sourceRole: request.sourceRole,
     fileKind: request.fileKind,
     fileType,
     summary:
-      "T8 extracted structured health-file hints only. Daycare action mapping remains out of scope for this step.",
+      "T9 mapped extracted health-file hints into conservative childcare actions. Medical diagnosis, medication authorization, and writeback remain out of scope.",
     extractedFacts,
-    riskItems: riskItems(signals.haystack),
-    contraindications: contraindications(signals.haystack),
-    followUpHints: followUpHints(signals.haystack, fileType),
-    confidence: computeConfidence(signals, extractedFacts, fileType),
+    riskItems: extractedRiskItems,
+    contraindications: extractedContraindications,
+    followUpHints: extractedFollowUpHints,
+    actionMapping,
+    confidence,
     disclaimer: HEALTH_FILE_BRIDGE_DISCLAIMER,
     source: options.source,
     fallback: options.fallback,

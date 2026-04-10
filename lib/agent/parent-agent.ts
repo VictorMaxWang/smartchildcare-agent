@@ -25,6 +25,8 @@ import {
   mergeInterventionCardWithFollowUp,
   type InterventionCard,
 } from "@/lib/agent/intervention-card";
+import { buildInterventionTasksFromCard, materializeTasksFromLegacy, pickActiveTask } from "@/lib/tasks/task-model";
+import type { CanonicalTask } from "@/lib/tasks/types";
 
 export type ParentAgentResultSource = "ai" | "fallback" | "mock";
 
@@ -76,6 +78,8 @@ export interface ParentAgentChildContext {
   taskCheckIns: TaskCheckInRecord[];
   teacherSuggestionSummary?: string;
   currentInterventionCard?: InterventionCard | null;
+  activeTask?: CanonicalTask;
+  taskTimeline: CanonicalTask[];
   focusReasons: string[];
   observationDefaults: string[];
 }
@@ -273,7 +277,7 @@ export function buildParentAgentChildContext(params: {
   taskCheckInRecords: TaskCheckInRecord[];
   weeklyTrend: WeeklyDietTrend;
   currentInterventionCard?: InterventionCard | null;
-}) {
+}): ParentAgentChildContext {
   const today = getLocalToday();
   const childId = params.child.id;
   const weeklyMeals = params.mealRecords.filter((item) => item.childId === childId && isDateWithinLastDays(item.date, 7, today));
@@ -291,6 +295,17 @@ export function buildParentAgentChildContext(params: {
   const pendingReviews = weeklyGrowthRecords.filter((item) => item.reviewStatus === "待复查");
   const task = getWeeklyTaskForChild(childId, getAgeBandFromBirthDate(params.child.birthDate) as never);
   const latestFeedback = weeklyFeedbacks[0];
+  const childTaskCheckIns = params.taskCheckInRecords.filter((item) => item.childId === childId);
+  const taskTimeline = params.currentInterventionCard
+    ? materializeTasksFromLegacy({
+        existingTasks: buildInterventionTasksFromCard(params.currentInterventionCard, {
+          legacyWeeklyTaskId: task.id,
+        }).tasks,
+        interventionCards: [params.currentInterventionCard],
+        guardianFeedbacks: weeklyFeedbacks,
+        taskCheckIns: childTaskCheckIns,
+      })
+    : [];
   const focusReasons = buildFocusReasons({
     smartInsights: params.smartInsights,
     weeklyTrend: params.weeklyTrend,
@@ -313,9 +328,11 @@ export function buildParentAgentChildContext(params: {
     latestFeedback,
     weeklyTrend: params.weeklyTrend,
     task,
-    taskCheckIns: params.taskCheckInRecords.filter((item) => item.childId === childId),
+    taskCheckIns: childTaskCheckIns,
     teacherSuggestionSummary: params.smartInsights[0]?.description,
     currentInterventionCard: params.currentInterventionCard,
+    activeTask: pickActiveTask(taskTimeline, childId, "parent"),
+    taskTimeline,
     focusReasons,
     observationDefaults: buildObservationDefaults({
       weeklyTrend: params.weeklyTrend,
@@ -542,6 +559,8 @@ export function buildParentAgentFollowUpPayload(params: {
       description: params.context.task.description,
       durationText: params.context.task.durationText,
     },
+    activeTask: params.context.activeTask,
+    tasks: params.context.taskTimeline,
   };
 }
 

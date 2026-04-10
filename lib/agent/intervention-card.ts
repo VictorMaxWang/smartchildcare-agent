@@ -24,6 +24,8 @@ export interface InterventionCard {
   shouldEscalateToAdmin?: boolean;
   source: InterventionCardSource;
   model?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface InterventionCardFromSuggestionInput {
@@ -139,8 +141,12 @@ function finalizeInterventionCard(input: {
   shouldEscalateToAdmin?: boolean;
   source: InterventionCardSource;
   model?: string;
+  createdAt?: string;
+  updatedAt?: string;
   generatedAt?: string;
 }): InterventionCard {
+  const createdAt = input.createdAt ?? input.generatedAt ?? new Date().toISOString();
+  const updatedAt = input.generatedAt ?? input.updatedAt ?? createdAt;
   const title = sanitizeText(input.title, `${input.childName} AI 干预卡`);
   const todayInSchoolAction = sanitizeText(input.todayInSchoolAction, "今天园内继续记录关键场景表现，并与家长同步执行重点。");
   const tonightHomeAction = sanitizeText(input.tonightHomeAction, "今晚先完成一项稳定情绪和作息的家庭动作，并记录孩子反应。");
@@ -183,6 +189,8 @@ function finalizeInterventionCard(input: {
     shouldEscalateToAdmin: input.shouldEscalateToAdmin,
     source: input.source,
     model: input.model,
+    createdAt,
+    updatedAt,
   };
 }
 

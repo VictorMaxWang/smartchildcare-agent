@@ -22,6 +22,7 @@ HealthFileBridgeFileType = Literal[
     "mixed",
     "unknown",
 ]
+HealthFileBridgeEscalationLevel = Literal["routine", "heightened", "same-day-review"]
 
 
 class HealthFileBridgeModel(BaseModel):
@@ -77,6 +78,50 @@ class HealthFileBridgeFollowUpHint(HealthFileBridgeModel):
     source: str
 
 
+class HealthFileBridgeActionItem(HealthFileBridgeModel):
+    title: str
+    detail: str
+    source: str
+    based_on: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("basedOn", "based_on"),
+    )
+
+
+class HealthFileBridgeEscalationSuggestion(HealthFileBridgeModel):
+    should_upgrade_attention: bool = Field(
+        validation_alias=AliasChoices("shouldUpgradeAttention", "should_upgrade_attention")
+    )
+    level: HealthFileBridgeEscalationLevel
+    reason: str
+
+
+class HealthFileBridgeActionMapping(HealthFileBridgeModel):
+    school_today_actions: list[HealthFileBridgeActionItem] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("schoolTodayActions", "school_today_actions"),
+    )
+    family_tonight_actions: list[HealthFileBridgeActionItem] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("familyTonightActions", "family_tonight_actions"),
+    )
+    follow_up_plan: list[HealthFileBridgeActionItem] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("followUpPlan", "follow_up_plan"),
+    )
+    escalation_suggestion: HealthFileBridgeEscalationSuggestion = Field(
+        validation_alias=AliasChoices("escalationSuggestion", "escalation_suggestion")
+    )
+    teacher_draft_hint: str = Field(
+        validation_alias=AliasChoices("teacherDraftHint", "teacher_draft_hint")
+    )
+    parent_communication_draft_hint: str = Field(
+        validation_alias=AliasChoices(
+            "parentCommunicationDraftHint", "parent_communication_draft_hint"
+        )
+    )
+
+
 class HealthFileBridgeResponse(HealthFileBridgeModel):
     child_id: str | None = Field(default=None, validation_alias=AliasChoices("childId", "child_id"))
     source_role: HealthFileBridgeSourceRole = Field(
@@ -99,6 +144,10 @@ class HealthFileBridgeResponse(HealthFileBridgeModel):
     follow_up_hints: list[HealthFileBridgeFollowUpHint] = Field(
         default_factory=list,
         validation_alias=AliasChoices("followUpHints", "follow_up_hints"),
+    )
+    action_mapping: HealthFileBridgeActionMapping | None = Field(
+        default=None,
+        validation_alias=AliasChoices("actionMapping", "action_mapping"),
     )
     confidence: float
     disclaimer: str

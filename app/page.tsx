@@ -111,6 +111,12 @@ export default function RootOverviewPage() {
     }
   }, [authLoading, isAuthenticated, router]);
 
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && currentUser.role === "家长") {
+      router.replace("/parent");
+    }
+  }, [authLoading, currentUser.role, isAuthenticated, router]);
+
   const visibleIds = useMemo(() => new Set(visibleChildren.map((child) => child.id)), [visibleChildren]);
   const todayAttendance = getTodayAttendance();
   const presentCount = todayAttendance.filter((item) => item.isPresent).length;
@@ -320,7 +326,7 @@ export default function RootOverviewPage() {
     };
   }, [isAuthenticated, weeklyReportKey, weeklyReportSnapshot]);
 
-  if (authLoading || !isAuthenticated) {
+  if (authLoading || !isAuthenticated || currentUser.role === "家长") {
     return (
       <div className="flex min-h-[calc(100vh-64px)] items-center justify-center px-6">
         <div className="flex flex-col items-center gap-3">
@@ -434,7 +440,7 @@ export default function RootOverviewPage() {
       </Card>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Card className={currentUser.role === "家长" ? "xl:col-span-2" : undefined}>
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <BookHeart className="h-5 w-5 text-rose-500" />

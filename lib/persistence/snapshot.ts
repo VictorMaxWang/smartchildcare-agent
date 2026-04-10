@@ -9,6 +9,8 @@ import type {
 } from "@/lib/store";
 import type { ConsultationResult, MobileDraft, ReminderItem } from "@/lib/ai/types";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
+import { materializeTasksFromLegacy } from "@/lib/tasks/task-model";
+import type { CanonicalTask } from "@/lib/tasks/types";
 
 export interface AppStateSnapshot {
   children: Child[];
@@ -22,6 +24,7 @@ export interface AppStateSnapshot {
   consultations: ConsultationResult[];
   mobileDrafts: MobileDraft[];
   reminders: ReminderItem[];
+  tasks: CanonicalTask[];
   updatedAt: string;
 }
 
@@ -70,6 +73,7 @@ function isGuardianFeedback(value: unknown): value is GuardianFeedback {
     childReaction?: unknown;
     improved?: unknown;
     freeNote?: unknown;
+    executionStatus?: unknown;
   };
 
   return (
@@ -84,7 +88,11 @@ function isGuardianFeedback(value: unknown): value is GuardianFeedback {
     (item.executed === undefined || typeof item.executed === "boolean") &&
     (item.childReaction === undefined || typeof item.childReaction === "string") &&
     (item.improved === undefined || typeof item.improved === "boolean" || item.improved === "unknown") &&
-    (item.freeNote === undefined || typeof item.freeNote === "string")
+    (item.freeNote === undefined || typeof item.freeNote === "string") &&
+    (item.executionStatus === undefined ||
+      item.executionStatus === "completed" ||
+      item.executionStatus === "partial" ||
+      item.executionStatus === "not_started")
   );
 }
 
@@ -111,6 +119,8 @@ function isInterventionCard(value: unknown): value is InterventionCard {
     summary?: unknown;
     consultationMode?: unknown;
     consultationId?: unknown;
+    createdAt?: unknown;
+    updatedAt?: unknown;
   };
 
   return (
@@ -119,7 +129,9 @@ function isInterventionCard(value: unknown): value is InterventionCard {
     typeof item.summary === "string" &&
     (item.riskLevel === "low" || item.riskLevel === "medium" || item.riskLevel === "high") &&
     (item.consultationMode === undefined || typeof item.consultationMode === "boolean") &&
-    (item.consultationId === undefined || typeof item.consultationId === "string")
+    (item.consultationId === undefined || typeof item.consultationId === "string") &&
+    (item.createdAt === undefined || typeof item.createdAt === "string") &&
+    (item.updatedAt === undefined || typeof item.updatedAt === "string")
   );
 }
 
@@ -174,6 +186,9 @@ function isReminderItem(value: unknown): value is ReminderItem {
     description?: unknown;
     scheduledAt?: unknown;
     status?: unknown;
+    taskId?: unknown;
+    sourceType?: unknown;
+    relatedTaskIds?: unknown;
   };
 
   return (
@@ -185,36 +200,92 @@ function isReminderItem(value: unknown): value is ReminderItem {
     typeof item.title === "string" &&
     typeof item.description === "string" &&
     typeof item.scheduledAt === "string" &&
-    typeof item.status === "string"
+    typeof item.status === "string" &&
+    (item.taskId === undefined || typeof item.taskId === "string") &&
+    (item.sourceType === undefined || typeof item.sourceType === "string") &&
+    (item.relatedTaskIds === undefined ||
+      (Array.isArray(item.relatedTaskIds) && item.relatedTaskIds.every((value) => typeof value === "string")))
   );
 }
 
-export function isAppStateSnapshot(value: unknown): value is AppStateSnapshot {
-  if (!value || typeof value !== "object") return false;
-  const data = value as Record<string, unknown>;
+function isCanonicalTask(value: unknown): value is CanonicalTask {
+  const item = value as Partial<CanonicalTask>;
+
   return (
-    Array.isArray(data.children) &&
-    data.children.every(isChild) &&
-    Array.isArray(data.attendance) &&
-    data.attendance.every(isAttendanceRecord) &&
-    Array.isArray(data.meals) &&
-    data.meals.every(isMealRecord) &&
-    Array.isArray(data.growth) &&
-    data.growth.every(isGrowthRecord) &&
-    Array.isArray(data.feedback) &&
-    data.feedback.every(isGuardianFeedback) &&
-    Array.isArray(data.health) &&
-    data.health.every(isHealthCheckRecord) &&
-    Array.isArray(data.taskCheckIns) &&
-    data.taskCheckIns.every(isTaskCheckInRecord) &&
-    Array.isArray(data.interventionCards) &&
-    data.interventionCards.every(isInterventionCard) &&
-    Array.isArray(data.consultations) &&
-    data.consultations.every(isConsultationResult) &&
-    Array.isArray(data.mobileDrafts) &&
-    data.mobileDrafts.every(isMobileDraft) &&
-    Array.isArray(data.reminders) &&
-    data.reminders.every(isReminderItem) &&
-    typeof data.updatedAt === "string"
+    Boolean(item) &&
+    typeof item === "object" &&
+    typeof item.taskId === "string" &&
+    typeof item.childId === "string" &&
+    typeof item.sourceType === "string" &&
+    typeof item.sourceId === "string" &&
+    typeof item.ownerRole === "string" &&
+    typeof item.title === "string" &&
+    typeof item.description === "string" &&
+    Boolean(item.dueWindow && typeof item.dueWindow === "object" && typeof item.dueWindow.label === "string") &&
+    typeof item.dueAt === "string" &&
+    typeof item.status === "string" &&
+    typeof item.evidenceSubmissionMode === "string" &&
+    typeof item.createdAt === "string" &&
+    typeof item.updatedAt === "string"
   );
+}
+
+function isArrayOf<T>(value: unknown, predicate: (item: unknown) => item is T) {
+  return Array.isArray(value) && value.every(predicate);
+}
+
+export function normalizeAppStateSnapshot(value: unknown): AppStateSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Record<string, unknown>;
+
+  if (
+    !isArrayOf(data.children, isChild) ||
+    !isArrayOf(data.attendance, isAttendanceRecord) ||
+    !isArrayOf(data.meals, isMealRecord) ||
+    !isArrayOf(data.growth, isGrowthRecord) ||
+    !isArrayOf(data.feedback, isGuardianFeedback) ||
+    !isArrayOf(data.health, isHealthCheckRecord) ||
+    !isArrayOf(data.taskCheckIns, isTaskCheckInRecord) ||
+    !isArrayOf(data.interventionCards, isInterventionCard) ||
+    !isArrayOf(data.consultations, isConsultationResult) ||
+    !isArrayOf(data.mobileDrafts, isMobileDraft) ||
+    !isArrayOf(data.reminders, isReminderItem) ||
+    typeof data.updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  if (typeof data.tasks !== "undefined" && !isArrayOf(data.tasks, isCanonicalTask)) {
+    return null;
+  }
+
+  const snapshot = {
+    children: data.children,
+    attendance: data.attendance,
+    meals: data.meals,
+    growth: data.growth,
+    feedback: data.feedback,
+    health: data.health,
+    taskCheckIns: data.taskCheckIns,
+    interventionCards: data.interventionCards,
+    consultations: data.consultations,
+    mobileDrafts: data.mobileDrafts,
+    reminders: data.reminders,
+    tasks: materializeTasksFromLegacy({
+      existingTasks: (data.tasks as CanonicalTask[] | undefined) ?? [],
+      interventionCards: data.interventionCards,
+      consultations: data.consultations,
+      reminders: data.reminders,
+      guardianFeedbacks: data.feedback,
+      taskCheckIns: data.taskCheckIns,
+      now: data.updatedAt,
+    }),
+    updatedAt: data.updatedAt,
+  } satisfies AppStateSnapshot;
+
+  return snapshot;
+}
+
+export function isAppStateSnapshot(value: unknown): value is AppStateSnapshot {
+  return normalizeAppStateSnapshot(value) !== null;
 }

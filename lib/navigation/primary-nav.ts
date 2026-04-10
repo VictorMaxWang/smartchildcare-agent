@@ -1,4 +1,4 @@
-import type { AccountRole } from "../auth/accounts";
+import { getRoleHomePath, type AccountRole } from "../auth/accounts";
 
 export type PrimaryNavIconKey =
   | "overview"
@@ -16,36 +16,83 @@ export interface PrimaryNavItem {
   icon: PrimaryNavIconKey;
 }
 
-const BASE_ITEMS: PrimaryNavItem[] = [
-  { href: "/", label: "数据概览", icon: "overview" },
-  { href: "/children", label: "幼儿档案", icon: "children" },
-  { href: "/health", label: "晨检与健康", icon: "health" },
-  { href: "/growth", label: "成长行为", icon: "growth" },
-  { href: "/diet", label: "饮食记录", icon: "diet" },
-  { href: "/parent", label: "家长端", icon: "parent" },
-  { href: "/teacher", label: "机构大屏", icon: "screen" },
+const OVERVIEW_ITEM: PrimaryNavItem = { href: "/", label: "数据概览", icon: "overview" };
+const CHILDREN_ITEM: PrimaryNavItem = { href: "/children", label: "幼儿档案", icon: "children" };
+const HEALTH_ITEM: PrimaryNavItem = { href: "/health", label: "晨检与健康", icon: "health" };
+const GROWTH_ITEM: PrimaryNavItem = { href: "/growth", label: "成长行为", icon: "growth" };
+const DIET_ITEM: PrimaryNavItem = { href: "/diet", label: "饮食记录", icon: "diet" };
+const PARENT_ITEM: PrimaryNavItem = { href: "/parent", label: "家长端", icon: "parent" };
+const INSTITUTION_SCREEN_ITEM: PrimaryNavItem = {
+  href: "/teacher",
+  label: "机构大屏",
+  icon: "screen",
+};
+const ADMIN_HOME_ITEM: PrimaryNavItem = { href: "/admin", label: "园所首页", icon: "role-home" };
+const TEACHER_HOME_ITEM: PrimaryNavItem = {
+  href: "/teacher/home",
+  label: "教师首页",
+  icon: "role-home",
+};
+const PARENT_HOME_ITEM: PrimaryNavItem = {
+  href: "/parent",
+  label: "家长首页",
+  icon: "parent",
+};
+
+const ADMIN_NAV_ITEMS: PrimaryNavItem[] = [
+  OVERVIEW_ITEM,
+  ADMIN_HOME_ITEM,
+  CHILDREN_ITEM,
+  HEALTH_ITEM,
+  GROWTH_ITEM,
+  DIET_ITEM,
+  PARENT_ITEM,
+  INSTITUTION_SCREEN_ITEM,
 ];
 
+const TEACHER_NAV_ITEMS: PrimaryNavItem[] = [
+  OVERVIEW_ITEM,
+  TEACHER_HOME_ITEM,
+  CHILDREN_ITEM,
+  HEALTH_ITEM,
+  GROWTH_ITEM,
+  DIET_ITEM,
+  PARENT_ITEM,
+  INSTITUTION_SCREEN_ITEM,
+];
+
+const PARENT_NAV_ITEMS: PrimaryNavItem[] = [PARENT_HOME_ITEM];
+
 export function getRoleStandaloneHomeItem(role: AccountRole): PrimaryNavItem | null {
-  if (role === "机构管理员") {
-    return { href: "/admin", label: "园所首页", icon: "role-home" };
+  const roleHomePath = getRoleHomePath(role);
+
+  if (roleHomePath === "/admin") {
+    return ADMIN_HOME_ITEM;
   }
 
-  if (role === "教师") {
-    return { href: "/teacher/home", label: "教师首页", icon: "role-home" };
+  if (roleHomePath === "/teacher/home") {
+    return TEACHER_HOME_ITEM;
+  }
+
+  if (roleHomePath === "/parent") {
+    return PARENT_HOME_ITEM;
   }
 
   return null;
 }
 
 export function buildPrimaryNavItems(role: AccountRole): PrimaryNavItem[] {
-  const roleHomeItem = getRoleStandaloneHomeItem(role);
+  const roleHomePath = getRoleHomePath(role);
 
-  if (!roleHomeItem) {
-    return [...BASE_ITEMS];
+  if (roleHomePath === "/admin") {
+    return [...ADMIN_NAV_ITEMS];
   }
 
-  return [BASE_ITEMS[0], roleHomeItem, ...BASE_ITEMS.slice(1)];
+  if (roleHomePath === "/teacher/home") {
+    return [...TEACHER_NAV_ITEMS];
+  }
+
+  return [...PARENT_NAV_ITEMS];
 }
 
 export function isPrimaryNavItemActive(pathname: string, href: string) {

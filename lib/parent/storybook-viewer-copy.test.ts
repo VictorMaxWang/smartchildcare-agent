@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   describeStoryBookMode,
   formatStoryBookAudioDelivery,
+  formatStoryBookFallbackReason,
   formatStoryBookHighlightSource,
   formatStoryBookProviderLabel,
   formatStoryBookResponseCache,
@@ -16,52 +17,57 @@ import {
 
 test("describeStoryBookMode maps live mixed fallback to Chinese labels and summaries", () => {
   assert.deepEqual(describeStoryBookMode("live"), {
-    label: "完整实时结果",
-    summary: "当前已命中真实插画和真实逐页朗读，页面展示的是完整 live 结果。",
+    label: "真实媒体",
+    summary: "当前图片和音频都命中真实链路，页面展示的是完整实时结果。",
     badgeVariant: "success",
   });
   assert.deepEqual(describeStoryBookMode("mixed"), {
     label: "混合交付",
-    summary: "当前只有部分页面命中真实媒体，其余页面仍由兜底图或本地补读/字幕预演补齐。",
+    summary: "当前只有部分页面命中真实媒体，其余页面仍使用真实补齐中的回退结果。",
     badgeVariant: "warning",
   });
   assert.deepEqual(describeStoryBookMode("fallback"), {
-    label: "兜底交付",
-    summary: "当前主要展示动态剧情插画与本地补读/字幕预演，还不是完整 live 媒体结果。",
+    label: "回退交付",
+    summary: "当前主要展示回退插画和本地补读或字幕预演，不宣称真实媒体已完全恢复。",
     badgeVariant: "secondary",
   });
 });
 
-test("storybook viewer copy maps media status and playback labels to Chinese", () => {
+test("storybook viewer copy maps media status and playback labels", () => {
   assert.equal(formatStoryBookSceneStatus("image", "ready"), "已生成插画");
-  assert.equal(formatStoryBookSceneStatus("image", "fallback"), "兜底插画");
-  assert.equal(formatStoryBookSceneStatus("audio", "ready"), "已生成配音");
-  assert.equal(formatStoryBookSceneStatus("audio", "mock"), "演示音轨");
+  assert.equal(formatStoryBookSceneStatus("image", "fallback"), "回退插画");
+  assert.equal(formatStoryBookSceneStatus("audio", "ready"), "已生成音频");
+  assert.equal(formatStoryBookSceneStatus("audio", "mock"), "示例音轨");
   assert.equal(formatStoryBookVoiceStyle("gentle-bedtime"), "晚安轻声");
   assert.equal(formatStoryBookVoiceStyle("warm-storytelling"), "温柔讲述");
 });
 
-test("storybook viewer copy maps provider, cache and source badges to Chinese", () => {
+test("storybook viewer copy maps provider, cache, transport and fallback reasons", () => {
   assert.equal(
     formatStoryBookProviderLabel("image", "vivo-story-image+storybook-dynamic-fallback"),
-    "插画：vivo 实时插画 + 动态剧情插画"
+    "插画：vivo 真实图片 + 动态剧情插画"
   );
   assert.equal(
     formatStoryBookProviderLabel("audio", "storybook-mock-preview"),
-    "配音：字幕预演"
+    "音频：字幕预演"
   );
   assert.equal(formatStoryBookResponseCache("hit"), "响应缓存命中");
   assert.equal(formatStoryBookAudioDelivery("preview-only"), "字幕预演");
+  assert.equal(formatStoryBookAudioDelivery("local-speech"), "本地补读");
   assert.equal(formatStoryBookSceneImageDelivery("dynamic-fallback"), "动态剧情插画");
-  assert.equal(formatStoryBookSceneImageDelivery("demo-art"), "演示插画");
-  assert.equal(formatStoryBookSceneImageDelivery("svg-fallback"), "兜底插画");
+  assert.equal(formatStoryBookSceneImageDelivery("svg-fallback"), "SVG 兜底插画");
   assert.equal(formatStoryBookTransport("remote-brain-proxy"), "FastAPI 实时链路");
   assert.equal(formatStoryBookHighlightSource("interventionCard"), "今晚动作");
+  assert.equal(formatStoryBookFallbackReason("brain-status-504"), "上游 brain 返回 504");
+  assert.equal(
+    formatStoryBookFallbackReason("brain-base-url-missing"),
+    "未配置 BRAIN_API_BASE_URL"
+  );
 });
 
-test("getStoryBookPresetCopy returns Chinese preset metadata", () => {
+test("getStoryBookPresetCopy returns preset metadata", () => {
   const preset = getStoryBookPresetCopy("forest-crayon");
 
   assert.equal(preset.shortLabel, "森林");
-  assert.match(preset.description, /演示画风|活泼/);
+  assert.match(preset.description, /活泼|绘本|演示/);
 });

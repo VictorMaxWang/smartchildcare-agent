@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ParentStoryBookScene } from "@/lib/ai/types";
+import type { ParentStoryBookResponse, ParentStoryBookScene } from "@/lib/ai/types";
 
 import {
   buildCaptionTimeline,
-  getRuntimeBannerItems,
   getCaptionIndexForCharIndex,
   getCaptionIndexForElapsedMs,
-  getStoryAudioRuntimeLabel,
-  resolveRuntimeStoryMode,
+  getRuntimeBannerItemsHotfix,
+  resolveRuntimeSceneImageDeliveryHotfix,
+  resolveRuntimeStoryModeHotfix,
   resolveSceneCaptionTiming,
 } from "./StoryBookViewer.tsx";
 
@@ -21,16 +21,89 @@ function buildScene(
     sceneTitle: "第一页",
     sceneText: "小兔团团先停一停。它轻轻说出心里的感受。今晚先做一个小动作。",
     imagePrompt: "image prompt",
-    imageUrl: "data:image/svg+xml;base64,PHN2Zy8+",
-    assetRef: "data:image/svg+xml;base64,PHN2Zy8+",
-    imageStatus: "fallback",
-    imageSourceKind: "demo-art",
+    imageUrl: "https://cdn.example.com/scene-1.png",
+    assetRef: "https://cdn.example.com/scene-1-fallback.svg",
+    imageStatus: "ready",
+    imageSourceKind: "real",
     audioUrl: null,
     audioRef: "scene-1-audio",
     audioScript: "第一页。小兔团团先停一停。它轻轻说出心里的感受。今晚先做一个小动作。",
     audioStatus: "fallback",
     voiceStyle: "warm-storytelling",
     highlightSource: "manualTheme",
+    ...overrides,
+  };
+}
+
+function buildStory(
+  overrides: Partial<ParentStoryBookResponse> = {}
+): ParentStoryBookResponse {
+  const scenes = overrides.scenes ?? [buildScene()];
+  return {
+    storyId: "storybook-1",
+    childId: "child-1",
+    mode: "storybook",
+    title: "晚安成长绘本",
+    summary: "一部关于表达感受的绘本。",
+    moral: "慢一点，也是在认真长大。",
+    parentNote: "今晚先陪孩子把感受说出来。",
+    source: "rule",
+    fallback: true,
+    fallbackReason: null,
+    generatedAt: "2026-04-10T00:00:00.000Z",
+    stylePreset: "sunrise-watercolor",
+    providerMeta: {
+      provider: "parent-storybook-rule",
+      mode: "fallback",
+      transport: "remote-brain-proxy",
+      imageProvider: "vivo-story-image",
+      audioProvider: "vivo-story-tts",
+      imageDelivery: "real",
+      audioDelivery: "real",
+      diagnostics: {
+        brain: {
+          reachable: true,
+          fallbackReason: null,
+          upstreamHost: "brain.example.com",
+          statusCode: null,
+          retryStrategy: "none",
+          elapsedMs: 820,
+          timeoutMs: 45000,
+        },
+        image: {
+          requestedProvider: "vivo",
+          resolvedProvider: "vivo-story-image",
+          liveEnabled: true,
+          missingConfig: [],
+          jobStatus: "ready",
+          pendingSceneCount: 0,
+          readySceneCount: scenes.length,
+          errorSceneCount: 0,
+          lastErrorStage: null,
+          lastErrorReason: null,
+          elapsedMs: 1200,
+        },
+        audio: {
+          requestedProvider: "vivo",
+          resolvedProvider: "vivo-story-tts",
+          liveEnabled: true,
+          missingConfig: [],
+          jobStatus: "ready",
+          pendingSceneCount: 0,
+          readySceneCount: scenes.length,
+          errorSceneCount: 0,
+          lastErrorStage: null,
+          lastErrorReason: null,
+          elapsedMs: 900,
+        },
+      },
+      realProvider: true,
+      highlightCount: 1,
+      sceneCount: scenes.length,
+      cacheHitCount: 0,
+      cacheWindowSeconds: 900,
+    },
+    scenes,
     ...overrides,
   };
 }
@@ -92,81 +165,70 @@ test("caption helpers map elapsed time and speech boundaries onto the correct se
   assert.equal(getCaptionIndexForCharIndex(timeline, boundaryIndex), 2);
 });
 
-test("runtime story mode only reports live when both image and audio are real", () => {
-  const fallbackStory = {
+test("runtime story mode hotfix reports mixed when browser fell back to local speech", () => {
+  const story = buildStory();
+
+  assert.equal(resolveRuntimeStoryModeHotfix(story), "live");
+  assert.equal(
+    resolveRuntimeStoryModeHotfix(story, {
+      canUseLocalSpeech: true,
+      playbackSource: "local",
+    }),
+    "mixed"
+  );
+});
+
+test("runtime scene image delivery hotfix degrades to fallback when browser swaps to assetRef", () => {
+  const scene = buildScene({
+    imageSourceKind: "real",
+    imageUrl: "https://cdn.example.com/live.png",
+    assetRef: "/api/ai/parent-storybook/media/fallback-scene-1",
+  });
+
+  assert.equal(resolveRuntimeSceneImageDeliveryHotfix(scene), "real");
+  assert.equal(
+    resolveRuntimeSceneImageDeliveryHotfix(scene, { useAssetFallback: true }),
+    "dynamic-fallback"
+  );
+});
+
+test("runtime banners hotfix maps brain 504 and local speech honestly", () => {
+  const story = buildStory({
     providerMeta: {
+      ...buildStory().providerMeta,
+      transport: "next-json-fallback",
       imageDelivery: "dynamic-fallback",
       audioDelivery: "preview-only",
-    },
-  } as any;
-  const mixedStory = {
-    providerMeta: {
-      imageDelivery: "real",
-      audioDelivery: "preview-only",
-    },
-  } as any;
-  const liveStory = {
-    providerMeta: {
-      imageDelivery: "real",
-      audioDelivery: "real",
-    },
-  } as any;
-
-  assert.equal(resolveRuntimeStoryMode(fallbackStory), "fallback");
-  assert.equal(resolveRuntimeStoryMode(mixedStory), "mixed");
-  assert.equal(resolveRuntimeStoryMode(liveStory), "live");
-});
-
-test("audio runtime label keeps preview-only honest about local fallback", () => {
-  assert.equal(
-    getStoryAudioRuntimeLabel("preview-only", true),
-    "后端真实朗读未命中，本地补读"
-  );
-  assert.equal(
-    getStoryAudioRuntimeLabel("preview-only", false),
-    "后端真实朗读未命中，字幕预演"
-  );
-  assert.equal(
-    getStoryAudioRuntimeLabel("mixed", true),
-    "部分真实朗读 + 本地补读"
-  );
-});
-
-test("runtime banners align brain connectivity and warming media states", () => {
-  const items = getRuntimeBannerItems(
-    {
-      providerMeta: {
-        transport: "remote-brain-proxy",
-        imageDelivery: "dynamic-fallback",
-        audioDelivery: "preview-only",
-        diagnostics: {
-          brain: {
-            reachable: true,
-            upstreamHost: "brain.example.com",
-            elapsedMs: 820,
-            timeoutMs: 35000,
-          },
-          image: {
-            jobStatus: "warming",
-            readySceneCount: 2,
-            pendingSceneCount: 4,
-            errorSceneCount: 0,
-            elapsedMs: 1200,
-          },
-          audio: {
-            jobStatus: "disabled",
-            readySceneCount: 0,
-            pendingSceneCount: 0,
-            errorSceneCount: 0,
-          },
+      diagnostics: {
+        ...buildStory().providerMeta.diagnostics,
+        brain: {
+          ...buildStory().providerMeta.diagnostics!.brain,
+          reachable: false,
+          fallbackReason: "brain-status-504",
+        },
+        image: {
+          ...buildStory().providerMeta.diagnostics!.image,
+          jobStatus: "warming",
+          readySceneCount: 1,
+          pendingSceneCount: 2,
+        },
+        audio: {
+          ...buildStory().providerMeta.diagnostics!.audio,
+          jobStatus: "warming",
+          readySceneCount: 0,
+          pendingSceneCount: 3,
         },
       },
-    } as any,
-    true
-  );
+    },
+  });
 
-  assert.ok(items.some((item) => item.label === "FastAPI brain 已接通"));
-  assert.ok(items.some((item) => item.label === "真实插画补齐中"));
-  assert.ok(items.some((item) => item.label === "后端真实朗读未命中，当前为本地补读"));
-  assert.ok(items.every((item) => item.label !== "未接通 FastAPI brain，当前为本地回退链路"));
+  const items = getRuntimeBannerItemsHotfix(story, true, {
+    playbackSource: "local",
+  });
+
+  assert.ok(items.some((item) => item.label === "未接通 FastAPI brain，当前为本地回退链路"));
+  assert.ok(items.some((item) => item.detail.includes("504")));
+  assert.ok(items.some((item) => item.label === "真实图片补齐中"));
+  assert.ok(items.some((item) => item.label === "当前音频为 local speech"));
+  assert.ok(items.every((item) => item.label !== "真实朗读已就绪"));
 });

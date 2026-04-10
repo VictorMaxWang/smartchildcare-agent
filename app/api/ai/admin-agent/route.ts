@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "next/server.js";
 import {
   buildAdminAgentContext,
   buildAdminDailyPriorityResult,
@@ -193,17 +193,23 @@ export async function POST(request: Request) {
       return brainForward.response;
     }
 
+    let shouldFallbackToLocalWeekly = false;
+
     try {
       const proxyData = (await brainForward.response.clone().json()) as unknown;
       const normalized = normalizeWeeklyProxyResult(payload, proxyData);
       if (normalized) {
         return buildNormalizedProxyResponse(brainForward.response, normalized);
       }
+      shouldFallbackToLocalWeekly = true;
     } catch (error) {
       console.warn("[AI] Failed to normalize proxied admin weekly-report response", error);
+      shouldFallbackToLocalWeekly = true;
     }
 
-    return brainForward.response;
+    if (!shouldFallbackToLocalWeekly) {
+      return brainForward.response;
+    }
   }
 
   const context = buildAdminAgentContext(payload);

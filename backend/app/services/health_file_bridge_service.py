@@ -9,8 +9,8 @@ from app.providers.vivo_ocr import VivoOcrProvider
 
 
 DISCLAIMER = (
-    "T8 extraction only: this bridge returns structured facts from file metadata and text hints. "
-    "It does not perform verified binary OCR, medical diagnosis, daycare action mapping, writeback, or escalation dispatch."
+    "T9 bridge returns structured facts plus conservative childcare action suggestions from file metadata and text hints. "
+    "It does not perform verified binary OCR, medical diagnosis, medication authorization, clearance decisions, writeback, or escalation dispatch."
 )
 
 FILE_TYPE_PRIORITY: tuple[str, ...] = (
@@ -92,6 +92,22 @@ FOLLOW_UP_HINT_KEYWORDS = (
     "48小时",
 )
 TEMPERATURE_PATTERN = re.compile(r"(?<!\d)(3[5-9](?:\.\d)?)(?:\s*(?:°?\s*[cC]|℃))?")
+DANGEROUS_ACTION_PATTERNS = {
+    "allergy": (
+        "allergen exposure is acceptable",
+        "resume suspect food",
+        "resume shared food",
+    ),
+    "medication": (
+        "administer medicine based on the file",
+        "start a medication plan from this file",
+    ),
+    "clearance": (
+        "resume normal activity",
+        "treat the file as clearance",
+        "cleared for regular activity",
+    ),
+}
 
 
 def _iso_now() -> str:
@@ -405,6 +421,290 @@ def _dedupe(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     return result
 
 
+def _unique_strings(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = _coerce_string(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _build_action_item(
+    title: str,
+    detail: str,
+    source: str,
+    based_on: list[Any],
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "detail": detail,
+        "source": source,
+        "basedOn": _unique_strings(based_on),
+    }
+
+
+def _has_fact_label(facts: list[dict[str, Any]], label: str) -> bool:
+    return any(_coerce_string(item.get("label")) == label for item in facts)
+
+
+def _has_risk_title(risks: list[dict[str, Any]], pattern: str) -> bool:
+    target = pattern.lower()
+    return any(target in (_coerce_string(item.get("title")) or "").lower() for item in risks)
+
+
+def _has_contraindication_text(items: list[dict[str, Any]], pattern: str) -> bool:
+    target = pattern.lower()
+    return any(
+        target in f"{_coerce_string(item.get('title')) or ''} {_coerce_string(item.get('detail')) or ''}".lower()
+        for item in items
+    )
+
+
+def _has_follow_up_title(items: list[dict[str, Any]], pattern: str) -> bool:
+    target = pattern.lower()
+    return any(target in (_coerce_string(item.get("title")) or "").lower() for item in items)
+
+
+def _filter_unsafe_action_items(
+    items: list[dict[str, Any]],
+    contraindications: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    has_allergy_contra = _has_contraindication_text(contraindications, "allergy")
+    has_medication_contra = _has_contraindication_text(contraindications, "medication")
+    has_clearance_contra = _has_contraindication_text(
+        contraindications, "clearance"
+    ) or _has_contraindication_text(contraindications, "normal activity")
+
+    result: list[dict[str, Any]] = []
+    for item in items:
+        text = f"{_coerce_string(item.get('title')) or ''} {_coerce_string(item.get('detail')) or ''}".lower()
+        if has_allergy_contra and any(
+            pattern in text for pattern in DANGEROUS_ACTION_PATTERNS["allergy"]
+        ):
+            continue
+        if has_medication_contra and any(
+            pattern in text for pattern in DANGEROUS_ACTION_PATTERNS["medication"]
+        ):
+            continue
+        if has_clearance_contra and any(
+            pattern in text for pattern in DANGEROUS_ACTION_PATTERNS["clearance"]
+        ):
+            continue
+        result.append(item)
+    return result
+
+
+def _build_action_mapping(
+    *,
+    file_type: str,
+    extracted_facts: list[dict[str, Any]],
+    risk_items: list[dict[str, Any]],
+    contraindications: list[dict[str, Any]],
+    follow_up_hints: list[dict[str, Any]],
+    confidence: float,
+) -> dict[str, Any]:
+    school_today_actions: list[dict[str, Any]] = []
+    family_tonight_actions: list[dict[str, Any]] = []
+    follow_up_plan: list[dict[str, Any]] = []
+
+    has_temperature = _has_fact_label(extracted_facts, "Temperature mention")
+    has_allergy = _has_fact_label(extracted_facts, "Allergy mention")
+    has_medication = _has_fact_label(extracted_facts, "Medication mention")
+    has_follow_up = (
+        file_type == "recheck-slip"
+        or _has_fact_label(extracted_facts, "Follow-up wording")
+        or _has_follow_up_title(follow_up_hints, "follow-up")
+        or _has_follow_up_title(follow_up_hints, "timing")
+    )
+    has_abnormal = _has_fact_label(extracted_facts, "Abnormal result wording")
+    has_high_risk = any(item.get("severity") == "high" for item in risk_items)
+    has_medium_risk = any(item.get("severity") == "medium" for item in risk_items)
+    low_confidence = (
+        confidence < 0.45
+        or _has_risk_title(risk_items, "low-confidence extraction")
+        or not any((has_temperature, has_allergy, has_medication, has_follow_up, has_abnormal))
+    )
+
+    if low_confidence:
+        school_today_actions.append(
+            _build_action_item(
+                "Verify the original file and log today's observation window",
+                "Before using the upload operationally, compare it with the original file and log today's temperature, energy, eating, and comfort observations.",
+                "rule:low-confidence-review",
+                ["Low-confidence extraction from limited text hints", "File type", "Extraction mode"],
+            )
+        )
+        family_tonight_actions.append(
+            _build_action_item(
+                "Send a clearer file or wording tonight and share the child's current status",
+                "Ask the family to resend the clearest available file or wording tonight and add a short update on temperature, energy, sleep, and appetite.",
+                "rule:low-confidence-review",
+                ["Low-confidence extraction from limited text hints", "Preserve the original file for manual walkthrough"],
+            )
+        )
+
+    if has_temperature:
+        school_today_actions.append(
+            _build_action_item(
+                "Recheck today and keep activity calm",
+                "Recheck the child's temperature and comfort today, reduce strenuous activity, offer fluids, and keep an observation note for the next handoff.",
+                "rule:temperature",
+                ["Temperature mention", "Temperature-related signal needs manual confirmation"],
+            )
+        )
+        family_tonight_actions.append(
+            _build_action_item(
+                "Watch temperature, energy, and sleep tonight",
+                "Ask the family to watch temperature, energy, breathing comfort, sleep, and appetite tonight and send an update before the next attendance.",
+                "rule:temperature",
+                ["Temperature mention", "Temperature-related signal needs manual confirmation"],
+            )
+        )
+        follow_up_plan.append(
+            _build_action_item(
+                "Confirm the latest temperature before next arrival",
+                "Keep the next check-in anchored to the most recent temperature and whether the child settled overnight.",
+                "rule:temperature-follow-up",
+                ["Temperature mention", "Temperature-related signal needs manual confirmation"],
+            )
+        )
+
+    if has_allergy:
+        school_today_actions.append(
+            _build_action_item(
+                "Temporarily avoid unverified allergen exposure today",
+                "Until the original allergen wording is confirmed, avoid introducing suspect foods, materials, or other trigger exposure in school.",
+                "rule:allergy",
+                ["Allergy mention", "Potential allergy-related instruction detected", "Do not assume allergen exposure is acceptable"],
+            )
+        )
+        family_tonight_actions.append(
+            _build_action_item(
+                "Confirm the exact allergen wording with the family",
+                "Ask the family to send the exact allergen, trigger, and source wording from the original file tonight.",
+                "rule:allergy",
+                ["Allergy mention", "Potential allergy-related instruction detected"],
+            )
+        )
+
+    if has_medication:
+        school_today_actions.append(
+            _build_action_item(
+                "Do not administer medicine from the file alone",
+                "Do not turn the upload into a school medication plan until written authorization and the exact original wording are confirmed.",
+                "rule:medication",
+                ["Medication mention", "Medication wording should not be treated as verified administration guidance", "Do not infer a daycare medication plan from the file alone"],
+            )
+        )
+        family_tonight_actions.append(
+            _build_action_item(
+                "If school coordination is needed, provide authorization and label wording",
+                "Ask the family to provide the written authorization path and the original label or prescription wording before any next-day school coordination.",
+                "rule:medication",
+                ["Medication mention", "Medication wording should not be treated as verified administration guidance"],
+            )
+        )
+
+    if has_follow_up:
+        follow_up_plan.append(
+            _build_action_item(
+                "Keep the original follow-up timing visible",
+                "Carry forward the follow-up or recheck timing exactly as written and use it as the next observation deadline.",
+                "rule:follow-up",
+                ["Follow-up wording", "Keep the original follow-up timing visible"],
+            )
+        )
+
+    if not follow_up_plan:
+        follow_up_plan.append(
+            _build_action_item(
+                "Do a manual review before tomorrow check-in",
+                "Before the next arrival, confirm the original file wording and whether any new symptoms or follow-up instructions appeared overnight.",
+                "rule:next-day-review",
+                ["Preserve the original file for manual walkthrough", "Extraction mode"],
+            )
+        )
+
+    filtered_school_actions = _filter_unsafe_action_items(
+        _dedupe(school_today_actions, "title"),
+        contraindications,
+    )
+    filtered_family_actions = _filter_unsafe_action_items(
+        _dedupe(family_tonight_actions, "title"),
+        contraindications,
+    )
+    filtered_follow_up = _filter_unsafe_action_items(
+        _dedupe(follow_up_plan, "title"),
+        contraindications,
+    )
+
+    school_actions = filtered_school_actions or [
+        _build_action_item(
+            "Verify the original file and keep today's observation brief",
+            "Use the file only as a prompt to verify the original wording and keep a brief observation note today.",
+            "rule:fallback-review",
+            ["File type", "Extraction mode"],
+        )
+    ]
+    family_actions = filtered_family_actions or [
+        _build_action_item(
+            "Share a factual status update tonight",
+            "Ask the family for a factual update tonight so tomorrow's school handoff does not depend on guesswork.",
+            "rule:fallback-review",
+            ["Extraction mode"],
+        )
+    ]
+    review_actions = filtered_follow_up or [
+        _build_action_item(
+            "Keep the next check-in manual",
+            "Before the next attendance, manually confirm the file wording and any change in the child's status.",
+            "rule:fallback-review",
+            ["Extraction mode"],
+        )
+    ]
+
+    escalation_suggestion = {
+        "shouldUpgradeAttention": False,
+        "level": "routine",
+        "reason": "Current extraction supports conservative observation and document verification without triggering a same-day escalation flow.",
+    }
+    if has_high_risk:
+        escalation_suggestion = {
+            "shouldUpgradeAttention": True,
+            "level": "same-day-review",
+            "reason": "A high-risk extraction signal needs same-day teacher-family review before normal routine decisions are treated as safe.",
+        }
+    elif has_medication or has_allergy or (has_follow_up and (has_medium_risk or has_high_risk)) or has_medium_risk:
+        escalation_suggestion = {
+            "shouldUpgradeAttention": True,
+            "level": "heightened",
+            "reason": "The file contains medium-risk or coordination-sensitive signals that need tighter observation and a clearer handoff.",
+        }
+
+    teacher_draft_hint = (
+        f"Teacher handoff hint: {(school_actions[0].get('title') or 'Verify the original file')} "
+        f"Follow {(review_actions[0].get('title') or 'keep the next check-in manual')}, "
+        "keep the wording operational, and avoid diagnosis or medication promises."
+    )
+    parent_communication_draft_hint = (
+        f"Parent communication hint: {(family_actions[0].get('title') or 'Share a factual status update tonight')} "
+        f"Please keep the update factual and support {str(review_actions[0].get('title') or 'the next manual check-in').lower()}."
+    )
+
+    return {
+        "schoolTodayActions": school_actions,
+        "familyTonightActions": family_actions,
+        "followUpPlan": review_actions,
+        "escalationSuggestion": escalation_suggestion,
+        "teacherDraftHint": teacher_draft_hint,
+        "parentCommunicationDraftHint": parent_communication_draft_hint,
+    }
+
+
 def _confidence(signals: dict[str, Any], facts: list[dict[str, Any]], file_type: str) -> float:
     score = 0.18
     if signals["preview_texts"]:
@@ -449,17 +749,26 @@ async def run_health_file_bridge(payload: dict[str, Any]) -> dict[str, Any]:
     contraindications = _dedupe(_contraindications(signals["haystack"]), "title")
     follow_up_hints = _dedupe(_follow_up_hints(signals["haystack"], file_type), "title")
     confidence = _confidence(signals, facts, file_type)
+    action_mapping = _build_action_mapping(
+        file_type=file_type,
+        extracted_facts=facts,
+        risk_items=risks,
+        contraindications=contraindications,
+        follow_up_hints=follow_up_hints,
+        confidence=confidence,
+    )
 
     return {
         "childId": payload.get("childId") or payload.get("child_id"),
         "sourceRole": source_role,
         "fileKind": payload.get("fileKind") or payload.get("file_kind"),
         "fileType": file_type,
-        "summary": "T8 extracted structured health-file hints only. Daycare action mapping remains out of scope for this step.",
+        "summary": "T9 mapped extracted health-file hints into conservative childcare actions. Medical diagnosis, medication authorization, and writeback remain out of scope.",
         "extractedFacts": facts,
         "riskItems": risks,
         "contraindications": contraindications,
         "followUpHints": follow_up_hints,
+        "actionMapping": action_mapping,
         "confidence": confidence,
         "disclaimer": DISCLAIMER,
         "source": "backend-text-fallback",

@@ -26,6 +26,7 @@ DEFAULT_SNAPSHOT_KEYS = (
     "consultations",
     "mobileDrafts",
     "reminders",
+    "tasks",
 )
 
 

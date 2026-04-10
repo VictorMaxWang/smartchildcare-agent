@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.schemas.agent import WeeklyReportRequest, WeeklyReportResponse
+from app.schemas.demand_insight import DemandInsightRequest, DemandInsightResponse
 from app.schemas.health_file_bridge import HealthFileBridgeRequest, HealthFileBridgeResponse
 from app.schemas.intent_router import IntentRouterRequest, IntentRouterResponse
 from app.schemas.parent_message import ParentMessageReflexionRequest, ParentMessageReflexionResponse
@@ -195,3 +196,15 @@ async def high_risk_consultation_feed(
         owner_name=owner_name,
         escalated_only=escalated_only,
     )
+
+
+@router.post("/agents/insights/demand", response_model=DemandInsightResponse)
+async def demand_insights(
+    payload: DemandInsightRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+):
+    try:
+        result = await orchestrator.demand_insights(payload.model_dump(mode="json", by_alias=True))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return DemandInsightResponse.model_validate(result)

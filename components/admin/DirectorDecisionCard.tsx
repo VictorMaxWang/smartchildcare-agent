@@ -96,7 +96,7 @@ function ActionColumn({
   toneClassName: string;
 }) {
   return (
-    <div className={cn("rounded-2xl border p-4", toneClassName)}>
+    <div className={cn("min-w-0 rounded-2xl border p-4", toneClassName)}>
       <div className="flex items-center gap-2">
         {icon}
         <p className="text-sm font-semibold text-slate-900">{title}</p>
@@ -228,7 +228,7 @@ export default function DirectorDecisionCard({
           </div>
         </div>
 
-        <div className="grid gap-3 2xl:grid-cols-3">
+        <div className="grid gap-3 xl:grid-cols-2">
           <ActionColumn
             icon={<School className="h-4 w-4 text-emerald-500" />}
             title="今日园内动作"

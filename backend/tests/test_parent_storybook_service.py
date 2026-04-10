@@ -4,6 +4,7 @@ import asyncio
 from copy import deepcopy
 
 from app.providers.base import ProviderResult
+from app.services import parent_storybook_service
 from app.services.parent_storybook_service import await_storybook_media_warming, run_parent_storybook
 from app.services.storybook_media_cache import get_storybook_media_cache
 
@@ -236,6 +237,55 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
     assert result["scenes"][0]["imageSourceKind"] == "real"
     assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert result["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "ready"
+
+
+def test_parent_storybook_service_surfaces_media_warm_error_diagnostics(monkeypatch):
+    image_provider = _SceneProvider(provider_name="vivo-story-image", image_status="ready")
+
+    class _FailingAudioProvider:
+        provider_name = "vivo-story-tts"
+
+        def read_cached_scene(self, **kwargs):
+            del kwargs
+            return None
+
+        def render_scene(self, **kwargs):
+            del kwargs
+            error = RuntimeError("tts handshake failed")
+            error.stage = "tts_handshake"  # type: ignore[attr-defined]
+            raise error
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: _FailingAudioProvider(),
+    )
+
+    first = asyncio.run(run_parent_storybook(_base_payload()))
+    assert first["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+    warm_job = parent_storybook_service._get_storybook_media_warm_job(first["storyId"])
+    assert warm_job is not None
+    assert warm_job.audio.error_scene_count == len(first["scenes"])
+    assert warm_job.audio.last_error_stage == "tts_handshake"
+    assert "tts handshake failed" in (warm_job.audio.last_error_reason or "")
+
+    diagnostics = parent_storybook_service._resolve_media_diagnostics(
+        story_id=first["storyId"],
+        settings=parent_storybook_service.get_settings(),
+        image_provider=image_provider,
+        audio_provider=_FailingAudioProvider(),
+        scenes=first["scenes"],
+        request_elapsed_ms=0,
+    )
+    assert diagnostics["audio"]["jobStatus"] == "error"
+    assert diagnostics["audio"]["errorSceneCount"] == len(first["scenes"])
+    assert diagnostics["audio"]["lastErrorStage"] == "tts_handshake"
+    assert "tts handshake failed" in (diagnostics["audio"]["lastErrorReason"] or "")
 
 
 def test_parent_storybook_service_degrades_to_card_when_context_is_sparse():

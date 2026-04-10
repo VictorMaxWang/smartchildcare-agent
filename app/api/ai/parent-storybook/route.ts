@@ -16,7 +16,19 @@ import {
 } from "@/lib/server/brain-client";
 
 export const runtime = "nodejs";
-const PARENT_STORYBOOK_BRAIN_TIMEOUT_MS = 35_000;
+const DEFAULT_PARENT_STORYBOOK_BRAIN_TIMEOUT_MS = 45_000;
+
+function resolveParentStoryBookBrainTimeoutMs() {
+  const rawValue =
+    process.env.PARENT_STORYBOOK_BRAIN_TIMEOUT_MS?.trim() ??
+    process.env.BRAIN_API_TIMEOUT_MS?.trim();
+  const parsed = rawValue ? Number(rawValue) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_PARENT_STORYBOOK_BRAIN_TIMEOUT_MS;
+}
+
+const PARENT_STORYBOOK_BRAIN_TIMEOUT_MS = resolveParentStoryBookBrainTimeoutMs();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

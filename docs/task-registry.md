@@ -216,7 +216,10 @@
 - 是否适合并行：中
 - 最小验收方式：给定样例图片 / PDF，能输出结构化抽取结果与失败边界
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要样例文件 walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-10 更新：已新增 `lib/tasks/types.ts` 与 `lib/tasks/task-model.ts`，把 `InterventionTask` / `FollowUpTask` 统一成 canonical task contract，并把 intervention card、reminder、follow-up payload、admin dispatch source、snapshot/store 挂回同一任务视角。
+- 2026-04-10 边界：本轮只完成 contract / mapping / persistence / follow-up route additive 兼容，不改首页 / Admin 首页 / Why High Priority 展示，不引入 `T21` 自动升级规则，也不把 admin dispatch 重构成全新任务系统。
+- 2026-04-10 验证：`npx --yes tsx --test lib/tasks/task-model.test.ts lib/db/notification-events.test.ts`、`py -m pytest backend/tests/test_agents_mock.py backend/tests/test_childcare_repository.py backend/tests/test_orchestrator_memory.py -q`、`npm run lint`、`npm run build`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T9｜外部健康文件桥接助手：专业信息 -> 托育动作映射
@@ -416,7 +419,10 @@
 - 是否适合并行：中
 - 最小验收方式：干预卡、提醒、任务状态三者能映射到统一 task model
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 workflow walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-10 更新：已新增 `lib/tasks/types.ts` 与 `lib/tasks/task-model.ts`，把 `InterventionTask` / `FollowUpTask` 统一成 canonical task contract，并把 intervention card、reminder、follow-up payload、admin dispatch source、snapshot/store 挂回同一任务视角。
+- 2026-04-10 边界：本轮只完成 contract / mapping / persistence / follow-up route additive 兼容，不改首页 / Admin 首页 / Why High Priority 展示，不引入 `T21` 自动升级规则，也不把 admin dispatch 重构成全新任务系统。
+- 2026-04-10 验证：`npx --yes tsx --test lib/tasks/task-model.test.ts lib/db/notification-events.test.ts`、`py -m pytest backend/tests/test_agents_mock.py backend/tests/test_childcare_repository.py backend/tests/test_orchestrator_memory.py -q`、`npm run lint`、`npm run build`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T21｜自动升级规则
@@ -584,8 +590,10 @@
 - 是否适合并行：中
 - 最小验收方式：至少输出一版可被 Admin 消费的洞察聚合结果
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough
-- 当前状态：`Planned`
-- 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
+- 当前状态：`Done-code-only`
+- 当前完成情况：已落地 `backend/app/services/demand_insight_engine.py`、`backend/app/schemas/demand_insight.py` 与 `POST /api/v1/agents/insights/demand`，稳定输出 `topConcernTopics`、`consultationTriggerHeat`、`actionDifficultyTopics`、`weakFeedbackSegments`、`recurringIssueClusters`，并附带 `window`、`sourceSummary`、`dataQuality`、`source`、`fallback`、`warnings`
+- 当前边界：聚合仍以 rule-first / aggregation-first 为主；`weekly-report-result` 与 `parent-follow-up-result` 只作为辅助来源统计或弱信号，不夸大为真实机构运营洞察；页面级消费与 walkthrough 尚未开始
+- 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T31｜信任透明层
 

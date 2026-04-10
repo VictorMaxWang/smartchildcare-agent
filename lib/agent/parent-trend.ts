@@ -151,6 +151,7 @@ export function buildParentTrendAppSnapshot(
     consultations: input.consultations,
     mobileDrafts: input.mobileDrafts,
     reminders: input.reminders,
+    tasks: [],
     updatedAt: input.updatedAt ?? new Date().toISOString(),
   };
 }

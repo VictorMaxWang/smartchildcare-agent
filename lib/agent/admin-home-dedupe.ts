@@ -1,5 +1,29 @@
+import type {
+  AdminAgentActionItem,
+  AdminAgentResult,
+  AdminDispatchEvent,
+  AdminFeedbackRiskSummary,
+  AdminHomeViewModel,
+  AdminRiskChildSummary,
+  InstitutionPriorityItem,
+} from "@/lib/agent/admin-types";
 import type { AdminConsultationPriorityItem } from "@/lib/agent/admin-consultation";
-import type { AdminDispatchEvent, AdminHomeViewModel } from "@/lib/agent/admin-types";
+
+const DEFAULT_ACTION_ENTRY_SUMMARY = "建议园长先从已置顶会诊区和当前最高优先级事项推进今日闭环。";
+
+type FeaturedChildTracker = {
+  ids: Set<string>;
+  names: Set<string>;
+};
+
+function createFeaturedChildTracker(
+  consultationPriorityItems: AdminConsultationPriorityItem[]
+): FeaturedChildTracker {
+  return {
+    ids: new Set(consultationPriorityItems.map((item) => item.childId)),
+    names: new Set(consultationPriorityItems.map((item) => item.decision.childName)),
+  };
+}
 
 function containsFeaturedChildName(text: string, childNames: Set<string>) {
   for (const childName of childNames) {
@@ -9,6 +33,101 @@ function containsFeaturedChildName(text: string, childNames: Set<string>) {
   }
 
   return false;
+}
+
+function markFeaturedChild(tracker: FeaturedChildTracker, childId: string, childName: string) {
+  if (!childId || !childName) return;
+  tracker.ids.add(childId);
+  tracker.names.add(childName);
+}
+
+function dedupePriorityTopItems(
+  items: InstitutionPriorityItem[],
+  tracker: FeaturedChildTracker,
+  limit: number
+) {
+  const next: InstitutionPriorityItem[] = [];
+
+  for (const item of items) {
+    if (item.targetType === "child") {
+      if (tracker.ids.has(item.targetId)) {
+        continue;
+      }
+
+      markFeaturedChild(tracker, item.targetId, item.targetName);
+    }
+
+    next.push(item);
+    if (next.length >= limit) break;
+  }
+
+  return next;
+}
+
+function dedupeRiskChildren(
+  items: AdminRiskChildSummary[],
+  tracker: FeaturedChildTracker,
+  limit: number
+) {
+  const next: AdminRiskChildSummary[] = [];
+
+  for (const item of items) {
+    if (tracker.ids.has(item.childId)) {
+      continue;
+    }
+
+    markFeaturedChild(tracker, item.childId, item.childName);
+    next.push(item);
+    if (next.length >= limit) break;
+  }
+
+  return next;
+}
+
+function dedupeFeedbackRiskItems(
+  items: AdminFeedbackRiskSummary[],
+  tracker: FeaturedChildTracker,
+  limit: number
+) {
+  const next: AdminFeedbackRiskSummary[] = [];
+
+  for (const item of items) {
+    if (tracker.ids.has(item.childId)) {
+      continue;
+    }
+
+    markFeaturedChild(tracker, item.childId, item.childName);
+    next.push(item);
+    if (next.length >= limit) break;
+  }
+
+  return next;
+}
+
+function markActionItemChildren(
+  items: AdminAgentActionItem[],
+  tracker: FeaturedChildTracker
+) {
+  for (const item of items) {
+    if (item.targetType !== "child") {
+      continue;
+    }
+
+    markFeaturedChild(tracker, item.targetId, item.targetName);
+  }
+}
+
+function dedupeTextItems(items: string[], tracker: FeaturedChildTracker, limit: number) {
+  return items
+    .filter((item) => !containsFeaturedChildName(item, tracker.names))
+    .slice(0, limit);
+}
+
+function dedupeActionEntrySummary(summary: string, tracker: FeaturedChildTracker) {
+  if (!summary) return summary;
+  return containsFeaturedChildName(summary, tracker.names)
+    ? DEFAULT_ACTION_ENTRY_SUMMARY
+    : summary;
 }
 
 function isConsultationScopedEvent(
@@ -51,33 +170,23 @@ export function dedupeAdminHomeExposure(
   home: AdminHomeViewModel,
   consultationPriorityItems: AdminConsultationPriorityItem[]
 ) {
-  if (consultationPriorityItems.length === 0) {
-    return home;
-  }
-
-  const featuredChildIds = new Set(consultationPriorityItems.map((item) => item.childId));
-  const featuredChildNames = new Set(
-    consultationPriorityItems.map((item) => item.decision.childName)
-  );
+  const tracker = createFeaturedChildTracker(consultationPriorityItems);
   const featuredConsultationIds = new Set(
     consultationPriorityItems.map((item) => item.consultationId)
   );
 
-  const priorityTopItems = home.priorityTopItems
-    .filter((item) => !(item.targetType === "child" && featuredChildIds.has(item.targetId)))
-    .slice(0, 3);
-
-  const riskChildren = home.riskChildren
-    .filter((item) => !featuredChildIds.has(item.childId))
-    .slice(0, 4);
-
-  const weeklyHighlights = home.weeklyHighlights
-    .filter((item) => !containsFeaturedChildName(item, featuredChildNames))
-    .slice(0, 4);
-
+  const priorityTopItems = dedupePriorityTopItems(
+    home.priorityTopItems,
+    tracker,
+    3
+  );
+  const riskChildren = dedupeRiskChildren(home.riskChildren, tracker, 4);
+  const weeklyHighlights = dedupeTextItems(home.weeklyHighlights, tracker, 4);
+  const pendingItems = dedupeTextItems(home.pendingItems, tracker, 4);
+  const actionEntrySummary = dedupeActionEntrySummary(home.actionEntrySummary, tracker);
   const pendingDispatches = home.pendingDispatches
     .map((event) =>
-      isConsultationScopedEvent(event, featuredConsultationIds, featuredChildIds)
+      isConsultationScopedEvent(event, featuredConsultationIds, tracker.ids)
         ? compactConsultationDispatchSummary(event)
         : event
     )
@@ -87,8 +196,42 @@ export function dedupeAdminHomeExposure(
     ...home,
     priorityTopItems,
     riskChildren,
-    weeklyHighlights:
-      weeklyHighlights.length > 0 ? weeklyHighlights : home.weeklyHighlights.slice(0, 4),
+    weeklyHighlights,
+    pendingItems,
+    actionEntrySummary,
     pendingDispatches,
   } satisfies AdminHomeViewModel;
+}
+
+export function dedupeAdminAgentResultExposure(
+  result: AdminAgentResult,
+  consultationPriorityItems: AdminConsultationPriorityItem[]
+) {
+  const tracker = createFeaturedChildTracker(consultationPriorityItems);
+
+  const priorityTopItems = dedupePriorityTopItems(
+    result.priorityTopItems,
+    tracker,
+    result.priorityTopItems.length
+  );
+  const riskChildren = dedupeRiskChildren(
+    result.riskChildren,
+    tracker,
+    result.riskChildren.length
+  );
+  const feedbackRiskItems = dedupeFeedbackRiskItems(
+    result.feedbackRiskItems,
+    tracker,
+    result.feedbackRiskItems.length
+  );
+  markActionItemChildren(result.actionItems, tracker);
+  const highlights = dedupeTextItems(result.highlights, tracker, result.highlights.length);
+
+  return {
+    ...result,
+    priorityTopItems,
+    riskChildren,
+    feedbackRiskItems,
+    highlights,
+  } satisfies AdminAgentResult;
 }

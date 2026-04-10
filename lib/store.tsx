@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AppStateSnapshot } from "@/lib/persistence/snapshot";
+import { normalizeAppStateSnapshot, type AppStateSnapshot } from "@/lib/persistence/snapshot";
 import type { ConsultationResult, MobileDraft, MobileDraftSyncStatus, ReminderItem } from "@/lib/ai/types";
 import {
   DEMO_ACCOUNTS,
@@ -13,6 +13,8 @@ import {
 import type { InterventionCard } from "@/lib/agent/intervention-card";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate, shiftLocalDate, startOfLocalDay } from "@/lib/date";
 import { emptyInstitutionSnapshot } from "@/lib/persistence/bootstrap";
+import { materializeTasksFromLegacy, pickActiveTask } from "@/lib/tasks/task-model";
+import type { CanonicalTask, TaskOwnerRole } from "@/lib/tasks/types";
 
 export type Role = AccountRole;
 export type Gender = "男" | "女";
@@ -329,8 +331,10 @@ interface AppContextType {
   consultations: ConsultationResult[];
   mobileDrafts: MobileDraft[];
   reminders: ReminderItem[];
+  tasks: CanonicalTask[];
   upsertInterventionCard: (card: InterventionCard) => void;
   upsertConsultation: (consultation: ConsultationResult) => void;
+  upsertTask: (task: CanonicalTask) => void;
   saveMobileDraft: (draft: MobileDraft) => void;
   markMobileDraftSyncStatus: (draftId: string, syncStatus: MobileDraftSyncStatus) => void;
   persistAppSnapshotNow: (
@@ -338,6 +342,8 @@ interface AppContextType {
   ) => Promise<PersistAppSnapshotResult>;
   upsertReminder: (reminder: ReminderItem) => void;
   updateReminderStatus: (reminderId: string, status: ReminderItem["status"]) => void;
+  getTasksForChild: (childId: string, ownerRole?: TaskOwnerRole) => CanonicalTask[];
+  getActiveTask: (childId: string, ownerRole?: TaskOwnerRole) => CanonicalTask | undefined;
   getChildInterventionCard: (childId: string) => InterventionCard | undefined;
   getConsultationsForChild: (childId: string) => ConsultationResult[];
   getLatestConsultationForChild: (childId: string) => ConsultationResult | undefined;
@@ -365,6 +371,7 @@ const STORAGE_KEYS = {
   consultations: "consultations.v1",
   mobileDrafts: "mobile-drafts.v1",
   reminders: "reminders.v1",
+  tasks: "tasks.v1",
 } as const;
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -384,7 +391,7 @@ function writeStorage<T>(key: string, value: T) {
 }
 
 function readScopedSnapshot(namespace: string, fallbackSnapshot: AppStateSnapshot): AppStateSnapshot {
-  return {
+  const snapshot = {
     children: readStorage<Child[]>(buildScopedStorageKey(namespace, "children"), fallbackSnapshot.children),
     attendance: readStorage<AttendanceRecord[]>(
       buildScopedStorageKey(namespace, "attendance"),
@@ -422,8 +429,14 @@ function readScopedSnapshot(namespace: string, fallbackSnapshot: AppStateSnapsho
       buildScopedStorageKey(namespace, "reminders"),
       fallbackSnapshot.reminders
     ),
+    tasks: readStorage<CanonicalTask[]>(
+      buildScopedStorageKey(namespace, "tasks"),
+      fallbackSnapshot.tasks
+    ),
     updatedAt: fallbackSnapshot.updatedAt,
-  };
+  } satisfies AppStateSnapshot;
+
+  return normalizeAppStateSnapshot(snapshot) ?? fallbackSnapshot;
 }
 
 function writeScopedSnapshot(namespace: string, snapshot: AppStateSnapshot) {
@@ -438,6 +451,7 @@ function writeScopedSnapshot(namespace: string, snapshot: AppStateSnapshot) {
   writeStorage(buildScopedStorageKey(namespace, "consultations"), snapshot.consultations);
   writeStorage(buildScopedStorageKey(namespace, "mobileDrafts"), snapshot.mobileDrafts);
   writeStorage(buildScopedStorageKey(namespace, "reminders"), snapshot.reminders);
+  writeStorage(buildScopedStorageKey(namespace, "tasks"), snapshot.tasks);
 }
 
 function buildScopedStorageKey(namespace: string, key: keyof typeof STORAGE_KEYS) {
@@ -1995,6 +2009,7 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
     consultations: [],
     mobileDrafts: [],
     reminders: [],
+    tasks: [],
     updatedAt: new Date().toISOString(),
   };
 }
@@ -3978,6 +3993,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
   const [consultations, setConsultations] = useState<ConsultationResult[]>([]);
   const [mobileDrafts, setMobileDrafts] = useState<MobileDraft[]>([]);
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [tasks, setTasks] = useState<CanonicalTask[]>([]);
   const lastSyncedSnapshotKeyRef = useRef<string | null>(null);
   const isAuthenticated = currentUser.id !== UNAUTHENTICATED_USER.id;
   const isDemoUser = isAuthenticated && currentUser.accountKind === "demo";
@@ -4001,6 +4017,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     setConsultations(snapshot.consultations);
     setMobileDrafts(snapshot.mobileDrafts);
     setReminders(snapshot.reminders);
+    setTasks(snapshot.tasks);
   }, []);
 
   const buildSnapshotWithOverride = useCallback(
@@ -4016,6 +4033,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       consultations: override?.consultations ?? consultations,
       mobileDrafts: override?.mobileDrafts ?? mobileDrafts,
       reminders: override?.reminders ?? reminders,
+      tasks: override?.tasks ?? tasks,
       updatedAt: override?.updatedAt ?? new Date().toISOString(),
     }),
     [
@@ -4030,8 +4048,22 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       consultations,
       mobileDrafts,
       reminders,
+      tasks,
     ]
   );
+
+  useEffect(() => {
+    setTasks((prev) =>
+      materializeTasksFromLegacy({
+        existingTasks: prev,
+        interventionCards,
+        consultations,
+        reminders,
+        guardianFeedbacks,
+        taskCheckIns: taskCheckInRecords,
+      })
+    );
+  }, [consultations, guardianFeedbacks, interventionCards, reminders, taskCheckInRecords]);
 
   const remoteSnapshot = useMemo<AppStateSnapshot>(() => buildSnapshotWithOverride(), [
     buildSnapshotWithOverride,
@@ -4051,7 +4083,8 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       snapshot.interventionCards.length === 0 &&
       snapshot.consultations.length === 0 &&
       snapshot.mobileDrafts.length === 0 &&
-      snapshot.reminders.length === 0
+      snapshot.reminders.length === 0 &&
+      snapshot.tasks.length === 0
     );
   }, []);
 
@@ -4446,6 +4479,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     setConsultations((prev) => prev.filter((item) => item.childId !== id));
     setMobileDrafts((prev) => prev.filter((draft) => draft.childId !== id));
     setReminders((prev) => prev.filter((reminder) => reminder.targetId !== id));
+    setTasks((prev) => prev.filter((task) => task.childId !== id));
   }, []);
 
   const markAttendance = useCallback((input: Omit<AttendanceRecord, "id">) => {
@@ -4574,6 +4608,19 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     });
   }, []);
 
+  const upsertTask = useCallback((task: CanonicalTask) => {
+    setTasks((prev) => {
+      const existingIndex = prev.findIndex((item) => item.taskId === task.taskId);
+      if (existingIndex === -1) {
+        return [task, ...prev];
+      }
+
+      const next = [...prev];
+      next[existingIndex] = { ...next[existingIndex], ...task };
+      return next;
+    });
+  }, []);
+
   const upsertConsultation = useCallback((consultation: ConsultationResult) => {
     setConsultations((prev) => {
       const existingIndex = prev.findIndex((item) => item.consultationId === consultation.consultationId);
@@ -4628,6 +4675,16 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
       prev.map((reminder) => (reminder.reminderId === reminderId ? { ...reminder, status } : reminder))
     );
   }, []);
+
+  const getTasksForChild = useCallback((childId: string, ownerRole?: TaskOwnerRole) => {
+    return tasks
+      .filter((task) => task.childId === childId && (!ownerRole || task.ownerRole === ownerRole))
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+  }, [tasks]);
+
+  const getActiveTask = useCallback((childId: string, ownerRole?: TaskOwnerRole) => {
+    return pickActiveTask(tasks, childId, ownerRole);
+  }, [tasks]);
 
   const getChildInterventionCard = useCallback((childId: string) => {
     return interventionCards.find((card) => card.targetChildId === childId);
@@ -4931,13 +4988,17 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     consultations,
     mobileDrafts,
     reminders,
+    tasks,
     upsertInterventionCard,
     upsertConsultation,
+    upsertTask,
     saveMobileDraft,
     markMobileDraftSyncStatus,
     persistAppSnapshotNow,
     upsertReminder,
     updateReminderStatus,
+    getTasksForChild,
+    getActiveTask,
     getChildInterventionCard,
     getConsultationsForChild,
     getLatestConsultationForChild,
@@ -4986,13 +5047,17 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     consultations,
     mobileDrafts,
     reminders,
+    tasks,
     upsertInterventionCard,
     upsertConsultation,
+    upsertTask,
     saveMobileDraft,
     markMobileDraftSyncStatus,
     persistAppSnapshotNow,
     upsertReminder,
     updateReminderStatus,
+    getTasksForChild,
+    getActiveTask,
     getChildInterventionCard,
     getConsultationsForChild,
     getLatestConsultationForChild,

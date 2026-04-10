@@ -35,10 +35,13 @@ test("health-file-bridge helper returns extraction-only output for metadata-heav
   assert.equal(result.fallback, true);
   assert.equal(result.mock, true);
   assert.equal(result.liveReadyButNotVerified, true);
-  assert.ok(result.disclaimer.includes("T8 extraction only"));
+  assert.ok(result.disclaimer.includes("T9 bridge"));
   assert.ok(result.extractedFacts.length >= 3);
   assert.ok(result.riskItems.length > 0);
   assert.ok(result.followUpHints.length > 0);
+  assert.ok(result.actionMapping);
+  assert.ok(result.actionMapping?.schoolTodayActions.length);
+  assert.equal(result.actionMapping?.escalationSuggestion.level, "routine");
   assert.equal(typeof result.confidence, "number");
 });
 
@@ -80,5 +83,52 @@ test("health-file-bridge helper promotes fever and medication cues into extracti
     contraindicationTitles.includes("Do not infer a daycare medication plan from the file alone")
   );
   assert.ok(result.followUpHints.length > 0);
+  assert.ok(result.actionMapping);
+  assert.equal(result.actionMapping?.escalationSuggestion.level, "same-day-review");
+  assert.ok(
+    result.actionMapping?.schoolTodayActions.some((item) =>
+      item.title.includes("Temporarily avoid unverified allergen exposure today")
+    )
+  );
+  assert.ok(
+    result.actionMapping?.schoolTodayActions.some((item) =>
+      item.title.includes("Do not administer medicine from the file alone")
+    )
+  );
   assert.ok(result.confidence >= 0.6);
+});
+
+test("health-file-bridge helper keeps contraindications from turning into risky actions", () => {
+  const request = {
+    childId: "child-3",
+    sourceRole: "teacher",
+    files: [
+      {
+        fileId: "file-3",
+        name: "allergy-note.png",
+        mimeType: "image/png",
+        previewText: "allergy medication fever 38.2 follow-up tomorrow",
+      },
+    ],
+    requestSource: "unit-test",
+  } as const;
+
+  const result = buildHealthFileBridgeResponse(request, {
+    source: "next-local-extractor",
+    fallback: true,
+    mock: true,
+    liveReadyButNotVerified: true,
+  });
+
+  const flattenedActionText = [
+    ...(result.actionMapping?.schoolTodayActions ?? []),
+    ...(result.actionMapping?.familyTonightActions ?? []),
+    ...(result.actionMapping?.followUpPlan ?? []),
+  ]
+    .map((item) => `${item.title} ${item.detail}`.toLowerCase())
+    .join(" ");
+
+  assert.ok(!flattenedActionText.includes("resume normal activity"));
+  assert.ok(!flattenedActionText.includes("allergen exposure is acceptable"));
+  assert.ok(!flattenedActionText.includes("administer medicine based on the file"));
 });

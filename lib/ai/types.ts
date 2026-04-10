@@ -1,4 +1,5 @@
 import type { AppStateSnapshot } from "@/lib/persistence/snapshot";
+import type { CanonicalTask, FollowUpTask, TaskSourceType } from "@/lib/tasks/types";
 
 export type AiRiskLevel = "low" | "medium" | "high";
 export type AiTrendPrediction = "up" | "stable" | "down";
@@ -256,6 +257,9 @@ export interface ReminderItem {
   scheduledAt: string;
   status: ReminderStatus;
   sourceId?: string;
+  taskId?: string;
+  sourceType?: TaskSourceType;
+  relatedTaskIds?: string[];
 }
 
 export interface RuleFallbackItem {
@@ -457,6 +461,8 @@ export interface AiFollowUpPayload {
     description: string;
     durationText?: string;
   };
+  activeTask?: CanonicalTask;
+  tasks?: CanonicalTask[];
   institutionContext?: {
     priorityTopItems: InstitutionPrioritySummaryItem[];
     pendingDispatches?: InstitutionSuggestionSnapshot["pendingDispatches"];
@@ -485,6 +491,8 @@ export interface AiFollowUpResponse {
   consultation?: ConsultationResult;
   continuityNotes?: string[];
   memoryMeta?: MemoryContextMeta;
+  followUpTask?: FollowUpTask;
+  tasks?: CanonicalTask[];
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
   model?: string;
@@ -980,6 +988,30 @@ export interface HealthFileBridgeFollowUpHint {
   source: string;
 }
 
+export type HealthFileBridgeEscalationLevel = "routine" | "heightened" | "same-day-review";
+
+export interface HealthFileBridgeActionItem {
+  title: string;
+  detail: string;
+  source: string;
+  basedOn: string[];
+}
+
+export interface HealthFileBridgeEscalationSuggestion {
+  shouldUpgradeAttention: boolean;
+  level: HealthFileBridgeEscalationLevel;
+  reason: string;
+}
+
+export interface HealthFileBridgeActionMapping {
+  schoolTodayActions: HealthFileBridgeActionItem[];
+  familyTonightActions: HealthFileBridgeActionItem[];
+  followUpPlan: HealthFileBridgeActionItem[];
+  escalationSuggestion: HealthFileBridgeEscalationSuggestion;
+  teacherDraftHint: string;
+  parentCommunicationDraftHint: string;
+}
+
 export interface HealthFileBridgeResponse {
   childId?: string;
   sourceRole: HealthFileBridgeSourceRole;
@@ -990,6 +1022,7 @@ export interface HealthFileBridgeResponse {
   riskItems: HealthFileBridgeRiskItem[];
   contraindications: HealthFileBridgeContraindication[];
   followUpHints: HealthFileBridgeFollowUpHint[];
+  actionMapping?: HealthFileBridgeActionMapping;
   confidence: number;
   disclaimer: string;
   source: HealthFileBridgeSource;
