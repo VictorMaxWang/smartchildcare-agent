@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ from app.tools.summary_tools import safe_dict
 
 
 logger = logging.getLogger(__name__)
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
 Runner = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -236,6 +238,33 @@ class Orchestrator:
     repositories: RepositoryBundle
     memory: MemoryService
 
+    def _should_skip_request_thread_memory(self, task: str) -> bool:
+        return task == "parent-storybook"
+
+    def _should_background_persistence(self, task: str) -> bool:
+        return task == "parent-storybook"
+
+    def _memory_trace_meta_for_skip(self) -> dict[str, Any]:
+        return {
+            "memory_context_used": False,
+            "memory_context_count": 0,
+            "memory_context_backend": self.repositories.backend,
+            "memory_context_skipped_reason": "parent-storybook-request-thread-sla",
+        }
+
+    def _schedule_background_task(self, coroutine: Awaitable[None], *, label: str) -> None:
+        task = asyncio.create_task(coroutine)
+        _BACKGROUND_TASKS.add(task)
+
+        def _finalize(completed_task: asyncio.Task[Any]) -> None:
+            _BACKGROUND_TASKS.discard(completed_task)
+            try:
+                completed_task.result()
+            except Exception:
+                logger.exception("Background task failed: %s", label)
+
+        task.add_done_callback(_finalize)
+
     async def _safe_save_trace(self, **kwargs: Any) -> None:
         try:
             await self.memory.save_agent_trace(**kwargs)
@@ -351,7 +380,12 @@ class Orchestrator:
         node_name: str,
         snapshot_type: str | None = None,
     ) -> dict[str, Any]:
-        effective_payload = await self._prepare_payload_with_memory(task, payload)
+        if self._should_skip_request_thread_memory(task):
+            effective_payload = dict(payload)
+            effective_payload["debugMemory"] = _debug_memory_enabled(effective_payload)
+            effective_payload["_memory_trace_meta"] = self._memory_trace_meta_for_skip()
+        else:
+            effective_payload = await self._prepare_payload_with_memory(task, payload)
         trace_id = _coerce_string(effective_payload.get("trace_id")) or _coerce_string(effective_payload.get("traceId")) or _create_trace_id(task)
         started_at = perf_counter()
 
@@ -359,22 +393,33 @@ class Orchestrator:
             result = await runner(effective_payload)
         except Exception as error:
             duration_ms = max(0, int((perf_counter() - started_at) * 1000))
-            await self._safe_save_trace(
-                trace_id=trace_id,
-                child_id=_extract_child_id(effective_payload),
-                session_id=_extract_session_id(effective_payload),
-                node_name=node_name,
-                action_type=task,
-                input_summary=_summarize_value(effective_payload),
-                output_summary=_summarize_value({"error": str(error), "type": type(error).__name__}),
-                status="failed",
-                duration_ms=duration_ms,
-                metadata_json={
+            trace_kwargs = {
+                "trace_id": trace_id,
+                "child_id": _extract_child_id(effective_payload),
+                "session_id": _extract_session_id(effective_payload),
+                "node_name": node_name,
+                "action_type": task,
+                "input_summary": _summarize_value(effective_payload),
+                "output_summary": _summarize_value({"error": str(error), "type": type(error).__name__}),
+                "status": "failed",
+                "duration_ms": duration_ms,
+                "metadata_json": {
                     "task": task,
                     "error_type": type(error).__name__,
-                    **(effective_payload.get("_memory_trace_meta") if isinstance(effective_payload.get("_memory_trace_meta"), dict) else {}),
+                    **(
+                        effective_payload.get("_memory_trace_meta")
+                        if isinstance(effective_payload.get("_memory_trace_meta"), dict)
+                        else {}
+                    ),
                 },
-            )
+            }
+            if self._should_background_persistence(task):
+                self._schedule_background_task(
+                    self._safe_save_trace(**trace_kwargs),
+                    label=f"{task}:failed-trace",
+                )
+            else:
+                await self._safe_save_trace(**trace_kwargs)
             raise
 
         duration_ms = max(0, int((perf_counter() - started_at) * 1000))
@@ -400,27 +445,41 @@ class Orchestrator:
         if task == "high-risk-consultation" and isinstance(result, dict):
             result = self._normalize_high_risk_result(payload=effective_payload, result=result)
 
-        await self._safe_save_trace(
-            trace_id=trace_id,
-            child_id=child_id,
-            session_id=session_id,
-            node_name=node_name,
-            action_type=task,
-            input_summary=_summarize_value(effective_payload),
-            output_summary=_summarize_value(result),
-            status="succeeded",
-            duration_ms=duration_ms,
-            metadata_json=_build_trace_metadata(task, effective_payload, result),
-        )
+        trace_kwargs = {
+            "trace_id": trace_id,
+            "child_id": child_id,
+            "session_id": session_id,
+            "node_name": node_name,
+            "action_type": task,
+            "input_summary": _summarize_value(effective_payload),
+            "output_summary": _summarize_value(result),
+            "status": "succeeded",
+            "duration_ms": duration_ms,
+            "metadata_json": _build_trace_metadata(task, effective_payload, result),
+        }
+        if self._should_background_persistence(task):
+            self._schedule_background_task(
+                self._safe_save_trace(**trace_kwargs),
+                label=f"{task}:trace",
+            )
+        else:
+            await self._safe_save_trace(**trace_kwargs)
 
         if snapshot_type and (child_id or session_id):
-            await self._safe_save_snapshot(
-                child_id=child_id,
-                session_id=session_id,
-                snapshot_type=snapshot_type,
-                input_summary=_summarize_value(effective_payload),
-                snapshot_json={"task": task, "traceId": trace_id, "result": result},
-            )
+            snapshot_kwargs = {
+                "child_id": child_id,
+                "session_id": session_id,
+                "snapshot_type": snapshot_type,
+                "input_summary": _summarize_value(effective_payload),
+                "snapshot_json": {"task": task, "traceId": trace_id, "result": result},
+            }
+            if self._should_background_persistence(task):
+                self._schedule_background_task(
+                    self._safe_save_snapshot(**snapshot_kwargs),
+                    label=f"{task}:snapshot",
+                )
+            else:
+                await self._safe_save_snapshot(**snapshot_kwargs)
 
         return result
 

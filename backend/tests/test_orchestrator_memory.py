@@ -2,6 +2,7 @@ import asyncio
 
 from app.core.config import get_settings
 from app.db.repositories import reset_repository_bundle_cache
+from app.services import orchestrator as orchestrator_module
 from app.services.orchestrator import build_memory_service, build_orchestrator, reset_orchestrator_runtime
 
 
@@ -306,3 +307,101 @@ def test_memory_service_remember_persists_session_message(monkeypatch):
         and item.snapshot_json["message"]["content"] == "guardian still needs to send the evening follow-up"
         for item in snapshots
     )
+
+
+def test_parent_storybook_skips_request_thread_memory_and_background_persistence(monkeypatch):
+    configure_memory_backend(monkeypatch, backend="memory")
+    orchestrator = build_orchestrator()
+    release_persistence = asyncio.Event()
+    trace_calls: list[dict] = []
+    snapshot_calls: list[dict] = []
+
+    async def fail_memory_hydrate(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("parent-storybook should skip request-thread memory hydration")
+
+    async def blocked_save_agent_trace(**kwargs):
+        trace_calls.append(kwargs)
+        await release_persistence.wait()
+
+    async def blocked_save_snapshot(**kwargs):
+        snapshot_calls.append(kwargs)
+        await release_persistence.wait()
+
+    async def stub_run_parent_storybook(payload: dict) -> dict:
+        return {
+            "storyId": "storybook-parent-storybook-hotfix",
+            "childId": "c-1",
+            "mode": "storybook",
+            "title": "Story title",
+            "summary": "Story summary",
+            "moral": "Story moral",
+            "parentNote": "Story parent note",
+            "source": "rule",
+            "fallback": True,
+            "generatedAt": "2026-04-11T00:00:00Z",
+            "providerMeta": {
+                "provider": "parent-storybook-rule",
+                "mode": "fallback",
+                "transport": "fastapi-brain",
+                "imageProvider": "storybook-dynamic-fallback",
+                "audioProvider": "storybook-mock-preview",
+                "requestSource": payload.get("requestSource", "parent-storybook"),
+                "highlightCount": 4,
+                "sceneCount": 6,
+            },
+            "scenes": [],
+        }
+
+    monkeypatch.setattr(
+        orchestrator.memory,
+        "build_memory_context_for_prompt",
+        fail_memory_hydrate,
+    )
+    monkeypatch.setattr(orchestrator.memory, "save_agent_trace", blocked_save_agent_trace)
+    monkeypatch.setattr(
+        orchestrator.memory,
+        "save_consultation_snapshot",
+        blocked_save_snapshot,
+    )
+    monkeypatch.setattr(
+        "app.services.orchestrator.run_parent_storybook",
+        stub_run_parent_storybook,
+    )
+
+    payload = {
+        "childId": "c-1",
+        "requestSource": "pytest-parent-storybook",
+        "debugMemory": True,
+        "snapshot": {
+            "child": {
+                "id": "c-1",
+                "name": "Lin Xiaoyu",
+                "className": "Sunrise Class",
+            }
+        },
+        "highlightCandidates": [],
+    }
+
+    async def run_case() -> dict:
+        result = await asyncio.wait_for(orchestrator.parent_storybook(payload), timeout=0.2)
+        assert result["memoryMeta"]["memory_context_used"] is False
+        assert result["memoryMeta"]["memory_context_count"] == 0
+        assert result["memoryMeta"]["memory_context_skipped_reason"] == "parent-storybook-request-thread-sla"
+        await asyncio.sleep(0)
+        assert len(trace_calls) == 1
+        assert len(snapshot_calls) == 1
+        assert trace_calls[0]["metadata_json"]["memory_context_used"] is False
+        assert (
+            trace_calls[0]["metadata_json"]["memory_context_skipped_reason"]
+            == "parent-storybook-request-thread-sla"
+        )
+        release_persistence.set()
+        pending = list(orchestrator_module._BACKGROUND_TASKS)
+        if pending:
+            await asyncio.gather(*pending)
+        return result
+
+    result = asyncio.run(run_case())
+
+    assert result["providerMeta"]["transport"] == "fastapi-brain"

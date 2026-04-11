@@ -88,6 +88,7 @@ STYLE_PALETTES: dict[str, dict[str, str]] = {
 STORYBOOK_MEDIA_WARM_JOB_TTL_SECONDS = 20 * 60
 STORYBOOK_MEDIA_WARM_MAX_WORKERS = 4
 STORYBOOK_MEDIA_WARM_PRIORITY_SCENE_COUNT = 2
+STORYBOOK_FIRST_BYTE_HIGHLIGHT_LIMIT = 4
 
 MediaWarmJobStatus = Literal["disabled", "idle", "warming", "ready", "partial", "error"]
 
@@ -152,6 +153,116 @@ def _normalize_keywords(values: Any) -> list[str]:
         seen.add(text)
         result.append(text)
     return result[:4]
+
+
+def _resolve_storybook_first_byte_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    child = snapshot.get("child")
+    growth = snapshot.get("summary", {}).get("growth") if isinstance(snapshot.get("summary"), dict) else {}
+    feedback = snapshot.get("summary", {}).get("feedback") if isinstance(snapshot.get("summary"), dict) else {}
+    return {
+        "child": {
+            "id": _normalize_text(child.get("id")) if isinstance(child, dict) else "",
+            "name": _normalize_text(child.get("name")) if isinstance(child, dict) else "",
+            "className": _normalize_text(child.get("className")) if isinstance(child, dict) else "",
+        },
+        "summary": {
+            "growth": {
+                "recordCount": int(growth.get("recordCount") or 0) if isinstance(growth, dict) else 0,
+                "topCategories": growth.get("topCategories") if isinstance(growth.get("topCategories"), list) else [],
+            },
+            "feedback": {
+                "count": int(feedback.get("count") or 0) if isinstance(feedback, dict) else 0,
+                "keywords": feedback.get("keywords") if isinstance(feedback.get("keywords"), list) else [],
+            },
+        },
+        "ruleFallback": snapshot.get("ruleFallback") if isinstance(snapshot.get("ruleFallback"), list) else [],
+    }
+
+
+def _resolve_storybook_first_byte_consultation(payload: dict[str, Any]) -> dict[str, Any] | None:
+    consultation = _payload_get(payload, "latestConsultation", "latest_consultation")
+    if not isinstance(consultation, dict):
+        return None
+    follow_up = consultation.get("followUp48h")
+    first_follow_up = ""
+    if isinstance(follow_up, list) and follow_up:
+        first_follow_up = _normalize_text(follow_up[0])
+    return {
+        "summary": _normalize_text(consultation.get("summary")),
+        "homeAction": _normalize_text(consultation.get("homeAction")),
+        "followUp48h": [first_follow_up] if first_follow_up else [],
+    }
+
+
+def _resolve_storybook_first_byte_intervention(payload: dict[str, Any]) -> dict[str, Any] | None:
+    intervention = _payload_get(payload, "latestInterventionCard", "latest_intervention_card")
+    if not isinstance(intervention, dict):
+        return None
+    return {
+        "tonightHomeAction": _normalize_text(intervention.get("tonightHomeAction")),
+        "tomorrowObservationPoint": _normalize_text(intervention.get("tomorrowObservationPoint")),
+        "reviewIn48h": _normalize_text(intervention.get("reviewIn48h")),
+    }
+
+
+def _resolve_storybook_first_byte_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    snapshot = _payload_get(payload, "snapshot")
+    raw_highlights = _payload_get(payload, "highlightCandidates", "highlight_candidates")
+    first_byte_highlights: list[dict[str, Any]] = []
+    if isinstance(raw_highlights, list):
+        for item in raw_highlights:
+            if not isinstance(item, dict):
+                continue
+            if not _normalize_text(item.get("detail") or item.get("title")):
+                continue
+            first_byte_highlights.append(dict(item))
+            if len(first_byte_highlights) >= STORYBOOK_FIRST_BYTE_HIGHLIGHT_LIMIT:
+                break
+    first_byte_payload: dict[str, Any] = {
+        "snapshot": _resolve_storybook_first_byte_snapshot(snapshot if isinstance(snapshot, dict) else {}),
+        "highlightCandidates": first_byte_highlights,
+    }
+
+    for key in (
+        "childId",
+        "child_id",
+        "storyMode",
+        "story_mode",
+        "generationMode",
+        "generation_mode",
+        "manualTheme",
+        "manual_theme",
+        "manualPrompt",
+        "manual_prompt",
+        "pageCount",
+        "page_count",
+        "goalKeywords",
+        "goal_keywords",
+        "protagonistArchetype",
+        "protagonist_archetype",
+        "requestSource",
+        "request_source",
+        "stylePreset",
+        "style_preset",
+        "styleMode",
+        "style_mode",
+        "customStylePrompt",
+        "custom_style_prompt",
+        "customStyleNegativePrompt",
+        "custom_style_negative_prompt",
+        "stylePrompt",
+        "style_prompt",
+    ):
+        if key in payload:
+            first_byte_payload[key] = payload.get(key)
+
+    consultation = _resolve_storybook_first_byte_consultation(payload)
+    if consultation is not None:
+        first_byte_payload["latestConsultation"] = consultation
+    intervention = _resolve_storybook_first_byte_intervention(payload)
+    if intervention is not None:
+        first_byte_payload["latestInterventionCard"] = intervention
+    return first_byte_payload
 
 
 def _stable_hash(seed: str, *, length: int = 12) -> str:
@@ -1710,6 +1821,8 @@ def _render_cached_or_fallback(
     fallback_provider: Any,
     kwargs: dict[str, Any],
 ) -> tuple[Any, bool]:
+    # First-byte SLA depends on miss -> immediate fallback. Live providers may only be read from cache here;
+    # uncached media must be warmed asynchronously after the story skeleton has already returned.
     cached_result = _read_cached_scene(provider=primary_provider, kwargs=kwargs)
     if cached_result is not None:
         return cached_result, True
@@ -2255,7 +2368,8 @@ def _resolve_audio_delivery(scenes: list[dict[str, Any]]) -> Literal["real", "mi
 
 async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     request_started_at = monotonic()
-    snapshot = _payload_get(payload, "snapshot")
+    first_byte_payload = _resolve_storybook_first_byte_payload(payload)
+    snapshot = _payload_get(first_byte_payload, "snapshot")
     if not isinstance(snapshot, dict):
         raise ValueError("snapshot is required")
 
@@ -2263,9 +2377,9 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(child, dict):
         raise ValueError("snapshot.child is required")
 
-    child_id = _normalize_text(child.get("id")) or _normalize_text(_payload_get(payload, "childId", "child_id")) or "storybook-guest"
-    generation_mode = _resolve_generation_mode(payload)
-    highlights = _build_highlights(payload, generation_mode)
+    child_id = _normalize_text(child.get("id")) or _normalize_text(_payload_get(first_byte_payload, "childId", "child_id")) or "storybook-guest"
+    generation_mode = _resolve_generation_mode(first_byte_payload)
+    highlights = _build_highlights(first_byte_payload, generation_mode)
     if not highlights:
         highlights = [
             {
@@ -2277,10 +2391,10 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             }
         ]
 
-    ingredients = _build_story_ingredients(payload, snapshot, child, highlights)
+    ingredients = _build_story_ingredients(first_byte_payload, snapshot, child, highlights)
     scenes_blueprint = _build_story_scenes_v2(ingredients)
     style_preset = ingredients["style_recipe"]["preset"]
-    story_seed = _build_story_seed(payload, ingredients, child_id)
+    story_seed = _build_story_seed(first_byte_payload, ingredients, child_id)
     story_id = f"storybook-{_stable_hash(story_seed)}"
     generated_at = _stable_timestamp(story_seed)
 

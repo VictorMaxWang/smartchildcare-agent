@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from threading import Event
+from time import perf_counter
 
 from app.providers.base import ProviderResult
 from app.services import parent_storybook_service
 from app.services.parent_storybook_service import await_storybook_media_warming, run_parent_storybook
 from app.services.storybook_media_cache import get_storybook_media_cache
+from conftest import load_storybook_fixture
 
 
 def _base_payload() -> dict:
@@ -52,6 +55,12 @@ def _base_payload() -> dict:
         },
         "requestSource": "pytest",
     }
+
+
+def _heavy_payload(request_source_suffix: str) -> dict:
+    payload = load_storybook_fixture("page-recording-c1-bedtime.json")
+    payload["requestSource"] = f"{payload['requestSource']}:{request_source_suffix}"
+    return payload
 
 
 def _read_cached_scene_svg(story: dict, scene_index: int = 0) -> str:
@@ -239,6 +248,108 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
     assert result["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "ready"
 
 
+def test_parent_storybook_service_heavy_payload_returns_first_byte_without_waiting_for_live_provider(
+    monkeypatch,
+):
+    class _BlockingImageProvider:
+        provider_name = "vivo-story-image"
+
+        def __init__(self) -> None:
+            self.release = Event()
+            self.calls: list[dict] = []
+
+        def read_cached_scene(self, **kwargs):
+            del kwargs
+            return None
+
+        def render_scene(self, **kwargs):
+            self.calls.append(kwargs)
+            self.release.wait(timeout=1.0)
+            return ProviderResult(
+                output={
+                    "imagePrompt": kwargs["image_prompt"],
+                    "imageUrl": "https://cdn.example.com/story-heavy.png",
+                    "assetRef": "https://cdn.example.com/story-heavy.png",
+                    "imageStatus": "ready",
+                },
+                provider=self.provider_name,
+                mode="live",
+                source="vivo",
+                model="blocking-image-v1",
+            )
+
+    image_provider = _BlockingImageProvider()
+    audio_provider = _SceneProvider(provider_name="storybook-mock-preview", audio_status="fallback")
+    get_storybook_media_cache()._entries.clear()
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = _heavy_payload("service-first-byte")
+    started_at = perf_counter()
+    first = asyncio.run(run_parent_storybook(payload))
+    elapsed = perf_counter() - started_at
+
+    assert elapsed < 0.4
+    assert first["providerMeta"]["transport"] == "fastapi-brain"
+    assert first["providerMeta"]["mode"] == "fallback"
+    assert first["providerMeta"]["imageDelivery"] == "dynamic-fallback"
+    assert first["providerMeta"]["audioDelivery"] == "preview-only"
+    assert first["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first["providerMeta"]["highlightCount"] == 4
+    assert first["providerMeta"]["sceneCount"] == 6
+    assert all(scene["imageSourceKind"] == "dynamic-fallback" for scene in first["scenes"])
+
+    image_provider.release.set()
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+
+def test_parent_storybook_service_heavy_payload_warms_into_mixed(monkeypatch):
+    image_provider = _SceneProvider(provider_name="vivo-story-image", image_status="ready")
+    audio_provider = _SceneProvider(provider_name="storybook-mock-preview", audio_status="fallback")
+    get_storybook_media_cache()._entries.clear()
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = _heavy_payload("service-mixed")
+    first = asyncio.run(run_parent_storybook(payload))
+    assert first["providerMeta"]["mode"] == "fallback"
+    assert first["providerMeta"]["transport"] == "fastapi-brain"
+    assert first["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "disabled"
+    assert first["providerMeta"]["highlightCount"] == 4
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+    result = asyncio.run(run_parent_storybook(payload))
+
+    assert result["providerMeta"]["mode"] == "mixed"
+    assert result["providerMeta"]["realProvider"] is True
+    assert result["fallback"] is True
+    assert result["providerMeta"]["imageDelivery"] == "real"
+    assert result["providerMeta"]["audioDelivery"] == "preview-only"
+    assert result["providerMeta"]["transport"] == "fastapi-brain"
+    assert result["providerMeta"]["requestSource"] == payload["requestSource"]
+    assert result["stylePreset"] == "sunrise-watercolor"
+    assert result["providerMeta"]["highlightCount"] == 4
+    assert result["providerMeta"]["sceneCount"] == 6
+    assert result["scenes"][0]["imageStatus"] == "ready"
+    assert result["scenes"][0]["audioStatus"] == "fallback"
+    assert result["scenes"][0]["imageSourceKind"] == "real"
+
+
 def test_parent_storybook_service_surfaces_media_warm_error_diagnostics(monkeypatch):
     image_provider = _SceneProvider(provider_name="vivo-story-image", image_status="ready")
 
@@ -319,7 +430,9 @@ def test_parent_storybook_service_includes_style_preset_in_prompt(monkeypatch):
 
     payload = _base_payload()
     payload["stylePreset"] = "moonlit-cutout"
+    payload["requestSource"] = "pytest-style-preset"
     result = asyncio.run(run_parent_storybook(payload))
+    assert await_storybook_media_warming(result["storyId"], timeout_seconds=2.0) is True
 
     assert result["stylePreset"] == "moonlit-cutout"
     assert "月夜剪纸" in image_provider.calls[0]["image_prompt"]
@@ -343,8 +456,10 @@ def test_parent_storybook_service_custom_style_overrides_preset_prompt(monkeypat
     payload["styleMode"] = "custom"
     payload["customStylePrompt"] = "梦幻3D儿童绘本，柔焦，浅景深"
     payload["customStyleNegativePrompt"] = "不要照片感、不要复杂背景"
+    payload["requestSource"] = "pytest-style-custom"
 
-    asyncio.run(run_parent_storybook(payload))
+    result = asyncio.run(run_parent_storybook(payload))
+    assert await_storybook_media_warming(result["storyId"], timeout_seconds=2.0) is True
 
     assert "梦幻3D儿童绘本" in image_provider.calls[0]["image_prompt"]
     assert "不要照片感" in image_provider.calls[0]["image_prompt"]

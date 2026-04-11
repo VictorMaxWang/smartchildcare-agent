@@ -8,6 +8,7 @@ from app.main import app
 from app.providers.base import ProviderResult
 from app.schemas.parent_storybook import ParentStoryBookRequest
 from app.services.parent_storybook_service import await_storybook_media_warming
+from conftest import load_storybook_fixture
 
 
 client = TestClient(app)
@@ -34,6 +35,12 @@ def build_payload() -> dict:
         "requestSource": "pytest-endpoint",
         "stylePreset": "forest-crayon",
     }
+
+
+def build_heavy_payload(request_source_suffix: str) -> dict:
+    payload = load_storybook_fixture("page-recording-c1-bedtime.json")
+    payload["requestSource"] = f"{payload['requestSource']}:{request_source_suffix}"
+    return payload
 
 
 class _WarmableProvider:
@@ -122,6 +129,28 @@ def test_parent_storybook_endpoint_returns_structured_response():
     assert body["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
     assert body["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
     assert body["providerMeta"]["diagnostics"]["brain"]["retryStrategy"] == "none"
+
+
+def test_parent_storybook_endpoint_accepts_heavy_page_payload_fixture():
+    payload = build_heavy_payload("endpoint-heavy")
+
+    response = client.post("/api/v1/agents/parent/storybook", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["storyId"]
+    assert body["childId"] == "c-1"
+    assert body["mode"] == "storybook"
+    assert body["stylePreset"] == "sunrise-watercolor"
+    assert len(body["scenes"]) == 6
+    assert body["providerMeta"]["transport"] == "fastapi-brain"
+    assert body["providerMeta"]["mode"] == "fallback"
+    assert body["providerMeta"]["requestSource"] == payload["requestSource"]
+    assert body["providerMeta"]["highlightCount"] == 4
+    assert body["providerMeta"]["sceneCount"] == 6
+    assert body["providerMeta"]["imageDelivery"] == "dynamic-fallback"
+    assert body["providerMeta"]["audioDelivery"] == "preview-only"
+    assert body["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
 
 
 def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
