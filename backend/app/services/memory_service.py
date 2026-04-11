@@ -140,6 +140,199 @@ def _extract_bridge_follow_up_seed(bridge_writeback: dict[str, Any] | None) -> d
     return None
 
 
+def _ensure_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _normalize_feedback_execution_status(value: Any, executed: Any) -> str:
+    normalized = (_coerce_string(value) or "").lower()
+    if normalized in {"not_started", "partial", "completed", "unable_to_execute"}:
+        return normalized
+    if executed is True:
+        return "completed"
+    if executed is False:
+        return "not_started"
+    return "not_started"
+
+
+def _normalize_feedback_improvement_status(value: Any) -> str:
+    if isinstance(value, bool):
+        return "clear_improvement" if value else "no_change"
+
+    normalized = (_coerce_string(value) or "").lower()
+    if normalized in {
+        "no_change",
+        "slight_improvement",
+        "clear_improvement",
+        "worse",
+        "unknown",
+    }:
+        return normalized
+    if normalized in {"partial", "slight"}:
+        return "slight_improvement"
+    if normalized in {"yes", "clear"}:
+        return "clear_improvement"
+    if normalized in {"no", "false"}:
+        return "no_change"
+    return "unknown"
+
+
+def _normalize_feedback_candidate(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    feedback_id = _coerce_string(value.get("feedbackId")) or _coerce_string(value.get("id"))
+    child_id = _coerce_string(value.get("childId"))
+    submitted_at = _coerce_string(value.get("submittedAt")) or _coerce_string(value.get("date"))
+    execution_status = _normalize_feedback_execution_status(
+        value.get("executionStatus"),
+        value.get("executed"),
+    )
+    improvement_status = _normalize_feedback_improvement_status(
+        value.get("improvementStatus") if value.get("improvementStatus") is not None else value.get("improved")
+    )
+    notes = (
+        _coerce_string(value.get("notes"))
+        or _coerce_string(value.get("content"))
+        or _coerce_string(value.get("freeNote"))
+    )
+    child_reaction = _coerce_string(value.get("childReaction")) or "neutral"
+    barriers = [
+        text
+        for text in (_coerce_string(item) for item in _ensure_list(value.get("barriers")))
+        if text
+    ]
+    related_task_id = _coerce_string(value.get("relatedTaskId")) or _coerce_string(value.get("interventionCardId"))
+    related_consultation_id = _coerce_string(value.get("relatedConsultationId")) or _coerce_string(value.get("consultationId"))
+
+    if not any([feedback_id, child_id, submitted_at, notes, barriers, related_task_id, related_consultation_id]):
+        return None
+
+    return {
+        "feedbackId": feedback_id,
+        "childId": child_id,
+        "submittedAt": submitted_at,
+        "executionStatus": execution_status,
+        "improvementStatus": improvement_status,
+        "childReaction": child_reaction,
+        "notes": notes,
+        "barriers": barriers,
+        "relatedTaskId": related_task_id,
+        "relatedConsultationId": related_consultation_id,
+    }
+
+
+def _append_feedback_candidates(target: list[dict[str, Any]], value: Any) -> None:
+    if isinstance(value, list):
+        for item in value:
+            normalized = _normalize_feedback_candidate(item)
+            if normalized:
+                target.append(normalized)
+        return
+
+    normalized = _normalize_feedback_candidate(value)
+    if normalized:
+        target.append(normalized)
+
+
+def _extract_feedback_candidates(snapshot_json: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(snapshot_json, dict):
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    result = snapshot_json.get("result") if isinstance(snapshot_json.get("result"), dict) else None
+    recent_details = snapshot_json.get("recentDetails") if isinstance(snapshot_json.get("recentDetails"), dict) else None
+    result_recent_details = result.get("recentDetails") if isinstance(result, dict) and isinstance(result.get("recentDetails"), dict) else None
+
+    for value in (
+        snapshot_json.get("latestFeedback"),
+        snapshot_json.get("feedback"),
+        recent_details.get("feedback") if isinstance(recent_details, dict) else None,
+        result.get("latestFeedback") if isinstance(result, dict) else None,
+        result.get("feedback") if isinstance(result, dict) else None,
+        result_recent_details.get("feedback") if isinstance(result_recent_details, dict) else None,
+    ):
+        _append_feedback_candidates(candidates, value)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = (
+            candidate.get("feedbackId")
+            or ":".join(
+                [
+                    candidate.get("childId") or "",
+                    candidate.get("submittedAt") or "",
+                    candidate.get("notes") or "",
+                ]
+            )
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _format_feedback_signal(candidate: dict[str, Any]) -> str | None:
+    parts = [f"Execution={candidate.get('executionStatus') or 'unknown'}"]
+
+    improvement_status = _coerce_string(candidate.get("improvementStatus"))
+    if improvement_status and improvement_status != "unknown":
+        parts.append(f"Improvement={improvement_status}")
+
+    child_reaction = _coerce_string(candidate.get("childReaction"))
+    if child_reaction and child_reaction != "neutral":
+        parts.append(f"Reaction={child_reaction}")
+
+    barriers = [
+        text
+        for text in (_coerce_string(item) for item in _ensure_list(candidate.get("barriers")))
+        if text
+    ]
+    if barriers:
+        parts.append(f"Barriers={'; '.join(barriers[:2])}")
+
+    notes = _coerce_string(candidate.get("notes"))
+    if notes:
+        parts.append(notes)
+
+    rendered = " | ".join(part for part in parts if part)
+    return f"Parent feedback: {rendered}" if rendered else None
+
+
+def _feedback_open_loop_hints(snapshot_json: dict[str, Any] | None, limit: int = 2) -> list[str]:
+    hints: list[str] = []
+    for candidate in _extract_feedback_candidates(snapshot_json):
+        execution_status = _coerce_string(candidate.get("executionStatus")) or "unknown"
+        improvement_status = _coerce_string(candidate.get("improvementStatus")) or "unknown"
+        notes = _coerce_string(candidate.get("notes"))
+        barriers = [
+            text
+            for text in (_coerce_string(item) for item in _ensure_list(candidate.get("barriers")))
+            if text
+        ]
+
+        if execution_status in {"not_started", "partial", "unable_to_execute"}:
+            if notes:
+                hints.append(f"Parent feedback needs follow-up: {notes}")
+            elif barriers:
+                hints.append(f"Parent feedback execution barrier: {barriers[0]}")
+            else:
+                hints.append(f"Parent feedback remains {execution_status}.")
+
+        if improvement_status in {"no_change", "worse"}:
+            if notes:
+                hints.append(f"Parent feedback indicates no clear improvement: {notes}")
+            else:
+                hints.append(f"Parent feedback indicates {improvement_status}.")
+
+        if barriers:
+            hints.append(f"Parent feedback barrier: {barriers[0]}")
+
+    return _take_unique(hints, limit=limit)
+
+
 def _snapshot_summary(record: AgentStateSnapshotRecord) -> str | None:
     bridge_writeback = _extract_bridge_writeback(record.snapshot_json if isinstance(record.snapshot_json, dict) else None)
     if isinstance(bridge_writeback, dict):
@@ -172,6 +365,19 @@ def _snapshot_summary(record: AgentStateSnapshotRecord) -> str | None:
             final_conclusion = _coerce_string(coordinator.get("finalConclusion"))
             if final_conclusion:
                 return final_conclusion
+
+    feedback_signals = [
+        signal
+        for signal in (
+            _format_feedback_signal(candidate)
+            for candidate in _extract_feedback_candidates(
+                record.snapshot_json if isinstance(record.snapshot_json, dict) else None
+            )
+        )
+        if signal
+    ]
+    if feedback_signals:
+        return feedback_signals[0]
 
     return _coerce_string(record.input_summary) or _safe_json_text(record.snapshot_json)
 
@@ -212,9 +418,8 @@ def _open_loops(
     loops: list[str] = []
 
     for record in snapshots:
-        bridge_writeback = _extract_bridge_writeback(
-            record.snapshot_json if isinstance(record.snapshot_json, dict) else None
-        )
+        snapshot_json = record.snapshot_json if isinstance(record.snapshot_json, dict) else None
+        bridge_writeback = _extract_bridge_writeback(snapshot_json)
         follow_up_seed = _extract_bridge_follow_up_seed(bridge_writeback)
         if isinstance(follow_up_seed, dict):
             review_in_48h = _coerce_string(
@@ -230,32 +435,36 @@ def _open_loops(
             if tomorrow_observation_point:
                 loops.append(f"Bridge next observation: {tomorrow_observation_point}")
 
+        loops.extend(_feedback_open_loop_hints(snapshot_json, limit=2))
+
         if record.snapshot_type != "consultation-result":
             continue
 
-        result = record.snapshot_json.get("result") if isinstance(record.snapshot_json, dict) else None
+        result = snapshot_json.get("result") if isinstance(snapshot_json, dict) else None
         if not isinstance(result, dict):
             continue
 
         for key, prefix in (
-            ("todayInSchoolActions", "园内待继续"),
-            ("tonightAtHomeActions", "家庭侧待验证"),
-            ("nextCheckpoints", "后续观察点"),
+            ("todayInSchoolActions", "School actions"),
+            ("tonightAtHomeActions", "Home actions"),
+            ("nextCheckpoints", "Next checkpoints"),
         ):
             value = result.get(key)
             if isinstance(value, list):
                 for item in value[:2]:
                     text = _coerce_string(item)
                     if text:
-                        loops.append(f"{prefix}：{text}")
+                        loops.append(f"{prefix}: {text}")
 
         review_in_48h = _coerce_string(result.get("reviewIn48h"))
         if review_in_48h:
-            loops.append(f"48小时复查：{review_in_48h}")
+            loops.append(f"48h review: {review_in_48h}")
 
     for record in traces:
         if record.status in {"failed", "fallback"}:
-            loops.append(f"最近一次 {record.node_name} 走了{record.status}，建议复看本轮闭环输出。")
+            loops.append(
+                f"Recent trace {record.node_name} ended with {record.status}; review the previous loop output."
+            )
 
     return _take_unique(loops, limit=limit)
 
@@ -266,10 +475,14 @@ def _snapshot_signals(records: list[AgentStateSnapshotRecord], limit: int = 6) -
         summary = _snapshot_summary(record)
         if not summary:
             continue
-        prefix = "最近会诊" if record.snapshot_type == "consultation-result" else "最近上下文"
-        signals.append(f"{prefix}：{summary}")
+        prefix = "Recent consultation" if record.snapshot_type == "consultation-result" else "Recent context"
+        signals.append(f"{prefix}: {summary}")
+        snapshot_json = record.snapshot_json if isinstance(record.snapshot_json, dict) else None
+        for candidate in _extract_feedback_candidates(snapshot_json)[:2]:
+            feedback_signal = _format_feedback_signal(candidate)
+            if feedback_signal:
+                signals.append(feedback_signal)
     return _take_unique(signals, limit=limit)
-
 
 def _trace_signals(records: list[AgentTraceLogRecord], limit: int = 6) -> list[str]:
     signals: list[str] = []

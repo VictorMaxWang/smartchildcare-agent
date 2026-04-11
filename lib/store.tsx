@@ -4,6 +4,14 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { normalizeAppStateSnapshot, type AppStateSnapshot } from "@/lib/persistence/snapshot";
 import type { ConsultationResult, MobileDraft, MobileDraftSyncStatus, ReminderItem } from "@/lib/ai/types";
 import {
+  normalizeGuardianFeedbackCollection,
+  normalizeParentStructuredFeedback,
+} from "@/lib/feedback/normalize";
+import type {
+  GuardianFeedback as SharedGuardianFeedback,
+  GuardianFeedbackInput,
+} from "@/lib/feedback/types";
+import {
   DEMO_ACCOUNTS,
   type AccountRole,
   type DemoAccount,
@@ -18,6 +26,7 @@ import type { CanonicalTask, TaskOwnerRole } from "@/lib/tasks/types";
 import { buildDemoConsultationResults } from "@/lib/demo/demo-consultations";
 
 export type Role = AccountRole;
+export type GuardianFeedback = SharedGuardianFeedback;
 export type Gender = "男" | "女";
 export type AgeBand = "0–6个月" | "6–12个月" | "1–3岁" | "3–6岁" | "6–7岁";
 export type BehaviorCategory =
@@ -185,23 +194,6 @@ export interface TaskCheckInRecord {
   date: string;
 }
 
-export interface GuardianFeedback {
-  id: string;
-  childId: string;
-  date: string;
-  status: CollaborationStatus;
-  content: string;
-  interventionCardId?: string;
-  sourceWorkflow?: "parent-agent" | "teacher-agent" | "manual";
-  executionStatus?: "completed" | "partial" | "not_started";
-  executed?: boolean;
-  childReaction?: string;
-  improved?: boolean | "unknown";
-  freeNote?: string;
-  createdBy: string;
-  createdByRole: Role;
-}
-
 export interface SmartInsight {
   id: string;
   title: string;
@@ -342,7 +334,7 @@ interface AppContextType {
   addGrowthRecord: (input: AddGrowthRecordInput) => void;
 
   guardianFeedbacks: GuardianFeedback[];
-  addGuardianFeedback: (input: Omit<GuardianFeedback, "id" | "createdBy" | "createdByRole">) => void;
+  addGuardianFeedback: (input: GuardianFeedbackInput) => void;
   interventionCards: InterventionCard[];
   consultations: ConsultationResult[];
   mobileDrafts: MobileDraft[];
@@ -417,10 +409,13 @@ function readScopedSnapshot(namespace: string, fallbackSnapshot: AppStateSnapsho
       readStorage<MealRecord[]>(buildScopedStorageKey(namespace, "meals"), fallbackSnapshot.meals)
     ),
     growth: readStorage<GrowthRecord[]>(buildScopedStorageKey(namespace, "growth"), fallbackSnapshot.growth),
-    feedback: readStorage<GuardianFeedback[]>(
-      buildScopedStorageKey(namespace, "feedback"),
-      fallbackSnapshot.feedback
-    ),
+    feedback:
+      normalizeGuardianFeedbackCollection(
+        readStorage<unknown[]>(
+          buildScopedStorageKey(namespace, "feedback"),
+          fallbackSnapshot.feedback
+        )
+      ) ?? fallbackSnapshot.feedback,
     health: readStorage<HealthCheckRecord[]>(
       buildScopedStorageKey(namespace, "health"),
       fallbackSnapshot.health
@@ -1767,7 +1762,7 @@ const INITIAL_GROWTH: GrowthRecord[] = [
   },
 ];
 
-const INITIAL_FEEDBACKS: GuardianFeedback[] = [
+const INITIAL_FEEDBACKS: GuardianFeedbackInput[] = [
   {
     id: "fb-1",
     childId: "c-1",
@@ -2019,7 +2014,10 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
       selectedIndicators: record.selectedIndicators ? [...record.selectedIndicators] : undefined,
       mediaUrls: record.mediaUrls ? [...record.mediaUrls] : undefined,
     })),
-    feedback: ALL_INITIAL_FEEDBACKS.map((record) => ({ ...record })),
+    feedback:
+      normalizeGuardianFeedbackCollection(
+        ALL_INITIAL_FEEDBACKS.map((record) => ({ ...record }))
+      ) ?? [],
     health: ALL_INITIAL_HEALTH_CHECKS.map((record) => ({ ...record })),
     taskCheckIns: ALL_INITIAL_TASK_CHECKINS.map((record) => ({ ...record })),
     interventionCards: [],
@@ -2142,6 +2140,7 @@ function shiftDemoSnapshotDates(snapshot: AppStateSnapshot, targetToday: string)
     feedback: snapshot.feedback.map((record) => ({
       ...record,
       date: shiftDemoDate(record.date, diffDays),
+      submittedAt: shiftDemoDate(record.submittedAt, diffDays),
     })),
     health: snapshot.health.map((record) => ({
       ...record,
@@ -2427,7 +2426,7 @@ function buildExtraGrowthRecord(childId: string, seed: ExtraGrowthSeed): GrowthR
   };
 }
 
-function buildExtraFeedbackRecord(childId: string, seed: ExtraFeedbackSeed): GuardianFeedback {
+function buildExtraFeedbackRecord(childId: string, seed: ExtraFeedbackSeed): GuardianFeedbackInput {
   return {
     id: `fb-${childId}-${seed.idSuffix}`,
     childId,
@@ -4079,7 +4078,7 @@ const EXTRA_GROWTH: GrowthRecord[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
   seed.growthSeeds.map((growthSeed) => buildExtraGrowthRecord(seed.child.id, growthSeed))
 );
 
-const EXTRA_FEEDBACKS: GuardianFeedback[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
+const EXTRA_FEEDBACKS: GuardianFeedbackInput[] = EXTRA_CHILD_SEEDS.flatMap((seed) =>
   seed.feedbackSeeds.map((feedbackSeed) => buildExtraFeedbackRecord(seed.child.id, feedbackSeed))
 );
 
@@ -4702,16 +4701,29 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     ]);
   }, [currentUser.name, currentUser.role]);
 
-  const addGuardianFeedback = useCallback((input: Omit<GuardianFeedback, "id" | "createdBy" | "createdByRole">) => {
-    setGuardianFeedbacks((prev) => [
-      {
-        ...input,
-        id: createClientId("fb"),
-        createdBy: currentUser.name,
-        createdByRole: currentUser.role,
-      },
-      ...prev,
-    ]);
+  const addGuardianFeedback = useCallback((input: GuardianFeedbackInput) => {
+    setGuardianFeedbacks((prev) => {
+      const feedbackId = createClientId("fb");
+      const normalized = normalizeParentStructuredFeedback(
+        {
+          ...input,
+          feedbackId,
+          id: feedbackId,
+          createdBy: currentUser.name,
+          createdByRole: currentUser.role,
+        },
+        {
+          feedbackId,
+          createdBy: currentUser.name,
+          createdByRole: currentUser.role,
+          submittedAt: input.submittedAt ?? input.date,
+          allowGenerateId: false,
+        }
+      );
+
+      if (!normalized) return prev;
+      return normalizeGuardianFeedbackCollection([normalized, ...prev]) ?? [normalized, ...prev];
+    });
   }, [currentUser.name, currentUser.role]);
 
   const upsertInterventionCard = useCallback((card: InterventionCard) => {

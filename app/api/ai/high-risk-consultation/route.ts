@@ -20,6 +20,7 @@ import {
   type BrainForwardResult,
 } from "@/lib/server/brain-client";
 import { normalizeHighRiskConsultationResult } from "@/lib/consultation/normalize-result";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
 function isRecordArray(value: unknown) {
@@ -135,15 +136,7 @@ export async function POST(request: Request) {
   const consultationInput = buildConsultationInputFromSnapshot({
     snapshot: suggestionSnapshot,
     latestFeedback: childContext.latestFeedback
-      ? {
-          date: childContext.latestFeedback.date,
-          status: childContext.latestFeedback.status,
-          content: childContext.latestFeedback.content,
-          executed: childContext.latestFeedback.executed,
-          childReaction: childContext.latestFeedback.childReaction,
-          improved: childContext.latestFeedback.improved,
-          freeNote: childContext.latestFeedback.freeNote,
-        }
+      ? (toFollowUpFeedbackLite(childContext.latestFeedback) ?? undefined)
       : undefined,
     focusReasons: [...autoContext.focusReasons, ...teacherSignals],
     source: "teacher",

@@ -1,3 +1,11 @@
+import type {
+  ParentFeedbackChildReaction,
+  ParentFeedbackExecutionStatus,
+  ParentFeedbackExecutorRole,
+  ParentFeedbackImprovementStatus,
+  ParentStructuredFeedbackSourceRole,
+} from "@/lib/feedback/types";
+
 export type TaskStatus = "pending" | "in_progress" | "completed" | "overdue";
 export type TaskType = "intervention" | "follow_up";
 export type TaskSourceType =
@@ -95,15 +103,27 @@ export interface TaskEscalationSuggestion {
 }
 
 export interface TaskEscalationFeedbackSignal {
+  feedbackId?: string;
   childId: string;
   date: string;
+  submittedAt?: string;
   interventionCardId?: string;
+  relatedTaskId?: string;
+  relatedConsultationId?: string;
+  sourceRole?: ParentStructuredFeedbackSourceRole;
+  sourceChannel?: string;
   status?: string;
   content?: string;
-  executionStatus?: "completed" | "partial" | "not_started";
+  executionStatus?: ParentFeedbackExecutionStatus;
+  executionCount?: number;
   executed?: boolean;
+  executorRole?: ParentFeedbackExecutorRole;
+  childReaction?: ParentFeedbackChildReaction | string;
   improved?: boolean | "unknown";
+  improvementStatus?: ParentFeedbackImprovementStatus;
   freeNote?: string;
+  notes?: string;
+  barriers?: string[];
 }
 
 export interface TaskEscalationTaskCheckInSignal {

@@ -2,9 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
   AssistantEntryCard,
   InlineLinkButton,
@@ -15,9 +16,11 @@ import {
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { buildParentAgentChildContext, buildParentAgentSuggestionResult, buildParentChildSuggestionSnapshot, type ParentAgentResult } from "@/lib/agent/parent-agent";
+import { buildParentWeeklyReportSnapshot } from "@/lib/agent/parent-weekly-report";
 import { resolveDefaultParentStoryBookDemoSeedId } from "@/lib/agent/parent-storybook-demo-seeds";
+import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
-import type { AiSuggestionResponse } from "@/lib/ai/types";
+import type { AiSuggestionResponse, WeeklyReportResponse } from "@/lib/ai/types";
 import { buildParentHomeViewModel } from "@/lib/view-models/role-home";
 import { formatDisplayDate, getAgeText, useApp } from "@/lib/store";
 
@@ -51,6 +54,10 @@ export default function ParentHomePage() {
   const feed = getParentFeed()[0];
   const viewModel = buildParentHomeViewModel(feed);
   const [previewResult, setPreviewResult] = useState<ParentAgentResult | null>(null);
+  const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReportResponse | null>(null);
+  const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
+  const [weeklyReportError, setWeeklyReportError] = useState<string | null>(null);
   const latestInterventionCard = feed ? getChildInterventionCard(feed.child.id) : undefined;
   const latestConsultation = feed ? getLatestConsultationForChild(feed.child.id) : undefined;
 
@@ -72,6 +79,20 @@ export default function ParentHomePage() {
   const snapshot = useMemo(
     () => (previewContext ? buildParentChildSuggestionSnapshot(previewContext) : null),
     [previewContext]
+  );
+  const weeklyReportPayload = useMemo(
+    () =>
+      previewContext
+        ? {
+            role: "parent" as const,
+            snapshot: buildParentWeeklyReportSnapshot(previewContext),
+          }
+        : null,
+    [previewContext]
+  );
+  const weeklyReportKey = useMemo(
+    () => (weeklyReportPayload ? JSON.stringify(weeklyReportPayload) : null),
+    [weeklyReportPayload]
   );
 
   useEffect(() => {
@@ -114,6 +135,58 @@ export default function ParentHomePage() {
       controller.abort();
     };
   }, [previewContext, snapshot]);
+
+  useEffect(() => {
+    const payload = weeklyReportPayload;
+    const key = weeklyReportKey;
+    if (!payload || !key) return;
+    const resolvedPayload: NonNullable<typeof weeklyReportPayload> = payload;
+    const resolvedKey: NonNullable<typeof weeklyReportKey> = key;
+
+    const cached = weeklyReportCacheRef.current.get(resolvedKey);
+    if (cached) {
+      setWeeklyReport(cached);
+      setWeeklyReportError(null);
+      setWeeklyReportLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadWeeklyReportPreview() {
+      setWeeklyReportLoading(true);
+      setWeeklyReportError(null);
+
+      try {
+        const data = await fetchWeeklyReport(resolvedPayload, {
+          signal: controller.signal,
+        });
+
+        if (!cancelled) {
+          weeklyReportCacheRef.current.set(resolvedKey, data);
+          setWeeklyReport(data);
+        }
+      } catch (requestError) {
+        if (!cancelled && !controller.signal.aborted) {
+          setWeeklyReportError(
+            requestError instanceof Error ? requestError.message : "家长周报预览暂时不可用"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setWeeklyReportLoading(false);
+        }
+      }
+    }
+
+    void loadWeeklyReportPreview();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [weeklyReportKey, weeklyReportPayload]);
 
   if (!viewModel || !feed || !previewContext) {
     return (
@@ -354,6 +427,19 @@ export default function ParentHomePage() {
                 </div>
               </div>
             </SectionCard>
+
+            <WeeklyReportPreviewCard
+              title="本周家庭周报预览"
+              description="只讲本周变化、一个最重要的家庭行动和需反馈问题，不把首页改成大工作流页。"
+              role="parent"
+              periodLabel={weeklyReportPayload?.snapshot.periodLabel ?? "近7天"}
+              report={weeklyReport}
+              loading={weeklyReportLoading}
+              error={weeklyReportError}
+              ctaHref={`${agentHref}#feedback`}
+              ctaLabel="去反馈本周变化"
+              ctaVariant="secondary"
+            />
 
             <SectionCard
               title="最近 7 天趋势入口"

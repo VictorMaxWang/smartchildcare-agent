@@ -10,6 +10,8 @@ import type {
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
+import type { GuardianFeedback } from "@/lib/feedback/types";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate } from "@/lib/date";
 import {
   buildInterventionCardFromCommunication,
@@ -69,19 +71,7 @@ export interface TeacherAgentGrowthSnapshot {
   reviewStatus?: "待复查" | "已完成";
 }
 
-export interface TeacherAgentGuardianFeedbackSnapshot {
-  id: string;
-  childId: string;
-  date: string;
-  status: string;
-  content: string;
-  interventionCardId?: string;
-  sourceWorkflow?: "parent-agent" | "teacher-agent" | "manual";
-  executed?: boolean;
-  childReaction?: string;
-  improved?: boolean | "unknown";
-  freeNote?: string;
-}
+export type TeacherAgentGuardianFeedbackSnapshot = GuardianFeedback;
 
 export interface TeacherAgentRequestPayload {
   workflow: TeacherAgentWorkflowType;
@@ -618,11 +608,10 @@ export function buildTeacherChildSuggestionSnapshot(context: TeacherAgentChildCo
         followUpAction: record.followUpAction,
         reviewStatus: record.reviewStatus,
       })),
-      feedback: context.recentFeedbacks.slice(0, 5).map((record) => ({
-        date: record.date,
-        status: record.status,
-        content: record.content,
-      })),
+      feedback: context.recentFeedbacks
+        .slice(0, 5)
+        .map((record) => toFollowUpFeedbackLite(record))
+        .filter((item): item is NonNullable<typeof item> => Boolean(item)),
     },
     ruleFallback: buildChildRuleFallback(context),
   };

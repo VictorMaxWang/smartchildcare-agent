@@ -357,3 +357,100 @@ test("materialized canonical tasks escalate multiple pending tasks for the same 
   assert.equal(highest?.escalationLevel, "director_attention");
   assert.ok(highest?.triggeredRules.includes("multiple_pending_tasks_same_child"));
 });
+
+test("materializeTasksFromLegacy matches structured feedback by relatedTaskId before interventionCardId fallback", () => {
+  const { parentTask } = buildInterventionTasksFromCard({
+    id: "card-related-task",
+    title: "Sleep support",
+    targetChildId: "c-1",
+    tonightHomeAction: "Keep the bedtime routine stable.",
+    reviewIn48h: "Review bedtime stability in 48 hours.",
+    createdAt: "2026-04-10T08:00:00.000Z",
+    updatedAt: "2026-04-10T08:00:00.000Z",
+  });
+
+  const tasks = materializeTasksFromLegacy({
+    existingTasks: [parentTask],
+    guardianFeedbacks: [
+      {
+        feedbackId: "feedback-related-task",
+        id: "feedback-related-task",
+        childId: "c-1",
+        sourceRole: "parent",
+        sourceChannel: "manual",
+        relatedTaskId: parentTask.taskId,
+        executionStatus: "completed",
+        executorRole: "parent",
+        childReaction: "accepted",
+        improvementStatus: "clear_improvement",
+        barriers: [],
+        notes: "The structured feedback closed the parent task.",
+        attachments: {},
+        submittedAt: "2026-04-10T20:00:00.000Z",
+        source: { kind: "structured", workflow: "manual" },
+        fallback: {},
+        date: "2026-04-10T20:00:00.000Z",
+        status: "completed",
+        content: "Legacy mirror content.",
+        interventionCardId: "unrelated-card-id",
+        executed: true,
+        improved: true,
+        createdBy: "Parent",
+        createdByRole: "parent" as never,
+      },
+    ],
+    now: "2026-04-10T21:00:00.000Z",
+  });
+
+  assert.equal(tasks[0]?.taskId, parentTask.taskId);
+  assert.equal(tasks[0]?.status, "completed");
+  assert.equal(tasks[0]?.completionSummary, "The structured feedback closed the parent task.");
+});
+
+test("materializeTasksFromLegacy keeps unable_to_execute feedback as incomplete evidence", () => {
+  const tasks = materializeTasksFromLegacy({
+    interventionCards: [
+      {
+        id: "card-unable",
+        title: "Hydration support",
+        targetChildId: "c-1",
+        tonightHomeAction: "Prompt water intake after dinner.",
+        reviewIn48h: "Review hydration follow-up in 48 hours.",
+        createdAt: "2026-04-10T08:00:00.000Z",
+        updatedAt: "2026-04-10T08:00:00.000Z",
+      },
+    ],
+    guardianFeedbacks: [
+      {
+        feedbackId: "feedback-unable",
+        id: "feedback-unable",
+        childId: "c-1",
+        sourceRole: "parent",
+        sourceChannel: "manual",
+        executionStatus: "unable_to_execute",
+        executorRole: "parent",
+        childReaction: "resisted",
+        improvementStatus: "worse",
+        barriers: ["Child got sick"],
+        notes: "Could not execute the hydration step tonight.",
+        attachments: {},
+        submittedAt: "2026-04-10T20:00:00.000Z",
+        source: { kind: "structured", workflow: "manual" },
+        fallback: {},
+        date: "2026-04-10T20:00:00.000Z",
+        status: "unable_to_execute",
+        content: "Could not execute the hydration step tonight.",
+        interventionCardId: "card-unable",
+        executed: false,
+        improved: false,
+        createdBy: "Parent",
+        createdByRole: "parent" as never,
+      },
+    ],
+    now: "2026-04-10T21:00:00.000Z",
+  });
+
+  const parentTask = tasks.find((task) => task.ownerRole === "parent");
+  assert.equal(parentTask?.status, "overdue");
+  assert.equal(parentTask?.completionSummary, "Could not execute the hydration step tonight.");
+});

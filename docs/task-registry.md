@@ -538,13 +538,15 @@
 - 问题定义：只有 schema / generator 没有展示层，周报依然无法形成角色差异化体验。
 - 目标效果：Teacher / Admin / Parent 至少各有一个入口看到对应版本的行动化周报。
 - 主要触达层：Teacher / Parent / Admin 页面与周报组件
-- 建议触达模块：`app/admin/agent/page.tsx`、`app/teacher/agent/page.tsx`、`app/parent/page.tsx` 或 `app/parent/agent/page.tsx`
+- 建议触达模块：`app/teacher/agent/page.tsx`、`app/admin/page.tsx`、`app/parent/page.tsx`、`components/weekly-report/WeeklyReportPreviewCard.tsx`、`lib/agent/weekly-report-client.ts`、`lib/agent/parent-weekly-report.ts`
 - 推荐前置依赖：`T26`
-- 推荐 subagents：`frontend_architect + reviewer_tester`
+- 推荐 subagents：`repo_mapper + frontend_architect + backend_architect + reviewer_tester`
 - 是否适合并行：中
 - 最小验收方式：三角色至少各有一个入口能看到对应版本周报
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-11 更新：Teacher 预览挂到 `/teacher/agent` 主列工作区后，Admin 预览挂到 `/admin` 首页既有周摘要卡位，Parent 预览挂到 `/parent` 首页成长记录后、趋势入口前；三端统一通过 `/api/ai/weekly-report` 拉取，Teacher / Admin 复用既有 snapshot builder，Parent 仅补薄 adapter 与最小前端 caller，不改 T26 backend schema，也不重做 `/admin/agent?action=weekly-report` 主工作区。
+- 2026-04-11 边界：本轮达到 code-ready / 可截图接入标准，但仍依赖 route 返回的 `source` 诚实表述，不能夸大为 fully live；若未完成完整 walkthrough / 录屏复验，不升为 `Demo-ready`。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T28｜Admin 质量驾驶舱：metrics engine
@@ -612,3 +614,12 @@
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
 - 当前状态：`Planned`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
+
+### T15 Parent Structured Feedback (2026-04-11)
+
+- Scope: schema / store / normalize / compatibility layer only. No T16 form UI, no T17 full writeback consumer, and no storybook or Admin main layout changes in this wave.
+- Single source of truth: keep using the existing `feedback[]` bucket and upgrade each item into one canonical `ParentStructuredFeedbackRecord` that also carries legacy guardian-feedback mirror fields.
+- Stable canonical fields: `feedbackId`, `childId`, `sourceRole`, `sourceChannel`, `relatedTaskId`, `relatedConsultationId`, `executionStatus`, `executionCount`, `executorRole`, `childReaction`, `improvementStatus`, `barriers`, `notes`, `attachments`, `submittedAt`, `source`, `fallback`.
+- Legacy compatibility stays additive on the same record: `id`, `date`, `status`, `content`, `interventionCardId`, `sourceWorkflow`, `executed`, `improved`, `freeNote`, `createdBy`, `createdByRole`.
+- Minimum bridge points landed: `lib/store.tsx`, `lib/persistence/snapshot.ts`, `app/api/state/route.ts`, follow-up payload normalization, task/escalation matching, backend child history/timeline reads, and memory continuity helpers.
+- Follow-on ownership: `T16` handles form/UI capture. `T17` handles stronger writeback, trend, weekly-report, and memory consumption. `T21` can consume canonical feedback signals directly after this compatibility layer.

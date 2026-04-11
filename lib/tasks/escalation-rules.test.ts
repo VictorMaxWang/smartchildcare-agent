@@ -354,3 +354,62 @@ test("pickHighestPriorityEscalation prefers higher levels over lower ones", () =
   assert.equal(highest?.taskId, "task-director");
   assert.equal(highest?.escalationLevel, "director_attention");
 });
+
+test("evaluateTaskEscalations matches negative feedback by relatedTaskId before legacy card linkage", () => {
+  const { parentTask, followUpTask } = buildTaskPair({
+    id: "card-related-negative",
+    createdAt: "2026-04-10T08:00:00.000Z",
+  });
+
+  const suggestions = evaluateTaskEscalations({
+    tasks: [parentTask, { ...followUpTask, status: "completed", completedAt: "2026-04-10T11:00:00.000Z" }],
+    guardianFeedbacks: [
+      {
+        childId: parentTask.childId,
+        date: "2026-04-10T10:30:00.000Z",
+        submittedAt: "2026-04-10T10:30:00.000Z",
+        relatedTaskId: parentTask.taskId,
+        interventionCardId: "different-card",
+        executionStatus: "unable_to_execute",
+        improvementStatus: "worse",
+        executed: false,
+        improved: false,
+        notes: "The parent could not execute the intervention tonight.",
+        barriers: ["Child had a fever"],
+      },
+    ],
+    now: "2026-04-10T12:00:00.000Z",
+  });
+
+  const suggestion = byTaskId(suggestions, parentTask.taskId);
+  assert.equal(suggestion?.escalationLevel, "reconsult_required");
+  assert.ok(suggestion?.triggeredRules.includes("guardian_feedback_negative_no_improvement"));
+  assert.equal(suggestion?.ownerRole, "admin");
+});
+
+test("evaluateTaskEscalations treats no_change improvement as negative structured feedback", () => {
+  const { parentTask, followUpTask } = buildTaskPair({
+    id: "card-no-change",
+    createdAt: "2026-04-10T08:00:00.000Z",
+  });
+
+  const suggestions = evaluateTaskEscalations({
+    tasks: [parentTask, { ...followUpTask, status: "completed", completedAt: "2026-04-10T11:00:00.000Z" }],
+    guardianFeedbacks: [
+      {
+        childId: parentTask.childId,
+        date: "2026-04-10T10:45:00.000Z",
+        interventionCardId: "card-no-change",
+        executionStatus: "partial",
+        improvementStatus: "no_change",
+        executed: true,
+        improved: false,
+      },
+    ],
+    now: "2026-04-10T12:00:00.000Z",
+  });
+
+  const suggestion = byTaskId(suggestions, parentTask.taskId);
+  assert.equal(suggestion?.escalationLevel, "reconsult_required");
+  assert.ok(suggestion?.triggeredRules.includes("guardian_feedback_negative_no_improvement"));
+});

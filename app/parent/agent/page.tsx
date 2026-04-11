@@ -51,6 +51,7 @@ import type {
   ParentTrendQueryResponse,
 } from "@/lib/ai/types";
 import { getLocalToday } from "@/lib/date";
+import type { ParentFeedbackChildReaction } from "@/lib/feedback/types";
 import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
 import { buildReminderItems } from "@/lib/mobile/reminders";
 import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
@@ -95,6 +96,49 @@ function buildFeedbackContent(input: {
   ].filter(Boolean);
 
   return parts.join("；");
+}
+
+function resolveFeedbackChildReaction(input: {
+  text: string;
+  executionStatus: "completed" | "partial" | "not_started" | null;
+  improved: boolean | "unknown";
+}): ParentFeedbackChildReaction {
+  const normalized = input.text.trim().toLowerCase();
+
+  if (
+    normalized.includes("抗拒") ||
+    normalized.includes("拒绝") ||
+    normalized.includes("哭") ||
+    normalized.includes("闹") ||
+    normalized.includes("resist")
+  ) {
+    return "resisted";
+  }
+
+  if (
+    normalized.includes("改善") ||
+    normalized.includes("更好") ||
+    normalized.includes("稳定") ||
+    normalized.includes("主动") ||
+    normalized.includes("顺利") ||
+    normalized.includes("improv")
+  ) {
+    return "improved";
+  }
+
+  if (
+    normalized.includes("配合") ||
+    normalized.includes("接受") ||
+    normalized.includes("愿意") ||
+    normalized.includes("accepted")
+  ) {
+    return "accepted";
+  }
+
+  if (input.improved === true) return "improved";
+  if (input.executionStatus === "not_started") return "resisted";
+
+  return "neutral";
 }
 
 export default function ParentAgentPage() {
@@ -635,6 +679,12 @@ export default function ParentAgentPage() {
       return;
     }
 
+    const structuredChildReaction = resolveFeedbackChildReaction({
+      text: childReaction,
+      executionStatus: feedbackExecutionStatus,
+      improved: feedbackImproved,
+    });
+
     addGuardianFeedback({
       childId: selectedFeed.child.id,
       date: getLocalToday(),
@@ -649,7 +699,7 @@ export default function ParentAgentPage() {
       sourceWorkflow: "parent-agent",
       executionStatus: feedbackExecutionStatus,
       executed: feedbackExecutionStatus !== "not_started",
-      childReaction: childReaction.trim(),
+      childReaction: structuredChildReaction,
       improved: feedbackImproved,
       freeNote: freeNote.trim() || undefined,
     });

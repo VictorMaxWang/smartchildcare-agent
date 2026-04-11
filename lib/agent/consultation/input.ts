@@ -8,6 +8,7 @@ import type {
   MemoryContextMeta,
   PromptMemoryContext,
 } from "@/lib/ai/types";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { buildContinuityNotes } from "@/lib/memory/prompt-context";
 
 export interface ConsultationPriorityHint {
@@ -78,13 +79,7 @@ export function buildConsultationInputFromSnapshot(
   const recentFeedback = params.snapshot.recentDetails?.feedback?.[0];
   const latestFeedback =
     params.latestFeedback ??
-    (recentFeedback
-      ? {
-          date: recentFeedback.date,
-          status: recentFeedback.status,
-          content: recentFeedback.content,
-        }
-      : undefined);
+    (recentFeedback ? (toFollowUpFeedbackLite(recentFeedback) ?? undefined) : undefined);
   const focusReasons = takeUnique([
     ...(params.focusReasons ?? []),
     ...continuityNotes,

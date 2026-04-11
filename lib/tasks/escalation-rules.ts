@@ -86,9 +86,12 @@ function isReminderPending(reminder: TaskEscalationReminderSignal) {
 
 function isNegativeFeedback(feedback: TaskEscalationFeedbackSignal) {
   return (
+    feedback.improvementStatus === "worse" ||
+    feedback.improvementStatus === "no_change" ||
     feedback.improved === false ||
     feedback.executed === false ||
-    feedback.executionStatus === "not_started"
+    feedback.executionStatus === "not_started" ||
+    feedback.executionStatus === "unable_to_execute"
   );
 }
 
@@ -176,6 +179,9 @@ function getLatestCheckInAt(task: CanonicalTask, taskCheckIns: TaskEscalationTas
 
 function matchesFeedbackToTask(task: CanonicalTask, feedback: TaskEscalationFeedbackSignal) {
   if (task.childId !== feedback.childId) return false;
+  if (feedback.relatedTaskId) {
+    return feedback.relatedTaskId === task.taskId;
+  }
   const cardId = task.legacyRefs?.interventionCardId;
   if (feedback.interventionCardId && cardId) {
     return feedback.interventionCardId === cardId;

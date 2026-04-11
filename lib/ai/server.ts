@@ -11,6 +11,7 @@ import {
   buildMockInstitutionSuggestion,
   buildMockWeeklyReport,
 } from "@/lib/ai/mock";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { resolveWeeklyReportRole } from "@/lib/ai/weekly-report";
 import type {
   AiFollowUpPayload,
@@ -86,6 +87,8 @@ export function isValidFollowUpPayload(payload: unknown): payload is AiFollowUpP
             (item as Record<string, unknown>).role === "assistant") &&
           typeof (item as Record<string, unknown>).content === "string"
       ));
+  const latestFeedbackValid =
+    obj.latestFeedback === undefined || Boolean(toFollowUpFeedbackLite(obj.latestFeedback));
 
   return (
     (isValidSuggestionSnapshot(obj.snapshot) || isValidInstitutionSuggestionSnapshot(obj.snapshot)) &&
@@ -93,7 +96,8 @@ export function isValidFollowUpPayload(payload: unknown): payload is AiFollowUpP
     obj.suggestionTitle.trim().length > 0 &&
     typeof obj.question === "string" &&
     obj.question.trim().length > 0 &&
-    historyValid
+    historyValid &&
+    latestFeedbackValid
   );
 }
 

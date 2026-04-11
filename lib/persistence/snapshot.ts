@@ -2,13 +2,16 @@ import type {
   AttendanceRecord,
   Child,
   GrowthRecord,
-  GuardianFeedback,
   HealthCheckRecord,
   MealRecord,
   TaskCheckInRecord,
 } from "@/lib/store";
 import type { ConsultationResult, MobileDraft, ReminderItem } from "@/lib/ai/types";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
+import {
+  normalizeGuardianFeedbackCollection,
+} from "@/lib/feedback/normalize";
+import type { GuardianFeedback } from "@/lib/feedback/types";
 import { materializeTasksFromLegacy } from "@/lib/tasks/task-model";
 import type { CanonicalTask } from "@/lib/tasks/types";
 
@@ -60,39 +63,6 @@ function isGrowthRecord(value: unknown): value is GrowthRecord {
     hasStringId(value) &&
     typeof (value as { childId?: unknown }).childId === "string" &&
     typeof (value as { description?: unknown }).description === "string"
-  );
-}
-
-function isGuardianFeedback(value: unknown): value is GuardianFeedback {
-  const item = value as {
-    childId?: unknown;
-    content?: unknown;
-    interventionCardId?: unknown;
-    sourceWorkflow?: unknown;
-    executed?: unknown;
-    childReaction?: unknown;
-    improved?: unknown;
-    freeNote?: unknown;
-    executionStatus?: unknown;
-  };
-
-  return (
-    hasStringId(value) &&
-    typeof item.childId === "string" &&
-    typeof item.content === "string" &&
-    (item.interventionCardId === undefined || typeof item.interventionCardId === "string") &&
-    (item.sourceWorkflow === undefined ||
-      item.sourceWorkflow === "parent-agent" ||
-      item.sourceWorkflow === "teacher-agent" ||
-      item.sourceWorkflow === "manual") &&
-    (item.executed === undefined || typeof item.executed === "boolean") &&
-    (item.childReaction === undefined || typeof item.childReaction === "string") &&
-    (item.improved === undefined || typeof item.improved === "boolean" || item.improved === "unknown") &&
-    (item.freeNote === undefined || typeof item.freeNote === "string") &&
-    (item.executionStatus === undefined ||
-      item.executionStatus === "completed" ||
-      item.executionStatus === "partial" ||
-      item.executionStatus === "not_started")
   );
 }
 
@@ -237,13 +207,17 @@ function isArrayOf<T>(value: unknown, predicate: (item: unknown) => item is T) {
 export function normalizeAppStateSnapshot(value: unknown): AppStateSnapshot | null {
   if (!value || typeof value !== "object") return null;
   const data = value as Record<string, unknown>;
+  const normalizedFeedback = normalizeGuardianFeedbackCollection(data.feedback, {
+    strict: true,
+    allowGenerateId: false,
+  });
 
   if (
     !isArrayOf(data.children, isChild) ||
     !isArrayOf(data.attendance, isAttendanceRecord) ||
     !isArrayOf(data.meals, isMealRecord) ||
     !isArrayOf(data.growth, isGrowthRecord) ||
-    !isArrayOf(data.feedback, isGuardianFeedback) ||
+    !normalizedFeedback ||
     !isArrayOf(data.health, isHealthCheckRecord) ||
     !isArrayOf(data.taskCheckIns, isTaskCheckInRecord) ||
     !isArrayOf(data.interventionCards, isInterventionCard) ||
@@ -264,7 +238,7 @@ export function normalizeAppStateSnapshot(value: unknown): AppStateSnapshot | nu
     attendance: data.attendance,
     meals: data.meals,
     growth: data.growth,
-    feedback: data.feedback,
+    feedback: normalizedFeedback,
     health: data.health,
     taskCheckIns: data.taskCheckIns,
     interventionCards: data.interventionCards,
@@ -276,7 +250,7 @@ export function normalizeAppStateSnapshot(value: unknown): AppStateSnapshot | nu
       interventionCards: data.interventionCards,
       consultations: data.consultations,
       reminders: data.reminders,
-      guardianFeedbacks: data.feedback,
+      guardianFeedbacks: normalizedFeedback,
       taskCheckIns: data.taskCheckIns,
       now: data.updatedAt,
     }),

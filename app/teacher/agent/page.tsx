@@ -7,6 +7,7 @@ import EmptyState from "@/components/EmptyState";
 import TeacherDraftConfirmationPanel from "@/components/teacher/TeacherDraftConfirmationPanel";
 import TeacherAgentHistoryList, { type TeacherAgentHistoryListItem } from "@/components/teacher/TeacherAgentHistoryList";
 import TeacherAgentResultCard from "@/components/teacher/TeacherAgentResultCard";
+import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
   AgentWorkspaceCard,
   InlineLinkButton,
@@ -21,13 +22,15 @@ import {
   buildTeacherAgentChildContext,
   buildTeacherAgentClassContext,
   buildTeacherAgentResultSummary,
+  buildTeacherWeeklyReportSnapshot,
   pickTeacherAgentDefaultChildId,
   type TeacherAgentMode,
   type TeacherAgentRequestPayload,
   type TeacherAgentResult,
   type TeacherAgentWorkflowType,
 } from "@/lib/agent/teacher-agent";
-import type { MobileDraft } from "@/lib/ai/types";
+import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
+import type { MobileDraft, WeeklyReportResponse } from "@/lib/ai/types";
 import { buildTeacherVoiceUnderstandFallback } from "@/lib/ai/teacher-voice-understand";
 import {
   createMobileDraft,
@@ -97,6 +100,7 @@ export default function TeacherAgentPage() {
   const preloadHandledRef = useRef<string | null>(null);
   const queryChildHandledRef = useRef<string | null>(null);
   const sourceDraftChildHandledRef = useRef<string | null>(null);
+  const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
   const [selectedSourceDraftId, setSelectedSourceDraftId] = useState<string | null>(
     null
   );
@@ -127,6 +131,20 @@ export default function TeacherAgentPage() {
     [classContext, defaultChildId, selectedChildId]
   );
   const latestResult = history.at(-1)?.result ?? null;
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReportResponse | null>(null);
+  const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
+  const [weeklyReportError, setWeeklyReportError] = useState<string | null>(null);
+  const weeklyReportPayload = useMemo(
+    () => ({
+      role: "teacher" as const,
+      snapshot: buildTeacherWeeklyReportSnapshot(classContext),
+    }),
+    [classContext]
+  );
+  const weeklyReportKey = useMemo(
+    () => JSON.stringify(weeklyReportPayload),
+    [weeklyReportPayload]
+  );
   const teacherRoleDrafts = useMemo(
     () => mobileDrafts.filter((draft) => draft.targetRole === "teacher"),
     [mobileDrafts]
@@ -606,6 +624,54 @@ export default function TeacherAgentPage() {
     void runWorkflow(preloadAction);
   }, [preloadAction, runWorkflow, visibleChildren.length]);
 
+  useEffect(() => {
+    if (visibleChildren.length === 0) return;
+
+    const cached = weeklyReportCacheRef.current.get(weeklyReportKey);
+    if (cached) {
+      setWeeklyReport(cached);
+      setWeeklyReportError(null);
+      setWeeklyReportLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadWeeklyReportPreview() {
+      setWeeklyReportLoading(true);
+      setWeeklyReportError(null);
+
+      try {
+        const data = await fetchWeeklyReport(weeklyReportPayload, {
+          signal: controller.signal,
+        });
+
+        if (!cancelled) {
+          weeklyReportCacheRef.current.set(weeklyReportKey, data);
+          setWeeklyReport(data);
+        }
+      } catch (requestError) {
+        if (!cancelled && !controller.signal.aborted) {
+          setWeeklyReportError(
+            requestError instanceof Error ? requestError.message : "教师周报预览暂时不可用"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setWeeklyReportLoading(false);
+        }
+      }
+    }
+
+    void loadWeeklyReportPreview();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [visibleChildren.length, weeklyReportKey, weeklyReportPayload]);
+
   if (visibleChildren.length === 0) {
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -903,6 +969,18 @@ export default function TeacherAgentPage() {
                 {isLoading ? <p className="mt-4 text-sm text-slate-500">教师 Agent 正在编排工作流，请稍候…</p> : null}
               </div>
             </AgentWorkspaceCard>
+
+            <WeeklyReportPreviewCard
+              title="本周班级周报预览"
+              description="先看本周异常、补录项和下周重点观察，再决定是否继续进入教师周报工作流。"
+              role="teacher"
+              periodLabel={weeklyReportPayload.snapshot.periodLabel}
+              report={weeklyReport}
+              loading={weeklyReportLoading}
+              error={weeklyReportError}
+              ctaHref="/teacher/agent?action=weekly-summary"
+              ctaLabel="生成完整本周总结"
+            />
 
             <SectionCard title="历史记录" description="保留当前会话内已生成的工作流结果摘要。">
               <TeacherAgentHistoryList items={history} />

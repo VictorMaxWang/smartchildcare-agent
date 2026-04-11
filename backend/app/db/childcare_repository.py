@@ -29,6 +29,30 @@ DEFAULT_SNAPSHOT_KEYS = (
     "tasks",
 )
 
+FEEDBACK_EXECUTION_STATUSES = {
+    "not_started",
+    "partial",
+    "completed",
+    "unable_to_execute",
+}
+FEEDBACK_IMPROVEMENT_STATUSES = {
+    "no_change",
+    "slight_improvement",
+    "clear_improvement",
+    "worse",
+    "unknown",
+}
+FEEDBACK_CHILD_REACTIONS = {"resisted", "neutral", "accepted", "improved"}
+FEEDBACK_EXECUTOR_ROLES = {
+    "parent",
+    "grandparent",
+    "caregiver",
+    "teacher",
+    "mixed",
+}
+FEEDBACK_SOURCE_ROLES = {"parent", "teacher", "admin", "system", "unknown"}
+LEGACY_FEEDBACK_WORKFLOWS = {"parent-agent", "teacher-agent", "manual"}
+
 
 def _create_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
@@ -102,10 +126,394 @@ def _unique_strings(values: list[str]) -> list[str]:
     return result
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return _unique_strings([str(item) for item in value if _coerce_string(item)])
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, float) and value > 0:
+        return int(round(value))
+    text = _coerce_string(value)
+    if not text:
+        return None
+    try:
+        parsed = int(float(text))
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _normalize_feedback_source_role(
+    value: Any,
+    *,
+    created_by_role: Any = None,
+    source_workflow: Any = None,
+) -> str:
+    direct = (_coerce_string(value) or "").lower()
+    if direct in FEEDBACK_SOURCE_ROLES:
+        return direct
+
+    workflow = (_coerce_string(source_workflow) or "").lower()
+    if workflow == "parent-agent":
+        return "parent"
+    if workflow == "teacher-agent":
+        return "teacher"
+
+    created_role = (_coerce_string(created_by_role) or "").lower()
+    if "parent" in created_role:
+        return "parent"
+    if "teacher" in created_role:
+        return "teacher"
+    if "admin" in created_role or "director" in created_role:
+        return "admin"
+    if "system" in created_role:
+        return "system"
+
+
+def _normalize_feedback_source_channel(value: Any, *, source_workflow: Any = None) -> str:
+    return _coerce_string(value) or _coerce_string(source_workflow) or "manual"
+
+
+def _normalize_feedback_execution_status(value: Any, *, executed: Any = None) -> str:
+    normalized = (_coerce_string(value) or "").lower()
+    if normalized in FEEDBACK_EXECUTION_STATUSES:
+        return normalized
+    if executed is True:
+        return "completed"
+    return "not_started"
+
+
+def _normalize_feedback_improvement_status(value: Any) -> str:
+    if isinstance(value, bool):
+        return "clear_improvement" if value else "no_change"
+
+    normalized = (_coerce_string(value) or "").lower()
+    if normalized in FEEDBACK_IMPROVEMENT_STATUSES:
+        return normalized
+    if normalized in {"partial", "slight"}:
+        return "slight_improvement"
+    if normalized in {"yes", "clear"}:
+        return "clear_improvement"
+    if normalized in {"no", "false"}:
+        return "no_change"
+    return "unknown"
+
+
+def _normalize_feedback_child_reaction(value: Any, *, improvement_status: str) -> str:
+    normalized = (_coerce_string(value) or "").lower()
+    if normalized in FEEDBACK_CHILD_REACTIONS:
+        return normalized
+    if any(token in normalized for token in ("resist", "cry")):
+        return "resisted"
+    if any(token in normalized for token in ("accept", "cooperate")):
+        return "accepted"
+    if improvement_status in {"slight_improvement", "clear_improvement"} or any(
+        token in normalized for token in ("improve", "better")
+    ):
+        return "improved"
+    return "neutral"
+
+
+def _normalize_feedback_executor_role(value: Any, *, source_role: str) -> str:
+    normalized = (_coerce_string(value) or "").lower()
+    if normalized in FEEDBACK_EXECUTOR_ROLES:
+        return normalized
+    if source_role == "teacher":
+        return "teacher"
+    if source_role == "parent":
+        return "parent"
+    return "mixed"
+
+
+def _normalize_feedback_attachment_refs(value: Any) -> list[dict[str, Any]]:
+    raw_items = value if isinstance(value, list) else ([value] if value is not None else [])
+    refs: list[dict[str, Any]] = []
+    for item in raw_items:
+        if isinstance(item, str):
+            text = _coerce_string(item)
+            if text:
+                refs.append({"url": text})
+            continue
+        if not isinstance(item, dict):
+            continue
+        normalized = {
+            "url": _coerce_string(item.get("url")),
+            "name": _coerce_string(item.get("name")),
+            "mimeType": _coerce_string(item.get("mimeType")),
+            "sizeBytes": item.get("sizeBytes") if isinstance(item.get("sizeBytes"), (int, float)) else None,
+            "meta": copy.deepcopy(item.get("meta")) if isinstance(item.get("meta"), dict) else None,
+        }
+        if any(value is not None for value in normalized.values()):
+            refs.append({key: value for key, value in normalized.items() if value is not None})
+    return refs
+
+
+def _normalize_feedback_attachments(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    voice = _normalize_feedback_attachment_refs(value.get("voice"))
+    image = _normalize_feedback_attachment_refs(value.get("image"))
+    attachments: dict[str, Any] = {}
+    if voice:
+        attachments["voice"] = voice
+    if image:
+        attachments["image"] = image
+    return attachments
+
+
+def _map_feedback_improvement_to_legacy(value: str) -> bool | str:
+    if value in {"clear_improvement", "slight_improvement"}:
+        return True
+    if value in {"no_change", "worse"}:
+        return False
+    return "unknown"
+
+
+def _map_feedback_execution_to_legacy(value: str, *, explicit_executed: Any) -> bool:
+    if isinstance(explicit_executed, bool):
+        return explicit_executed
+    return value in {"completed", "partial"}
+
+
+def _build_feedback_legacy_content(
+    *,
+    explicit_content: Any,
+    notes: str,
+    barriers: list[str],
+    child_reaction: str,
+    improvement_status: str,
+    execution_status: str,
+) -> str:
+    explicit = _coerce_string(explicit_content)
+    if explicit:
+        return explicit
+
+    parts = [notes]
+    if barriers:
+        parts.append(f"Barriers: {'; '.join(barriers)}")
+    if child_reaction != "neutral":
+        parts.append(f"Child reaction: {child_reaction}")
+    if improvement_status != "unknown":
+        parts.append(f"Improvement: {improvement_status}")
+    parts.append(f"Execution: {execution_status}")
+    return " | ".join(part for part in parts if part) or "Parent feedback recorded."
+
+
+def _build_feedback_legacy_free_note(*, explicit_free_note: Any, notes: str, barriers: list[str]) -> str | None:
+    explicit = _coerce_string(explicit_free_note)
+    if explicit:
+        return explicit
+    parts = [notes] if notes else []
+    if barriers:
+        parts.append(f"Barriers: {'; '.join(barriers)}")
+    return " | ".join(parts) or None
+
+
+def _feedback_score(record: dict[str, Any]) -> int:
+    attachments = record.get("attachments") if isinstance(record.get("attachments"), dict) else {}
+    fields = [
+        record.get("relatedTaskId"),
+        record.get("relatedConsultationId"),
+        record.get("executionCount"),
+        record.get("notes"),
+        bool(_ensure_list(record.get("barriers"))),
+        bool(_ensure_list(attachments.get("voice"))),
+        bool(_ensure_list(attachments.get("image"))),
+        record.get("sourceChannel"),
+    ]
+    return sum(1 for field in fields if field)
+
+
+def _feedback_timestamp(record: dict[str, Any]) -> str | None:
+    return _coerce_string(record.get("submittedAt")) or _coerce_string(record.get("date"))
+
+
+def _feedback_summary(record: dict[str, Any]) -> str:
+    return (
+        _coerce_string(record.get("notes"))
+        or _coerce_string(record.get("content"))
+        or _coerce_string(record.get("freeNote"))
+        or "Parent feedback recorded."
+    )
+
+
+def _normalize_feedback_record(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    feedback_id = _coerce_string(value.get("feedbackId")) or _coerce_string(value.get("id"))
+    child_id = _coerce_string(value.get("childId"))
+    if not feedback_id or not child_id:
+        return None
+
+    created_by = _coerce_string(value.get("createdBy")) or "Unknown"
+    created_by_role = _coerce_string(value.get("createdByRole")) or "unknown"
+    source_role = _normalize_feedback_source_role(
+        value.get("sourceRole"),
+        created_by_role=created_by_role,
+        source_workflow=value.get("sourceWorkflow"),
+    )
+    source_channel = _normalize_feedback_source_channel(
+        value.get("sourceChannel"),
+        source_workflow=value.get("sourceWorkflow"),
+    )
+    execution_status = _normalize_feedback_execution_status(
+        value.get("executionStatus"),
+        executed=value.get("executed"),
+    )
+    improvement_status = _normalize_feedback_improvement_status(
+        value.get("improvementStatus") if value.get("improvementStatus") is not None else value.get("improved")
+    )
+    child_reaction = _normalize_feedback_child_reaction(
+        value.get("childReaction"),
+        improvement_status=improvement_status,
+    )
+    notes = (
+        _coerce_string(value.get("notes"))
+        or _coerce_string(value.get("freeNote"))
+        or _coerce_string(value.get("content"))
+        or ""
+    )
+    barriers = _coerce_string_list(value.get("barriers"))
+    attachments = _normalize_feedback_attachments(value.get("attachments"))
+    submitted_at = _coerce_string(value.get("submittedAt")) or _coerce_string(value.get("date")) or _now_iso()
+    executor_role = _normalize_feedback_executor_role(value.get("executorRole"), source_role=source_role)
+    execution_count = _coerce_positive_int(value.get("executionCount"))
+    related_task_id = _coerce_string(value.get("relatedTaskId")) or _coerce_string(value.get("interventionCardId"))
+    related_consultation_id = _coerce_string(value.get("relatedConsultationId")) or _coerce_string(value.get("consultationId"))
+
+    source_value = value.get("source")
+    if isinstance(source_value, dict):
+        source = {
+            "kind": _coerce_string(source_value.get("kind")) or ("structured" if value.get("feedbackId") else "legacy_guardian_feedback"),
+            "workflow": _coerce_string(source_value.get("workflow")) or source_channel,
+            "createdBy": _coerce_string(source_value.get("createdBy")) or created_by,
+            "createdByRole": _coerce_string(source_value.get("createdByRole")) or created_by_role,
+            "traceId": _coerce_string(source_value.get("traceId")),
+            "meta": copy.deepcopy(source_value.get("meta")) if isinstance(source_value.get("meta"), dict) else None,
+        }
+    else:
+        source = {
+            "kind": "structured" if value.get("feedbackId") else "legacy_guardian_feedback",
+            "workflow": source_channel,
+            "createdBy": created_by,
+            "createdByRole": created_by_role,
+        }
+    source = {key: item for key, item in source.items() if item is not None}
+
+    fallback_value = value.get("fallback")
+    if isinstance(fallback_value, dict):
+        fallback = {
+            "rawStatus": _coerce_string(fallback_value.get("rawStatus")) or _coerce_string(value.get("status")),
+            "rawChildReaction": _coerce_string(fallback_value.get("rawChildReaction")) or _coerce_string(value.get("childReaction")),
+            "rawImproved": fallback_value.get("rawImproved") if fallback_value.get("rawImproved") is not None else value.get("improved"),
+            "rawExecutionStatus": _coerce_string(fallback_value.get("rawExecutionStatus")) or _coerce_string(value.get("executionStatus")),
+            "rawInterventionCardId": _coerce_string(fallback_value.get("rawInterventionCardId")) or _coerce_string(value.get("interventionCardId")),
+            "rawSourceWorkflow": _coerce_string(fallback_value.get("rawSourceWorkflow")) or _coerce_string(value.get("sourceWorkflow")),
+            "notesSummary": _coerce_string(fallback_value.get("notesSummary")) or (notes[:160] if notes else None),
+        }
+    else:
+        fallback = {
+            "rawStatus": _coerce_string(value.get("status")),
+            "rawChildReaction": _coerce_string(value.get("childReaction")),
+            "rawImproved": value.get("improved"),
+            "rawExecutionStatus": _coerce_string(value.get("executionStatus")),
+            "rawInterventionCardId": _coerce_string(value.get("interventionCardId")),
+            "rawSourceWorkflow": _coerce_string(value.get("sourceWorkflow")),
+            "notesSummary": notes[:160] if notes else None,
+        }
+    fallback = {key: item for key, item in fallback.items() if item is not None}
+
+    legacy_status = _coerce_string(value.get("status")) or execution_status
+    legacy_content = _build_feedback_legacy_content(
+        explicit_content=value.get("content"),
+        notes=notes,
+        barriers=barriers,
+        child_reaction=child_reaction,
+        improvement_status=improvement_status,
+        execution_status=execution_status,
+    )
+    legacy_free_note = _build_feedback_legacy_free_note(
+        explicit_free_note=value.get("freeNote"),
+        notes=notes,
+        barriers=barriers,
+    )
+    improved = (
+        value.get("improved")
+        if value.get("improved") in {True, False, "unknown"}
+        else _map_feedback_improvement_to_legacy(improvement_status)
+    )
+    source_workflow = _coerce_string(value.get("sourceWorkflow"))
+    if source_workflow not in LEGACY_FEEDBACK_WORKFLOWS:
+        source_workflow = source_channel if source_channel in LEGACY_FEEDBACK_WORKFLOWS else "manual"
+
+    return {
+        "feedbackId": feedback_id,
+        "childId": child_id,
+        "sourceRole": source_role,
+        "sourceChannel": source_channel,
+        "relatedTaskId": related_task_id,
+        "relatedConsultationId": related_consultation_id,
+        "executionStatus": execution_status,
+        "executionCount": execution_count,
+        "executorRole": executor_role,
+        "childReaction": child_reaction,
+        "improvementStatus": improvement_status,
+        "barriers": barriers,
+        "notes": notes,
+        "attachments": attachments,
+        "submittedAt": submitted_at,
+        "source": source,
+        "fallback": fallback,
+        "id": feedback_id,
+        "date": _coerce_string(value.get("date")) or submitted_at,
+        "status": legacy_status,
+        "content": legacy_content,
+        "interventionCardId": related_task_id,
+        "sourceWorkflow": source_workflow,
+        "executed": _map_feedback_execution_to_legacy(execution_status, explicit_executed=value.get("executed")),
+        "improved": improved,
+        "freeNote": legacy_free_note,
+        "createdBy": created_by,
+        "createdByRole": created_by_role,
+    }
+
+
+def _normalize_feedback_bucket(values: Any) -> list[dict[str, Any]]:
+    records = _ensure_list(values)
+    deduped: dict[str, dict[str, Any]] = {}
+    for item in records:
+        normalized = _normalize_feedback_record(item)
+        if not normalized:
+            continue
+        key = (
+            _coerce_string(normalized.get("feedbackId"))
+            or _coerce_string(normalized.get("id"))
+            or ":".join(
+                [
+                    _coerce_string(normalized.get("childId")) or "",
+                    _feedback_timestamp(normalized) or "",
+                    _coerce_string(normalized.get("content")) or "",
+                ]
+            )
+        )
+        existing = deduped.get(key)
+        if existing is None or _feedback_score(normalized) > _feedback_score(existing):
+            deduped[key] = normalized
+    return list(deduped.values())
+
+
 def _normalize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(snapshot)
     for key in DEFAULT_SNAPSHOT_KEYS:
         normalized[key] = _ensure_list(normalized.get(key))
+    normalized["feedback"] = _normalize_feedback_bucket(normalized.get("feedback"))
     if not _coerce_string(normalized.get("updatedAt")):
         normalized["updatedAt"] = _now_iso()
     return normalized
@@ -493,7 +901,7 @@ class ChildcareRepository:
             ("meals", ("date",)),
             ("health", ("date",)),
             ("growth", ("createdAt", "reviewDate")),
-            ("feedback", ("date",)),
+            ("feedback", ("submittedAt", "date")),
         ):
             for record in self._child_records(bucket, child_id):
                 for key in keys:
@@ -580,7 +988,7 @@ class ChildcareRepository:
         meals = _recent(self._child_records("meals", child_id), "date")
         health = _recent(self._child_records("health", child_id), "date")
         growth = _recent(self._child_records("growth", child_id), "createdAt", "reviewDate")
-        feedback = _recent(self._child_records("feedback", child_id), "date")
+        feedback = _recent(self._child_records("feedback", child_id), "submittedAt", "date")
 
         timeline: list[dict[str, Any]] = []
         for record in meals:
@@ -614,9 +1022,9 @@ class ChildcareRepository:
             timeline.append(
                 {
                     "type": "feedback",
-                    "date": _coerce_string(record.get("date")),
-                    "summary": _coerce_string(record.get("content")),
-                    "recordId": _coerce_string(record.get("id")),
+                    "date": _feedback_timestamp(record),
+                    "summary": _feedback_summary(record),
+                    "recordId": _coerce_string(record.get("feedbackId")) or _coerce_string(record.get("id")),
                 }
             )
 

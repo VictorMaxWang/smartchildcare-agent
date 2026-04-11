@@ -3,6 +3,7 @@ import { executeFollowUp, getAiRuntimeOptions, isValidFollowUpPayload } from "@/
 import type { AiFollowUpPayload, ChildSuggestionSnapshot } from "@/lib/ai/types";
 import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/input";
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { forwardBrainRequest } from "@/lib/server/brain-client";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 import {
@@ -118,6 +119,9 @@ export async function POST(request: Request) {
         };
   const taskAwarePayload = {
     ...nextPayload,
+    latestFeedback: nextPayload.latestFeedback
+      ? (toFollowUpFeedbackLite(nextPayload.latestFeedback) ?? undefined)
+      : undefined,
     activeTask: taskContext.activeTask,
     tasks: taskContext.tasks,
     currentInterventionCard: taskContext.currentInterventionCard ?? nextPayload.currentInterventionCard,

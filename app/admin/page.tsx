@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ClipboardCheck, ShieldAlert, TrendingUp, Workflow } from "lucide-react";
 import AdminQualityMetricsPanel from "@/components/admin/AdminQualityMetricsPanel";
 import RiskPriorityBoard from "@/components/admin/RiskPriorityBoard";
 import EmptyState from "@/components/EmptyState";
+import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
   AssistantEntryCard,
   InlineLinkButton,
@@ -14,10 +15,15 @@ import {
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
-import { buildAdminHomeViewModel } from "@/lib/agent/admin-agent";
+import {
+  buildAdminHomeViewModel,
+  buildAdminWeeklyReportSnapshot,
+} from "@/lib/agent/admin-agent";
 import { dedupeAdminHomeExposure } from "@/lib/agent/admin-home-dedupe";
 import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
+import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
 import type { AdminDispatchEvent, InstitutionPriorityItem } from "@/lib/agent/admin-types";
+import type { WeeklyReportResponse } from "@/lib/ai/types";
 import { INSTITUTION_NAME, useApp } from "@/lib/store";
 
 const TODAY_TEXT = new Date().toLocaleDateString("zh-CN", {
@@ -70,27 +76,30 @@ export default function AdminHomePage() {
       escalatedOnly: true,
     },
   });
-  const home = useMemo(
-    () =>
-      buildAdminHomeViewModel({
-        workflow: "daily-priority",
-        currentUser: {
-          name: currentUser.name,
-          institutionName: INSTITUTION_NAME,
-          institutionId: currentUser.institutionId,
-          role: currentUser.role,
-        },
-        visibleChildren,
-        attendanceRecords,
-        healthCheckRecords,
-        growthRecords,
-        guardianFeedbacks,
-        mealRecords,
-        adminBoardData: getAdminBoardData(),
-        weeklyTrend: getWeeklyDietTrend(),
-        smartInsights: getSmartInsights(),
-        notificationEvents,
-      }),
+  const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReportResponse | null>(null);
+  const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
+  const [weeklyReportError, setWeeklyReportError] = useState<string | null>(null);
+  const adminHomePayload = useMemo(
+    () => ({
+      workflow: "daily-priority" as const,
+      currentUser: {
+        name: currentUser.name,
+        institutionName: INSTITUTION_NAME,
+        institutionId: currentUser.institutionId,
+        role: currentUser.role,
+      },
+      visibleChildren,
+      attendanceRecords,
+      healthCheckRecords,
+      growthRecords,
+      guardianFeedbacks,
+      mealRecords,
+      adminBoardData: getAdminBoardData(),
+      weeklyTrend: getWeeklyDietTrend(),
+      smartInsights: getSmartInsights(),
+      notificationEvents,
+    }),
     [
       attendanceRecords,
       currentUser.institutionId,
@@ -107,10 +116,70 @@ export default function AdminHomePage() {
       visibleChildren,
     ]
   );
+  const home = useMemo(() => buildAdminHomeViewModel(adminHomePayload), [adminHomePayload]);
   const displayHome = useMemo(
     () => dedupeAdminHomeExposure(home, consultationPriorityItems),
     [consultationPriorityItems, home]
   );
+  const weeklyReportPayload = useMemo(
+    () => ({
+      role: "admin" as const,
+      snapshot: buildAdminWeeklyReportSnapshot(adminHomePayload, home.adminContext),
+    }),
+    [adminHomePayload, home.adminContext]
+  );
+  const weeklyReportKey = useMemo(
+    () => JSON.stringify(weeklyReportPayload),
+    [weeklyReportPayload]
+  );
+
+  useEffect(() => {
+    if (visibleChildren.length === 0) return;
+
+    const cached = weeklyReportCacheRef.current.get(weeklyReportKey);
+    if (cached) {
+      setWeeklyReport(cached);
+      setWeeklyReportError(null);
+      setWeeklyReportLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadWeeklyReportPreview() {
+      setWeeklyReportLoading(true);
+      setWeeklyReportError(null);
+
+      try {
+        const data = await fetchWeeklyReport(weeklyReportPayload, {
+          signal: controller.signal,
+        });
+
+        if (!cancelled) {
+          weeklyReportCacheRef.current.set(weeklyReportKey, data);
+          setWeeklyReport(data);
+        }
+      } catch (requestError) {
+        if (!cancelled && !controller.signal.aborted) {
+          setWeeklyReportError(
+            requestError instanceof Error ? requestError.message : "园长周报预览暂时不可用"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setWeeklyReportLoading(false);
+        }
+      }
+    }
+
+    void loadWeeklyReportPreview();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [visibleChildren.length, weeklyReportKey, weeklyReportPayload]);
 
   if (visibleChildren.length === 0) {
     return (
@@ -319,7 +388,21 @@ export default function AdminHomePage() {
               </ul>
             </AssistantEntryCard>
 
-            <SectionCard title="本周运营亮点" description="用于周报和大屏复用的高层摘要。">
+            <WeeklyReportPreviewCard
+              title="本周运营周报预览"
+              description="首页只保留闭环率、反馈率、问题热点和下周治理重点的轻量预览，不替代完整周报工作区。"
+              role="admin"
+              periodLabel={weeklyReportPayload.snapshot.periodLabel}
+              report={weeklyReport}
+              loading={weeklyReportLoading}
+              error={weeklyReportError}
+              ctaHref="/admin/agent?action=weekly-report"
+              ctaLabel="进入完整周报工作区"
+              ctaVariant="premium"
+            />
+
+            {false ? (
+              <SectionCard title="本周运营亮点" description="用于周报和大屏复用的高层摘要。">
               <div className="space-y-3">
                 {displayHome.weeklyHighlights.length > 0 ? (
                   displayHome.weeklyHighlights.map((item) => (
@@ -336,7 +419,8 @@ export default function AdminHomePage() {
                   </div>
                 )}
               </div>
-            </SectionCard>
+              </SectionCard>
+            ) : null}
 
             <SectionCard title="园长今日顺序" description="比赛 demo 中适合直接讲清楚的处理顺序。">
               <ol className="space-y-3 text-sm text-slate-600">

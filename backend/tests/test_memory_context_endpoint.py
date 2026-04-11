@@ -235,3 +235,79 @@ def test_parent_follow_up_memory_context_consumes_bridge_writeback(tmp_path, mon
         "Check the child's status at the next arrival." in item
         for item in body["prompt_context"]["open_loops"]
     )
+
+
+def test_parent_follow_up_memory_context_extracts_structured_feedback_signals(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "memory-structured-feedback.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    memory = build_memory_service()
+    asyncio.run(
+        memory.save_consultation_snapshot(
+            child_id="child-feedback-1",
+            session_id="follow-up-structured-1",
+            snapshot_type="parent-follow-up-result",
+            input_summary="parent follow-up structured feedback",
+            snapshot_json={
+                "result": {
+                    "latestFeedback": {
+                        "feedbackId": "fb-structured-1",
+                        "childId": "child-feedback-1",
+                        "sourceRole": "parent",
+                        "sourceChannel": "manual",
+                        "relatedTaskId": "task-parent-1",
+                        "executionStatus": "unable_to_execute",
+                        "executorRole": "parent",
+                        "childReaction": "resisted",
+                        "improvementStatus": "worse",
+                        "barriers": ["Child had a fever"],
+                        "notes": "The family could not execute the task tonight.",
+                        "attachments": {},
+                        "submittedAt": "2026-04-11T08:00:00Z",
+                        "source": {"kind": "structured", "workflow": "manual"},
+                        "fallback": {},
+                    },
+                    "recentDetails": {
+                        "feedback": [
+                            {
+                                "feedbackId": "fb-structured-1",
+                                "childId": "child-feedback-1",
+                                "sourceRole": "parent",
+                                "sourceChannel": "manual",
+                                "executionStatus": "unable_to_execute",
+                                "executorRole": "parent",
+                                "childReaction": "resisted",
+                                "improvementStatus": "worse",
+                                "barriers": ["Child had a fever"],
+                                "notes": "The family could not execute the task tonight.",
+                                "attachments": {},
+                                "submittedAt": "2026-04-11T08:00:00Z",
+                                "source": {"kind": "structured", "workflow": "manual"},
+                                "fallback": {},
+                            }
+                        ]
+                    },
+                }
+            },
+        )
+    )
+
+    response = client.post(
+        "/api/v1/memory/context",
+        json={
+            "child_id": "child-feedback-1",
+            "workflow_type": "parent-follow-up",
+            "options": {"query": "structured feedback", "limit": 5, "top_k": 5},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(
+        "Parent feedback:" in item
+        for item in body["prompt_context"]["recent_continuity_signals"]
+    )
+    assert any(
+        "could not execute the task tonight" in item.lower()
+        for item in body["prompt_context"]["open_loops"]
+    )

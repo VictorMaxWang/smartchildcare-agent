@@ -1,4 +1,5 @@
 import type { AppStateSnapshot } from "@/lib/persistence/snapshot";
+import type { ParentStructuredFeedbackLite } from "@/lib/feedback/types";
 import type {
   CanonicalTask,
   FollowUpTask,
@@ -336,11 +337,7 @@ export interface ChildSuggestionSnapshot {
       followUpAction?: string;
       reviewStatus?: string;
     }>;
-    feedback: Array<{
-      date: string;
-      status: string;
-      content: string;
-    }>;
+    feedback: ParentStructuredFeedbackLite[];
   };
   memoryContext?: PromptMemoryContext;
   continuityNotes?: string[];
@@ -445,15 +442,7 @@ export interface AiFollowUpPayload {
   suggestionDescription?: string;
   question: string;
   history?: AiFollowUpMessage[];
-  latestFeedback?: {
-    date: string;
-    status: string;
-    content: string;
-    executed?: boolean;
-    childReaction?: string;
-    improved?: boolean | "unknown";
-    freeNote?: string;
-  };
+  latestFeedback?: ParentStructuredFeedbackLite;
   currentInterventionCard?: {
     id?: string;
     title: string;

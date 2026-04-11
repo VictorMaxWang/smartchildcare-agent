@@ -20,6 +20,7 @@ import {
 import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/input";
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
 import { attachConsultationToInterventionCard } from "@/lib/agent/intervention-card";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { forwardBrainRequest } from "@/lib/server/brain-client";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 
@@ -111,15 +112,7 @@ export async function POST(request: Request) {
       buildConsultationInputFromSnapshot({
         snapshot: buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext),
         latestFeedback: childContext.latestFeedback
-          ? {
-              date: childContext.latestFeedback.date,
-              status: childContext.latestFeedback.status,
-              content: childContext.latestFeedback.content,
-              executed: childContext.latestFeedback.executed,
-              childReaction: childContext.latestFeedback.childReaction,
-              improved: childContext.latestFeedback.improved,
-              freeNote: childContext.latestFeedback.freeNote,
-            }
+          ? (toFollowUpFeedbackLite(childContext.latestFeedback) ?? undefined)
           : undefined,
         focusReasons: childContext.focusReasons,
         followUp: aiResponse,
@@ -158,15 +151,7 @@ export async function POST(request: Request) {
       buildConsultationInputFromSnapshot({
         snapshot: buildTeacherChildSuggestionSnapshotWithMemory(childContext, memoryContext),
         latestFeedback: childContext.latestFeedback
-          ? {
-              date: childContext.latestFeedback.date,
-              status: childContext.latestFeedback.status,
-              content: childContext.latestFeedback.content,
-              executed: childContext.latestFeedback.executed,
-              childReaction: childContext.latestFeedback.childReaction,
-              improved: childContext.latestFeedback.improved,
-              freeNote: childContext.latestFeedback.freeNote,
-            }
+          ? (toFollowUpFeedbackLite(childContext.latestFeedback) ?? undefined)
           : undefined,
         focusReasons: childContext.focusReasons,
         suggestion: aiSuggestion,

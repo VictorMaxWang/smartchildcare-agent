@@ -406,6 +406,9 @@ function findMatchingReminder(task: CanonicalTask, reminder: ReminderItem) {
 function findMatchingFeedback(task: CanonicalTask, feedback: GuardianFeedback) {
   if (task.childId !== feedback.childId) return false;
   if (task.ownerRole !== "parent") return false;
+  if (feedback.relatedTaskId) {
+    return feedback.relatedTaskId === task.taskId;
+  }
   const interventionCardId = task.legacyRefs?.interventionCardId ?? task.sourceId;
   if (feedback.interventionCardId) {
     return feedback.interventionCardId === interventionCardId;
@@ -424,6 +427,7 @@ function findMatchingCheckIn(task: CanonicalTask, record: TaskCheckInRecord) {
 function toFeedbackCoreStatus(feedback: GuardianFeedback): TaskCoreStatus {
   if (feedback.executionStatus === "completed" || feedback.executed === true) return "completed";
   if (feedback.executionStatus === "partial") return "in_progress";
+  if (feedback.executionStatus === "unable_to_execute") return "pending";
   return "pending";
 }
 
@@ -444,10 +448,12 @@ function collectEvidence(task: CanonicalTask, input: MaterializeTasksInput, exis
 
   const latestReminder = reminders.sort((left, right) => safeDateMs(right.scheduledAt) - safeDateMs(left.scheduledAt))[0];
   const latestFeedback = guardianFeedbacks
-    .sort((left, right) => safeDateMs(right.date) - safeDateMs(left.date))[0];
+    .sort((left, right) => safeDateMs(right.submittedAt ?? right.date) - safeDateMs(left.submittedAt ?? left.date))[0];
   const latestCheckIn = taskCheckIns.sort((left, right) => safeDateMs(right.date) - safeDateMs(left.date))[0];
-  const lastEvidenceAt = maxIso(existingTask?.lastEvidenceAt, latestReminder?.scheduledAt, latestFeedback?.date, latestCheckIn?.date);
+  const latestFeedbackAt = latestFeedback?.submittedAt ?? latestFeedback?.date;
+  const lastEvidenceAt = maxIso(existingTask?.lastEvidenceAt, latestReminder?.scheduledAt, latestFeedbackAt, latestCheckIn?.date);
   const completionSummary =
+    latestFeedback?.notes?.trim() ||
     latestFeedback?.freeNote?.trim() ||
     latestFeedback?.content?.trim() ||
     existingTask?.completionSummary;
@@ -464,7 +470,7 @@ function collectEvidence(task: CanonicalTask, input: MaterializeTasksInput, exis
     completionSummary,
     completedAt:
       coreStatus === "completed"
-        ? maxIso(existingTask?.completedAt, latestFeedback?.date, latestCheckIn?.date, latestReminder?.scheduledAt)
+        ? maxIso(existingTask?.completedAt, latestFeedbackAt, latestCheckIn?.date, latestReminder?.scheduledAt)
         : undefined,
     lastEvidenceAt,
     reminderIds: reminders.map((item) => item.reminderId),

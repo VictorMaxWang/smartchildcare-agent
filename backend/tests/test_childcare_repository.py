@@ -136,3 +136,46 @@ def test_childcare_repository_demo_snapshot_expands_to_36_children_and_recent_hi
     assert c11_history["aggregates"]["pickyEatingSignals"] >= 1
     assert c15_history["aggregates"]["mealCount"] >= 3
     assert any(record["isAbnormal"] for record in c15_history["health"])
+
+
+def test_childcare_repository_normalizes_structured_feedback_into_history_and_timeline():
+    snapshot = build_app_snapshot()
+    snapshot["feedback"] = [
+        {
+            "feedbackId": "fb-structured-1",
+            "childId": "c-11",
+            "sourceRole": "parent",
+            "sourceChannel": "manual",
+            "relatedTaskId": "task-parent-1",
+            "relatedConsultationId": "consult-1",
+            "executionStatus": "unable_to_execute",
+            "executionCount": 1,
+            "executorRole": "parent",
+            "childReaction": "resisted",
+            "improvementStatus": "worse",
+            "barriers": ["Child had a fever"],
+            "notes": "The family could not execute the hydration step tonight.",
+            "attachments": {},
+            "submittedAt": "2026-04-04T08:30:00Z",
+            "source": {"kind": "structured", "workflow": "manual"},
+            "fallback": {},
+            "createdBy": "Parent Chen",
+            "createdByRole": "parent",
+        }
+    ]
+
+    repository = asyncio.run(
+        ChildcareRepository.create(app_snapshot=snapshot, institution_id=None, database_url=None)
+    )
+
+    feedback = repository.snapshot["feedback"][0]
+    history = repository.get_child_history("c-11", 7)
+
+    assert feedback["feedbackId"] == "fb-structured-1"
+    assert feedback["id"] == "fb-structured-1"
+    assert feedback["interventionCardId"] == "task-parent-1"
+    assert feedback["executed"] is False
+    assert feedback["improved"] is False
+    assert history["feedback"][0]["notes"] == "The family could not execute the hydration step tonight."
+    assert history["timeline"][0]["type"] == "feedback"
+    assert history["timeline"][0]["summary"] == "The family could not execute the hydration step tonight."

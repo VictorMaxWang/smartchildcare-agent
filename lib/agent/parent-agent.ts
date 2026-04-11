@@ -6,6 +6,7 @@ import type {
   ConsultationResult,
   RuleFallbackItem,
 } from "@/lib/ai/types";
+import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate } from "@/lib/date";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 import { getWeeklyTaskForChild } from "@/lib/mock/coparenting";
@@ -430,11 +431,10 @@ export function buildParentChildSuggestionSnapshot(context: ParentAgentChildCont
         followUpAction: item.followUpAction,
         reviewStatus: item.reviewStatus,
       })),
-      feedback: context.weeklyFeedbacks.slice(0, 4).map((item) => ({
-        date: item.date,
-        status: item.status,
-        content: item.content,
-      })),
+      feedback: context.weeklyFeedbacks
+        .slice(0, 4)
+        .map((item) => toFollowUpFeedbackLite(item))
+        .filter((item): item is NonNullable<typeof item> => Boolean(item)),
     },
     ruleFallback: buildRuleFallbackItems(context.smartInsights, context.latestFeedback),
   };
@@ -535,15 +535,7 @@ export function buildParentAgentFollowUpPayload(params: {
       { role: "assistant" as const, content: item.answer },
     ]),
     latestFeedback: params.context.latestFeedback
-      ? {
-          date: params.context.latestFeedback.date,
-          status: params.context.latestFeedback.status,
-          content: params.context.latestFeedback.content,
-          executed: params.context.latestFeedback.executed,
-          childReaction: params.context.latestFeedback.childReaction,
-          improved: params.context.latestFeedback.improved,
-          freeNote: params.context.latestFeedback.freeNote,
-        }
+      ? (toFollowUpFeedbackLite(params.context.latestFeedback) ?? undefined)
       : undefined,
     currentInterventionCard: {
       id: params.suggestionResult.interventionCard.id,
