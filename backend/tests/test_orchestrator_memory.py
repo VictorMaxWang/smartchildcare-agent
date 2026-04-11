@@ -1,9 +1,14 @@
 import asyncio
+from threading import Event
+from time import perf_counter
 
 from app.core.config import get_settings
 from app.db.repositories import reset_repository_bundle_cache
+from app.providers.base import ProviderResult
 from app.services import orchestrator as orchestrator_module
 from app.services.orchestrator import build_memory_service, build_orchestrator, reset_orchestrator_runtime
+from app.services.parent_storybook_service import await_storybook_media_warming
+from conftest import load_storybook_fixture
 
 
 def configure_memory_backend(monkeypatch, *, backend: str, sqlite_path: str | None = None):
@@ -113,6 +118,69 @@ def build_parent_trend_snapshot() -> dict:
         "reminders": [],
         "updatedAt": "2026-04-04T00:00:00Z",
     }
+
+
+class _BlockingWarmProvider:
+    def __init__(self, *, provider_name: str, media_kind: str, release: Event) -> None:
+        self.provider_name = provider_name
+        self.media_kind = media_kind
+        self.release = release
+        self._cached_results: dict[str, ProviderResult[dict]] = {}
+
+    def _cache_key(self, kwargs: dict) -> str:
+        if self.media_kind == "image":
+            return f"image::{kwargs['scene_index']}::{kwargs['image_prompt']}"
+        return f"audio::{kwargs['scene_index']}::{kwargs['audio_script']}"
+
+    def read_cached_scene(self, **kwargs):
+        cached = self._cached_results.get(self._cache_key(kwargs))
+        if not cached:
+            return None
+        return ProviderResult(
+            output={
+                **dict(cached.output),
+                "cacheHit": True,
+            },
+            provider=cached.provider,
+            mode=cached.mode,
+            source="cache",
+            model=cached.model,
+            request_id=cached.request_id,
+        )
+
+    def render_scene(self, **kwargs):
+        self.release.wait(timeout=1.0)
+        if self.media_kind == "image":
+            result = ProviderResult(
+                output={
+                    "imagePrompt": kwargs["image_prompt"],
+                    "imageUrl": "https://cdn.example.com/orchestrator-story.png",
+                    "assetRef": "https://cdn.example.com/orchestrator-story.png",
+                    "imageStatus": "ready",
+                },
+                provider=self.provider_name,
+                mode="live",
+                source="vivo",
+                model="blocking-image-v1",
+            )
+        else:
+            result = ProviderResult(
+                output={
+                    "audioUrl": "data:audio/wav;base64,AAAA",
+                    "audioRef": "orchestrator-audio-1",
+                    "audioScript": kwargs["audio_script"],
+                    "audioStatus": "ready",
+                    "voiceStyle": kwargs["voice_style"],
+                    "audioBytes": b"RIFF",
+                    "audioContentType": "audio/wav",
+                },
+                provider=self.provider_name,
+                mode="live",
+                source="vivo",
+                model="blocking-audio-v1",
+            )
+        self._cached_results[self._cache_key(kwargs)] = result
+        return result
 
 
 def test_high_risk_consultation_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):
@@ -405,3 +473,100 @@ def test_parent_storybook_skips_request_thread_memory_and_background_persistence
     result = asyncio.run(run_case())
 
     assert result["providerMeta"]["transport"] == "fastapi-brain"
+
+
+def test_parent_storybook_heavy_fixture_real_service_stays_fast_without_request_thread_waits(monkeypatch):
+    configure_memory_backend(monkeypatch, backend="memory")
+    orchestrator = build_orchestrator()
+    release_persistence = asyncio.Event()
+    image_release = Event()
+    audio_release = Event()
+    trace_calls: list[dict] = []
+    snapshot_calls: list[dict] = []
+    image_provider = _BlockingWarmProvider(
+        provider_name="vivo-story-image",
+        media_kind="image",
+        release=image_release,
+    )
+    audio_provider = _BlockingWarmProvider(
+        provider_name="vivo-story-tts",
+        media_kind="audio",
+        release=audio_release,
+    )
+
+    async def fail_memory_hydrate(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("parent-storybook should skip request-thread memory hydration")
+
+    async def blocked_save_agent_trace(**kwargs):
+        trace_calls.append(kwargs)
+        await release_persistence.wait()
+
+    async def blocked_save_snapshot(**kwargs):
+        snapshot_calls.append(kwargs)
+        await release_persistence.wait()
+
+    monkeypatch.setattr(
+        orchestrator.memory,
+        "build_memory_context_for_prompt",
+        fail_memory_hydrate,
+    )
+    monkeypatch.setattr(orchestrator.memory, "save_agent_trace", blocked_save_agent_trace)
+    monkeypatch.setattr(
+        orchestrator.memory,
+        "save_consultation_snapshot",
+        blocked_save_snapshot,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = load_storybook_fixture("page-recording-c1-bedtime.json")
+    payload["requestSource"] = f"{payload['requestSource']}:orchestrator-heavy"
+
+    async def run_case() -> dict:
+        started_at = perf_counter()
+        result = await asyncio.wait_for(orchestrator.parent_storybook(payload), timeout=0.6)
+        elapsed = perf_counter() - started_at
+
+        assert elapsed < 0.6
+        assert result["memoryMeta"]["memory_context_used"] is False
+        assert result["memoryMeta"]["memory_context_count"] == 0
+        assert result["memoryMeta"]["memory_context_skipped_reason"] == "parent-storybook-request-thread-sla"
+        assert result["providerMeta"]["transport"] == "fastapi-brain"
+        assert result["providerMeta"]["mode"] == "fallback"
+        assert result["providerMeta"]["requestSource"] == payload["requestSource"]
+        assert result["providerMeta"]["fallbackReason"] != "brain-proxy-timeout"
+        assert result["providerMeta"]["diagnostics"]["brain"]["fallbackReason"] is None
+        assert result["providerMeta"]["diagnostics"]["brain"]["timeoutMs"] is None
+        assert result["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+        assert result["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
+
+        await asyncio.sleep(0)
+        assert len(trace_calls) == 1
+        assert len(snapshot_calls) == 1
+        assert trace_calls[0]["metadata_json"]["memory_context_used"] is False
+        assert (
+            trace_calls[0]["metadata_json"]["memory_context_skipped_reason"]
+            == "parent-storybook-request-thread-sla"
+        )
+
+        image_release.set()
+        audio_release.set()
+        assert await asyncio.to_thread(await_storybook_media_warming, result["storyId"], 2.0) is True
+
+        release_persistence.set()
+        pending = list(orchestrator_module._BACKGROUND_TASKS)
+        if pending:
+            await asyncio.gather(*pending)
+        return result
+
+    result = asyncio.run(run_case())
+
+    assert result["providerMeta"]["highlightCount"] == 4
+    assert result["providerMeta"]["sceneCount"] == 6

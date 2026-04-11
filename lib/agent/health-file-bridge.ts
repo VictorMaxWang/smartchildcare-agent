@@ -2,14 +2,17 @@ import type {
   HealthFileBridgeActionItem,
   HealthFileBridgeActionMapping,
   HealthFileBridgeContraindication,
+  HealthFileBridgeFollowUpSeed,
   HealthFileBridgeFact,
   HealthFileBridgeFile,
   HealthFileBridgeFileType,
   HealthFileBridgeFollowUpHint,
+  HealthFileBridgeMemoryCandidate,
   HealthFileBridgeRequest,
   HealthFileBridgeResponse,
   HealthFileBridgeRiskItem,
   HealthFileBridgeSource,
+  HealthFileBridgeWriteback,
 } from "../ai/types";
 
 const HEALTH_FILE_BRIDGE_DISCLAIMER =
@@ -339,6 +342,11 @@ function uniqueStrings(items: Array<string | undefined>) {
   return result;
 }
 
+function summarizeActionItem(item?: HealthFileBridgeActionItem) {
+  if (!item) return undefined;
+  return `${item.title}: ${item.detail}`;
+}
+
 function buildActionItem(
   title: string,
   detail: string,
@@ -625,6 +633,118 @@ function buildHealthFileActionMapping(input: {
     escalationSuggestion,
     teacherDraftHint,
     parentCommunicationDraftHint,
+  };
+}
+
+function buildFollowUpSeed(response: HealthFileBridgeResponse): HealthFileBridgeFollowUpSeed {
+  const schoolActions = response.actionMapping?.schoolTodayActions ?? [];
+  const familyActions = response.actionMapping?.familyTonightActions ?? [];
+  const followUpPlan = response.actionMapping?.followUpPlan ?? [];
+  const primaryFamilyAction = familyActions[0];
+  const primarySchoolAction = schoolActions[0];
+  const primaryFollowUpAction = followUpPlan[0];
+  const observationPoints = uniqueStrings([
+    ...schoolActions.map((item) => item.title),
+    ...followUpPlan.map((item) => item.title),
+    ...response.riskItems.map((item) => item.title),
+  ]).slice(0, 3);
+
+  return {
+    suggestionTitle: primaryFollowUpAction?.title ?? "Manual health file follow-up",
+    suggestionDescription: response.summary,
+    tonightHomeAction:
+      primaryFamilyAction?.detail ??
+      primaryFamilyAction?.title ??
+      "Share a factual status update tonight and confirm the latest status.",
+    observationPoints:
+      observationPoints.length > 0
+        ? observationPoints
+        : ["Verify the original file wording", "Observe the child's current status today"],
+    tomorrowObservationPoint:
+      primarySchoolAction?.title ??
+      primaryFollowUpAction?.title ??
+      "Review the original file before the next attendance.",
+    reviewIn48h:
+      primaryFollowUpAction?.detail ??
+      "Review the bridge hints against the original file within 48 hours.",
+    teacherSuggestionSummary: response.actionMapping?.teacherDraftHint ?? response.summary,
+    familyTask: {
+      title: primaryFamilyAction?.title ?? "Share a factual status update tonight",
+      description: primaryFamilyAction?.detail ?? response.summary,
+    },
+  };
+}
+
+function buildMemoryCandidate(
+  request: HealthFileBridgeRequest,
+  response: HealthFileBridgeResponse,
+  followUpSeed: HealthFileBridgeFollowUpSeed
+): HealthFileBridgeMemoryCandidate {
+  return {
+    title: followUpSeed.suggestionTitle,
+    summary: response.summary,
+    continuitySignals: uniqueStrings([
+      response.summary,
+      response.actionMapping?.teacherDraftHint,
+      response.actionMapping?.parentCommunicationDraftHint,
+      ...response.extractedFacts.map((item) => `${item.label}: ${item.detail}`),
+    ]).slice(0, 4),
+    openLoops: uniqueStrings([
+      followUpSeed.reviewIn48h,
+      followUpSeed.tomorrowObservationPoint,
+      ...(response.actionMapping?.followUpPlan.map(summarizeActionItem) ?? []),
+    ]).slice(0, 4),
+    sourceRefs: uniqueStrings([
+      request.requestSource,
+      `bridge-source:${response.source}`,
+      `file-type:${response.fileType}`,
+      response.provider ? `provider:${response.provider}` : undefined,
+      request.traceId ? `trace:${request.traceId}` : undefined,
+    ]),
+  };
+}
+
+export function buildHealthFileBridgeWriteback(
+  request: HealthFileBridgeRequest,
+  response: HealthFileBridgeResponse
+): HealthFileBridgeWriteback {
+  const followUpSeed = buildFollowUpSeed(response);
+  const memoryCandidate = buildMemoryCandidate(request, response, followUpSeed);
+
+  return {
+    childScopedArtifacts: [
+      {
+        artifactType: "health-file-bridge",
+        childId: request.childId,
+        fileKind: response.fileKind ?? request.fileKind,
+        fileType: response.fileType,
+        summary: response.summary,
+        extractedFacts: response.extractedFacts,
+        riskItems: response.riskItems,
+        contraindications: response.contraindications,
+        followUpHints: response.followUpHints,
+        actionMapping: response.actionMapping,
+        generatedAt: response.generatedAt,
+      },
+    ],
+    memoryCandidate,
+    followUpSeed,
+    weeklyReportSeed: null,
+    provenance: {
+      bridgeOrigin: "health-file-bridge",
+      sourceRole: response.sourceRole,
+      requestSource: request.requestSource,
+      traceId: request.traceId,
+      fileKind: response.fileKind ?? request.fileKind,
+      fileType: response.fileType,
+      source: response.source,
+      fallback: response.fallback,
+      mock: response.mock,
+      liveReadyButNotVerified: response.liveReadyButNotVerified,
+      provider: response.provider,
+      model: response.model,
+      generatedAt: response.generatedAt,
+    },
   };
 }
 

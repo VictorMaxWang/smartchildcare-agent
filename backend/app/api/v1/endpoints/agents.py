@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.schemas.agent import WeeklyReportRequest, WeeklyReportResponse
+from app.schemas.admin_quality_metrics import AdminQualityMetricsRequest, AdminQualityMetricsResponse
 from app.schemas.demand_insight import DemandInsightRequest, DemandInsightResponse
 from app.schemas.health_file_bridge import HealthFileBridgeRequest, HealthFileBridgeResponse
 from app.schemas.intent_router import IntentRouterRequest, IntentRouterResponse
@@ -208,3 +209,15 @@ async def demand_insights(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return DemandInsightResponse.model_validate(result)
+
+
+@router.post("/agents/metrics/admin-quality", response_model=AdminQualityMetricsResponse)
+async def admin_quality_metrics(
+    payload: AdminQualityMetricsRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+):
+    try:
+        result = await orchestrator.admin_quality_metrics(payload.model_dump(mode="json", by_alias=True))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return AdminQualityMetricsResponse.model_validate(result)

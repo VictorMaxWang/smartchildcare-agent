@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from time import perf_counter
 
 from fastapi.testclient import TestClient
 
@@ -133,10 +134,13 @@ def test_parent_storybook_endpoint_returns_structured_response():
 
 def test_parent_storybook_endpoint_accepts_heavy_page_payload_fixture():
     payload = build_heavy_payload("endpoint-heavy")
+    started_at = perf_counter()
 
     response = client.post("/api/v1/agents/parent/storybook", json=payload)
+    elapsed = perf_counter() - started_at
 
     assert response.status_code == 200
+    assert elapsed < 0.75
     body = response.json()
     assert body["storyId"]
     assert body["childId"] == "c-1"
@@ -151,6 +155,10 @@ def test_parent_storybook_endpoint_accepts_heavy_page_payload_fixture():
     assert body["providerMeta"]["imageDelivery"] == "dynamic-fallback"
     assert body["providerMeta"]["audioDelivery"] == "preview-only"
     assert body["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
+    assert body["fallbackReason"] != "brain-proxy-timeout"
+    assert body["providerMeta"]["fallbackReason"] != "brain-proxy-timeout"
+    assert body["providerMeta"]["diagnostics"]["brain"]["fallbackReason"] is None
+    assert body["providerMeta"]["diagnostics"]["brain"]["timeoutMs"] is None
 
 
 def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):

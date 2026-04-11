@@ -110,7 +110,53 @@ def _profile_traits(profile_json: dict[str, Any], limit: int = 6) -> list[str]:
     return _take_unique(traits, limit=limit)
 
 
+def _extract_bridge_writeback(snapshot_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(snapshot_json, dict):
+        return None
+
+    bridge_writeback = snapshot_json.get("bridgeWriteback")
+    if isinstance(bridge_writeback, dict):
+        return bridge_writeback
+
+    bridge_writeback = snapshot_json.get("bridge_writeback")
+    if isinstance(bridge_writeback, dict):
+        return bridge_writeback
+
+    return None
+
+
+def _extract_bridge_follow_up_seed(bridge_writeback: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(bridge_writeback, dict):
+        return None
+
+    follow_up_seed = bridge_writeback.get("followUpSeed")
+    if isinstance(follow_up_seed, dict):
+        return follow_up_seed
+
+    follow_up_seed = bridge_writeback.get("follow_up_seed")
+    if isinstance(follow_up_seed, dict):
+        return follow_up_seed
+
+    return None
+
+
 def _snapshot_summary(record: AgentStateSnapshotRecord) -> str | None:
+    bridge_writeback = _extract_bridge_writeback(record.snapshot_json if isinstance(record.snapshot_json, dict) else None)
+    if isinstance(bridge_writeback, dict):
+        memory_candidate = bridge_writeback.get("memoryCandidate") or bridge_writeback.get("memory_candidate")
+        if isinstance(memory_candidate, dict):
+            summary = _coerce_string(memory_candidate.get("summary"))
+            if summary:
+                return summary
+
+        follow_up_seed = _extract_bridge_follow_up_seed(bridge_writeback)
+        if isinstance(follow_up_seed, dict):
+            suggestion_title = _coerce_string(
+                follow_up_seed.get("suggestionTitle") or follow_up_seed.get("suggestion_title")
+            )
+            if suggestion_title:
+                return suggestion_title
+
     result = record.snapshot_json.get("result") if isinstance(record.snapshot_json, dict) else None
     if isinstance(result, dict):
         summary = (
@@ -159,13 +205,34 @@ def _consultation_takeaways(consultations: list[AgentStateSnapshotRecord], limit
 
 
 def _open_loops(
-    consultations: list[AgentStateSnapshotRecord],
+    snapshots: list[AgentStateSnapshotRecord],
     traces: list[AgentTraceLogRecord],
     limit: int = 5,
 ) -> list[str]:
     loops: list[str] = []
 
-    for record in consultations:
+    for record in snapshots:
+        bridge_writeback = _extract_bridge_writeback(
+            record.snapshot_json if isinstance(record.snapshot_json, dict) else None
+        )
+        follow_up_seed = _extract_bridge_follow_up_seed(bridge_writeback)
+        if isinstance(follow_up_seed, dict):
+            review_in_48h = _coerce_string(
+                follow_up_seed.get("reviewIn48h") or follow_up_seed.get("review_in_48h")
+            )
+            if review_in_48h:
+                loops.append(f"Bridge 48h review: {review_in_48h}")
+
+            tomorrow_observation_point = _coerce_string(
+                follow_up_seed.get("tomorrowObservationPoint")
+                or follow_up_seed.get("tomorrow_observation_point")
+            )
+            if tomorrow_observation_point:
+                loops.append(f"Bridge next observation: {tomorrow_observation_point}")
+
+        if record.snapshot_type != "consultation-result":
+            continue
+
         result = record.snapshot_json.get("result") if isinstance(record.snapshot_json, dict) else None
         if not isinstance(result, dict):
             continue
@@ -249,7 +316,13 @@ def _workflow_snapshot_types(workflow_type: str) -> list[str]:
     if workflow_type == "high-risk-consultation":
         return ["consultation-result", "teacher-agent-result", "parent-follow-up-result"]
     if workflow_type in {"teacher-agent", "teacher-follow-up", "parent-follow-up"}:
-        return ["consultation-result", "teacher-agent-result", "parent-follow-up-result", "session-message"]
+        return [
+            "consultation-result",
+            "teacher-agent-result",
+            "parent-follow-up-result",
+            "health-file-bridge-writeback",
+            "session-message",
+        ]
     if workflow_type == "parent-message-reflexion":
         return [
             "consultation-result",
@@ -330,6 +403,42 @@ class MemoryService:
                 },
             )
         return record
+
+    async def save_health_file_bridge_writeback(
+        self,
+        *,
+        child_id: str,
+        bridge_writeback: dict[str, Any],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentStateSnapshotRecord:
+        memory_candidate = (
+            bridge_writeback.get("memoryCandidate")
+            if isinstance(bridge_writeback.get("memoryCandidate"), dict)
+            else bridge_writeback.get("memory_candidate")
+        )
+        follow_up_seed = _extract_bridge_follow_up_seed(bridge_writeback)
+        input_summary = None
+        if isinstance(memory_candidate, dict):
+            input_summary = _coerce_string(memory_candidate.get("summary"))
+        if not input_summary and isinstance(follow_up_seed, dict):
+            input_summary = _coerce_string(
+                follow_up_seed.get("suggestionTitle") or follow_up_seed.get("suggestion_title")
+            )
+        if not input_summary:
+            input_summary = "health-file-bridge writeback"
+
+        snapshot_json: dict[str, Any] = {"bridgeWriteback": dict(bridge_writeback)}
+        if trace_id:
+            snapshot_json["traceId"] = trace_id
+
+        return await self.save_consultation_snapshot(
+            child_id=child_id,
+            session_id=session_id or trace_id,
+            snapshot_type="health-file-bridge-writeback",
+            input_summary=input_summary,
+            snapshot_json=snapshot_json,
+        )
 
     async def get_recent_snapshots(
         self,
@@ -620,7 +729,7 @@ class MemoryService:
             limit=6,
         )
         last_consultation_takeaways = _consultation_takeaways(envelope.recent_consultations)
-        open_loops = _open_loops(envelope.recent_consultations, envelope.relevant_traces)
+        open_loops = _open_loops(envelope.recent_snapshots, envelope.relevant_traces)
 
         envelope.prompt_context = MemoryPromptContext(
             long_term_traits=profile_traits,

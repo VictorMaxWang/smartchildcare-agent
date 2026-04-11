@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 import hashlib
+import logging
 from datetime import UTC, datetime, timedelta
 from threading import Event, Lock
 from time import monotonic, time
@@ -22,6 +23,8 @@ from app.providers.story_image_provider import (
     resolve_story_image_provider,
 )
 from app.services.storybook_media_cache import get_storybook_media_cache
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_STYLE_PRESET = "sunrise-watercolor"
 DEFAULT_STYLE_MODE = "preset"
@@ -139,6 +142,10 @@ def _coerce_text(value: Any) -> str:
 
 def _normalize_text(value: Any) -> str:
     return " ".join(_coerce_text(value).split())
+
+
+def _elapsed_ms(started_at: float, ended_at: float | None = None) -> int:
+    return max(0, int((((ended_at or monotonic()) - started_at)) * 1000))
 
 
 def _normalize_keywords(values: Any) -> list[str]:
@@ -1733,9 +1740,6 @@ def _build_story_scenes_v2(ingredients: dict[str, Any]) -> list[dict[str, Any]]:
                 "imagePrompt": _build_scene_image_prompt_v2(blueprint, ingredients),
                 "imageUrl": None,
                 "assetRef": None,
-                "dynamicFallbackSvg": _build_dynamic_fallback_scene_svg_v2(blueprint, scene_text, ingredients),
-                "demoArtSvg": _build_demo_art_scene_svg_v2(blueprint, scene_text, ingredients),
-                "fallbackSvg": _build_scene_fallback_svg_v2(blueprint, scene_text, ingredients),
                 "imageStatus": "fallback",
                 "audioUrl": None,
                 "audioRef": "storybook-audio-card"
@@ -1794,15 +1798,6 @@ def _build_story_seed(payload: dict[str, Any], ingredients: dict[str, Any], chil
             _normalize_text(_payload_get(payload, "requestSource", "request_source")),
         ]
     )
-
-
-def _render_with_fallback(*, primary_provider: Any, fallback_provider: Any, kwargs: dict[str, Any]) -> Any:
-    if primary_provider.__class__ is fallback_provider.__class__:
-        return primary_provider.render_scene(**kwargs)
-    try:
-        return primary_provider.render_scene(**kwargs)
-    except Exception:
-        return fallback_provider.render_scene(**kwargs)
 
 
 def _read_cached_scene(*, provider: Any, kwargs: dict[str, Any]) -> Any | None:
@@ -1923,6 +1918,13 @@ def _run_storybook_media_warm_task(
             error.stage = "image_not_ready"  # type: ignore[attr-defined]
         else:
             if _scene_has_real_audio(result):
+                _store_audio_asset(
+                    story_id=story_id,
+                    scene_index=int(kwargs["scene_index"]),
+                    audio_script=_normalize_text(kwargs.get("audio_script")),
+                    voice_style=_normalize_text(kwargs.get("voice_style")),
+                    audio_result=result,
+                )
                 _update_storybook_media_warm_channel(story_id, media_kind, success=True)
                 return
             error = RuntimeError("audio provider returned without ready audio")
@@ -2122,7 +2124,6 @@ def _resolve_scene_image_asset(
     scene_text: str,
     image_status: str,
     image_result: Any,
-    settings: Any,
     ingredients: dict[str, Any],
 ) -> tuple[str | None, str | None, str]:
     image_url = image_result.output.get("imageUrl")
@@ -2134,9 +2135,7 @@ def _resolve_scene_image_asset(
     if image_status == "ready" and image_url:
         return image_url, asset_ref or image_url, "real"
 
-    dynamic_svg = scene_blueprint.get("dynamicFallbackSvg")
-    if not isinstance(dynamic_svg, str) or not dynamic_svg.strip():
-        dynamic_svg = _build_dynamic_fallback_scene_svg_v2(render_blueprint, scene_text, ingredients)
+    dynamic_svg = _build_dynamic_fallback_scene_svg_v2(render_blueprint, scene_text, ingredients)
     if isinstance(dynamic_svg, str) and dynamic_svg.strip():
         asset_url = _store_scene_image_svg_asset(
             story_id=story_id,
@@ -2146,9 +2145,7 @@ def _resolve_scene_image_asset(
         )
         return asset_url, asset_url, "dynamic-fallback"
 
-    demo_svg = scene_blueprint.get("demoArtSvg")
-    if not isinstance(demo_svg, str) or not demo_svg.strip():
-        demo_svg = _build_demo_art_scene_svg_v2(render_blueprint, scene_text, ingredients)
+    demo_svg = _build_demo_art_scene_svg_v2(render_blueprint, scene_text, ingredients)
     if isinstance(demo_svg, str) and demo_svg.strip():
         asset_url = _store_scene_image_svg_asset(
             story_id=story_id,
@@ -2158,7 +2155,7 @@ def _resolve_scene_image_asset(
         )
         return asset_url, asset_url, "demo-art"
 
-    fallback_svg = scene_blueprint.get("fallbackSvg")
+    fallback_svg = _build_scene_fallback_svg_v2(render_blueprint, scene_text, ingredients)
     if not isinstance(fallback_svg, str) or not fallback_svg.strip():
         return image_url, asset_ref, "svg-fallback"
 
@@ -2299,14 +2296,21 @@ def _build_image_media_key(*, story_id: str, scene_index: int, scene_title: str)
     return f"storybook-media-{_stable_hash(seed, length=16)}"
 
 
-def _maybe_store_audio_asset(*, story_id: str, scene_index: int, audio_script: str, voice_style: str, audio_status: str, audio_result: Any) -> tuple[str | None, str | None]:
-    audio_url = audio_result.output.get("audioUrl")
-    audio_ref = _normalize_text(audio_result.output.get("audioRef")) or None
-    if audio_status != "ready":
-        return audio_url, audio_ref
+def _storybook_audio_media_url(media_key: str) -> str:
+    return f"/api/ai/parent-storybook/media/{media_key}"
+
+
+def _store_audio_asset(
+    *,
+    story_id: str,
+    scene_index: int,
+    audio_script: str,
+    voice_style: str,
+    audio_result: Any,
+) -> str | None:
     audio_bytes = audio_result.output.get("audioBytes")
     if not isinstance(audio_bytes, (bytes, bytearray)) or len(audio_bytes) == 0:
-        return audio_url, audio_ref
+        return None
 
     media_key = _build_media_key(
         story_id=story_id,
@@ -2324,37 +2328,33 @@ def _maybe_store_audio_asset(*, story_id: str, scene_index: int, audio_script: s
         audio_bytes=bytes(audio_bytes),
         content_type=content_type,
     )
-    return f"/api/ai/parent-storybook/media/{media_key}", media_key
+    return media_key
 
 
-def _maybe_store_fallback_image_asset(*, story_id: str, scene_blueprint: dict[str, Any], image_status: str, image_result: Any) -> tuple[str | None, str | None]:
-    image_url = image_result.output.get("imageUrl")
-    asset_ref = image_result.output.get("assetRef")
-    if image_status == "ready" and image_url:
-        return image_url, asset_ref or image_url
+def _maybe_store_audio_asset(*, story_id: str, scene_index: int, audio_script: str, voice_style: str, audio_status: str, audio_result: Any) -> tuple[str | None, str | None]:
+    audio_url = audio_result.output.get("audioUrl")
+    audio_ref = _normalize_text(audio_result.output.get("audioRef")) or None
+    if audio_status != "ready":
+        return audio_url, audio_ref
 
-    fallback_svg = scene_blueprint.get("fallbackSvg")
-    if not isinstance(fallback_svg, str) or not fallback_svg.strip():
-        return image_url, asset_ref
-
-    media_key = _build_image_media_key(
+    media_key = _build_media_key(
         story_id=story_id,
-        scene_index=scene_blueprint["sceneIndex"] - 1,
-        scene_title=scene_blueprint["sceneTitle"],
+        scene_index=scene_index,
+        audio_script=audio_script,
     )
-    get_storybook_media_cache().put_image(
-        media_key,
-        payload={
-            "storyId": story_id,
-            "sceneIndex": scene_blueprint["sceneIndex"],
-            "sceneTitle": scene_blueprint["sceneTitle"],
-            "contentType": "image/svg+xml",
-            "svg": fallback_svg,
-            "expiresAt": time() + float(get_storybook_media_cache().cache_window_seconds),
-        },
+    if get_storybook_media_cache().get_audio_asset(media_key):
+        return _storybook_audio_media_url(media_key), media_key
+
+    stored_media_key = _store_audio_asset(
+        story_id=story_id,
+        scene_index=scene_index,
+        audio_script=audio_script,
+        voice_style=voice_style,
+        audio_result=audio_result,
     )
-    asset_url = f"/api/ai/parent-storybook/media/{media_key}"
-    return asset_url, asset_url
+    if stored_media_key:
+        return _storybook_audio_media_url(stored_media_key), stored_media_key
+    return audio_url, audio_ref
 
 
 def _resolve_audio_delivery(scenes: list[dict[str, Any]]) -> Literal["real", "mixed", "preview-only"]:
@@ -2368,7 +2368,9 @@ def _resolve_audio_delivery(scenes: list[dict[str, Any]]) -> Literal["real", "mi
 
 async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     request_started_at = monotonic()
+    payload_trim_started_at = request_started_at
     first_byte_payload = _resolve_storybook_first_byte_payload(payload)
+    payload_trim_ms = _elapsed_ms(payload_trim_started_at)
     snapshot = _payload_get(first_byte_payload, "snapshot")
     if not isinstance(snapshot, dict):
         raise ValueError("snapshot is required")
@@ -2378,6 +2380,8 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("snapshot.child is required")
 
     child_id = _normalize_text(child.get("id")) or _normalize_text(_payload_get(first_byte_payload, "childId", "child_id")) or "storybook-guest"
+    request_source = _normalize_text(_payload_get(first_byte_payload, "requestSource", "request_source")) or "parent-storybook"
+    scene_build_started_at = monotonic()
     generation_mode = _resolve_generation_mode(first_byte_payload)
     highlights = _build_highlights(first_byte_payload, generation_mode)
     if not highlights:
@@ -2397,6 +2401,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     story_seed = _build_story_seed(first_byte_payload, ingredients, child_id)
     story_id = f"storybook-{_stable_hash(story_seed)}"
     generated_at = _stable_timestamp(story_seed)
+    scene_build_ms = _elapsed_ms(scene_build_started_at)
 
     settings = get_settings()
     fallback_image_provider = MockStoryImageProvider()
@@ -2469,6 +2474,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    warm_submit_started_at = monotonic()
     _ensure_storybook_media_warming(
         story_id=story_id,
         scene_requests=scene_requests,
@@ -2485,15 +2491,21 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         image_pending_scene_indices=image_pending_scene_indices,
         audio_pending_scene_indices=audio_pending_scene_indices,
     )
+    warm_submit_ms = _elapsed_ms(warm_submit_started_at)
 
     cache_hit_count = 0
+    image_cache_hit_count = 0
+    audio_cache_hit_count = 0
     scenes: list[dict[str, Any]] = []
+    fallback_asset_build_started_at = monotonic()
     for scene_request in scene_requests:
         scene_blueprint = scene_request["scene"]
         image_result = scene_request["image_result"]
         audio_result = scene_request["audio_result"]
         image_cache_hit = scene_request["image_cache_hit"] or bool(image_result.output.get("cacheHit"))
         audio_cache_hit = scene_request["audio_cache_hit"] or bool(audio_result.output.get("cacheHit"))
+        image_cache_hit_count += int(image_cache_hit)
+        audio_cache_hit_count += int(audio_cache_hit)
         cache_hit_count += int(image_cache_hit) + int(audio_cache_hit)
         image_status = image_result.output.get("imageStatus", "fallback")
         audio_status = audio_result.output.get("audioStatus", "fallback")
@@ -2503,7 +2515,6 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             scene_text=scene_blueprint["sceneText"],
             image_status=image_status,
             image_result=image_result,
-            settings=settings,
             ingredients=ingredients,
         )
         caption_timing = (
@@ -2540,6 +2551,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 "audioCacheHit": audio_cache_hit,
             }
         )
+    fallback_asset_build_ms = _elapsed_ms(fallback_asset_build_started_at)
 
     provider_mode = _provider_mode_from_scenes(scenes)
     if provider_mode == "live":
@@ -2558,7 +2570,29 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         image_provider=image_provider,
         audio_provider=audio_provider,
         scenes=scenes,
-        request_elapsed_ms=max(0, int((monotonic() - request_started_at) * 1000)),
+        request_elapsed_ms=_elapsed_ms(request_started_at),
+    )
+    first_byte_done_ms = _elapsed_ms(request_started_at)
+    logger.info(
+        "parent_storybook.first_byte story_id=%s request_source=%s payload_trim_ms=%d scene_build_ms=%d warm_submit_ms=%d fallback_asset_build_ms=%d first_byte_done_ms=%d scene_count=%d cache_hit=%s cache_hit_count=%d image_cache_hit_count=%d audio_cache_hit_count=%d image_live_enabled=%s audio_live_enabled=%s image_pending_scene_count=%d audio_pending_scene_count=%d image_provider=%s audio_provider=%s live_provider_request_thread_policy=cache-read-only",
+        story_id,
+        request_source,
+        payload_trim_ms,
+        scene_build_ms,
+        warm_submit_ms,
+        fallback_asset_build_ms,
+        first_byte_done_ms,
+        len(scenes),
+        cache_hit_count > 0,
+        cache_hit_count,
+        image_cache_hit_count,
+        audio_cache_hit_count,
+        image_live_enabled,
+        audio_live_enabled,
+        len(image_pending_scene_indices),
+        len(audio_pending_scene_indices),
+        getattr(image_provider, "provider_name", "storybook-asset"),
+        getattr(audio_provider, "provider_name", "storybook-mock-preview"),
     )
 
     return {
@@ -2605,8 +2639,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             "imageDelivery": image_delivery,
             "audioDelivery": _resolve_audio_delivery(scenes),
             "stylePreset": style_preset,
-            "requestSource": _normalize_text(_payload_get(payload, "requestSource", "request_source"))
-            or "parent-storybook",
+            "requestSource": request_source,
             "fallbackReason": fallback_reason,
             "realProvider": provider_mode in {"live", "mixed"},
             "highlightCount": len(highlights),

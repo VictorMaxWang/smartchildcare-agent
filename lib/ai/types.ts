@@ -1012,6 +1012,75 @@ export interface HealthFileBridgeActionMapping {
   parentCommunicationDraftHint: string;
 }
 
+export interface HealthFileBridgeChildScopedArtifact {
+  artifactType: "health-file-bridge";
+  childId?: string;
+  fileKind?: string;
+  fileType: HealthFileBridgeFileType;
+  summary: string;
+  extractedFacts: HealthFileBridgeFact[];
+  riskItems: HealthFileBridgeRiskItem[];
+  contraindications: HealthFileBridgeContraindication[];
+  followUpHints: HealthFileBridgeFollowUpHint[];
+  actionMapping?: HealthFileBridgeActionMapping;
+  generatedAt: string;
+}
+
+export interface HealthFileBridgeMemoryCandidate {
+  title: string;
+  summary: string;
+  continuitySignals: string[];
+  openLoops: string[];
+  sourceRefs: string[];
+}
+
+export interface HealthFileBridgeFamilyTask {
+  title: string;
+  description: string;
+}
+
+export interface HealthFileBridgeFollowUpSeed {
+  suggestionTitle: string;
+  suggestionDescription: string;
+  tonightHomeAction: string;
+  observationPoints: string[];
+  tomorrowObservationPoint: string;
+  reviewIn48h: string;
+  teacherSuggestionSummary: string;
+  familyTask: HealthFileBridgeFamilyTask;
+}
+
+export interface HealthFileBridgeProvenance {
+  bridgeOrigin: "health-file-bridge";
+  sourceRole: HealthFileBridgeSourceRole;
+  requestSource: string;
+  traceId?: string;
+  fileKind?: string;
+  fileType: HealthFileBridgeFileType;
+  source: HealthFileBridgeSource;
+  fallback: boolean;
+  mock: boolean;
+  liveReadyButNotVerified: boolean;
+  provider?: string;
+  model?: string;
+  generatedAt: string;
+}
+
+export interface HealthFileBridgeWriteback {
+  childScopedArtifacts: HealthFileBridgeChildScopedArtifact[];
+  memoryCandidate: HealthFileBridgeMemoryCandidate;
+  followUpSeed: HealthFileBridgeFollowUpSeed;
+  weeklyReportSeed: null;
+  provenance: HealthFileBridgeProvenance;
+}
+
+export interface HealthFileBridgeWritebackRequest {
+  childId: string;
+  sessionId?: string;
+  traceId?: string;
+  bridgeWriteback: HealthFileBridgeWriteback;
+}
+
 export interface HealthFileBridgeResponse {
   childId?: string;
   sourceRole: HealthFileBridgeSourceRole;
@@ -1032,6 +1101,7 @@ export interface HealthFileBridgeResponse {
   generatedAt: string;
   provider?: string;
   model?: string;
+  bridgeWriteback?: HealthFileBridgeWriteback;
 }
 
 export type IntentRouterRoleHint = "teacher" | "parent" | "admin";

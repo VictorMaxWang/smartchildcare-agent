@@ -71,3 +71,167 @@ def test_memory_context_endpoint_returns_prompt_context(tmp_path, monkeypatch):
     assert body["child_id"] == "child-1"
     assert body["prompt_context"]["long_term_traits"]
     assert body["prompt_context"]["open_loops"]
+
+
+def test_health_file_bridge_writeback_endpoint_persists_snapshot(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "memory-bridge-writeback.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    response = client.post(
+        "/api/v1/memory/health-file-bridge-writeback",
+        json={
+            "childId": "child-bridge-1",
+            "traceId": "trace-bridge-1",
+            "bridgeWriteback": {
+                "childScopedArtifacts": [
+                    {
+                        "artifactType": "health-file-bridge",
+                        "childId": "child-bridge-1",
+                        "fileKind": "health-note",
+                        "fileType": "pdf",
+                        "summary": "Bridge artifact summary",
+                        "extractedFacts": [],
+                        "riskItems": [],
+                        "contraindications": [],
+                        "followUpHints": [],
+                        "generatedAt": "2026-04-11T00:00:00Z",
+                    }
+                ],
+                "memoryCandidate": {
+                    "title": "Bridge follow-up seed",
+                    "summary": "Bridge summary for parent follow-up",
+                    "continuitySignals": ["Bridge summary for parent follow-up"],
+                    "openLoops": ["Review the file again within 48 hours"],
+                    "sourceRefs": ["pytest-memory-endpoint"],
+                },
+                "followUpSeed": {
+                    "suggestionTitle": "Bridge follow-up seed",
+                    "suggestionDescription": "Use the bridge output as a follow-up seed.",
+                    "tonightHomeAction": "Share a factual status update tonight.",
+                    "observationPoints": ["Watch temperature tonight"],
+                    "tomorrowObservationPoint": "Check the child's status at the next arrival.",
+                    "reviewIn48h": "Review the bridge signals again within 48 hours.",
+                    "teacherSuggestionSummary": "Carry the bridge wording into the next handoff.",
+                    "familyTask": {
+                        "title": "Share a status update tonight",
+                        "description": "Confirm the latest temperature and sleep status.",
+                    },
+                },
+                "weeklyReportSeed": None,
+                "provenance": {
+                    "bridgeOrigin": "health-file-bridge",
+                    "sourceRole": "parent",
+                    "requestSource": "pytest-memory-endpoint",
+                    "traceId": "trace-bridge-1",
+                    "fileKind": "health-note",
+                    "fileType": "pdf",
+                    "source": "next-local-extractor",
+                    "fallback": True,
+                    "mock": True,
+                    "liveReadyButNotVerified": True,
+                    "provider": "pytest-provider",
+                    "model": "pytest-model",
+                    "generatedAt": "2026-04-11T00:00:00Z",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["child_id"] == "child-bridge-1"
+    assert body["snapshot_type"] == "health-file-bridge-writeback"
+    assert body["snapshot_json"]["bridgeWriteback"]["provenance"]["source"] == "next-local-extractor"
+    assert (
+        body["snapshot_json"]["bridgeWriteback"]["followUpSeed"]["reviewIn48h"]
+        == "Review the bridge signals again within 48 hours."
+    )
+
+
+def test_parent_follow_up_memory_context_consumes_bridge_writeback(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "memory-bridge-follow-up.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    memory = build_memory_service()
+    asyncio.run(
+        memory.save_health_file_bridge_writeback(
+            child_id="child-bridge-2",
+            trace_id="trace-bridge-2",
+            bridge_writeback={
+                "childScopedArtifacts": [
+                    {
+                        "artifactType": "health-file-bridge",
+                        "childId": "child-bridge-2",
+                        "fileKind": "health-note",
+                        "fileType": "pdf",
+                        "summary": "Bridge artifact summary",
+                        "extractedFacts": [],
+                        "riskItems": [],
+                        "contraindications": [],
+                        "followUpHints": [],
+                        "generatedAt": "2026-04-11T00:00:00Z",
+                    }
+                ],
+                "memoryCandidate": {
+                    "title": "Bridge follow-up seed",
+                    "summary": "Bridge summary for parent follow-up",
+                    "continuitySignals": ["Bridge summary for parent follow-up"],
+                    "openLoops": ["Review the file again within 48 hours"],
+                    "sourceRefs": ["pytest-memory-context"],
+                },
+                "followUpSeed": {
+                    "suggestionTitle": "Bridge follow-up seed",
+                    "suggestionDescription": "Use the bridge output as a follow-up seed.",
+                    "tonightHomeAction": "Share a factual status update tonight.",
+                    "observationPoints": ["Watch temperature tonight"],
+                    "tomorrowObservationPoint": "Check the child's status at the next arrival.",
+                    "reviewIn48h": "Review the bridge signals again within 48 hours.",
+                    "teacherSuggestionSummary": "Carry the bridge wording into the next handoff.",
+                    "familyTask": {
+                        "title": "Share a status update tonight",
+                        "description": "Confirm the latest temperature and sleep status.",
+                    },
+                },
+                "weeklyReportSeed": None,
+                "provenance": {
+                    "bridgeOrigin": "health-file-bridge",
+                    "sourceRole": "teacher",
+                    "requestSource": "pytest-memory-context",
+                    "traceId": "trace-bridge-2",
+                    "fileKind": "health-note",
+                    "fileType": "pdf",
+                    "source": "next-local-extractor",
+                    "fallback": True,
+                    "mock": True,
+                    "liveReadyButNotVerified": True,
+                    "provider": "pytest-provider",
+                    "model": "pytest-model",
+                    "generatedAt": "2026-04-11T00:00:00Z",
+                },
+            },
+        )
+    )
+
+    response = client.post(
+        "/api/v1/memory/context",
+        json={
+            "child_id": "child-bridge-2",
+            "workflow_type": "parent-follow-up",
+            "options": {"query": "follow-up seed", "limit": 5, "top_k": 5},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(
+        "Bridge summary for parent follow-up" in item
+        for item in body["prompt_context"]["recent_continuity_signals"]
+    )
+    assert any(
+        "Review the bridge signals again within 48 hours." in item
+        for item in body["prompt_context"]["open_loops"]
+    )
+    assert any(
+        "Check the child's status at the next arrival." in item
+        for item in body["prompt_context"]["open_loops"]
+    )

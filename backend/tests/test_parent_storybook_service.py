@@ -141,6 +141,27 @@ class _SceneProvider:
         return result
 
 
+class _BlockingSceneProvider(_SceneProvider):
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        release: Event,
+        image_status: str | None = None,
+        audio_status: str | None = None,
+    ) -> None:
+        super().__init__(
+            provider_name=provider_name,
+            image_status=image_status,
+            audio_status=audio_status,
+        )
+        self.release = release
+
+    def render_scene(self, **kwargs):
+        self.release.wait(timeout=1.0)
+        return super().render_scene(**kwargs)
+
+
 def test_parent_storybook_service_returns_six_page_storybook_by_default():
     result = asyncio.run(run_parent_storybook(_base_payload()))
 
@@ -169,6 +190,40 @@ def test_parent_storybook_service_returns_six_page_storybook_by_default():
     assert "storybook_image_provider" in result["providerMeta"]["diagnostics"]["image"]["missingConfig"]
     assert result["providerMeta"]["diagnostics"]["brain"]["statusCode"] is None
     assert result["providerMeta"]["diagnostics"]["brain"]["retryStrategy"] == "none"
+
+
+def test_parent_storybook_service_first_byte_payload_trims_rich_fixture_fields():
+    payload = _heavy_payload("service-thin-payload")
+
+    first_byte_payload = parent_storybook_service._resolve_storybook_first_byte_payload(payload)
+
+    assert "recentDetails" in payload["snapshot"]
+    assert "recentDetails" not in first_byte_payload["snapshot"]
+    assert set(first_byte_payload["snapshot"].keys()) == {"child", "summary", "ruleFallback"}
+    assert set(first_byte_payload["snapshot"]["child"].keys()) == {"id", "name", "className"}
+    assert len(first_byte_payload["highlightCandidates"]) == 4
+    assert first_byte_payload["highlightCandidates"][-1]["priority"] == 4
+
+    consultation = first_byte_payload["latestConsultation"]
+    assert set(consultation.keys()) == {"summary", "homeAction", "followUp48h"}
+    assert consultation["followUp48h"] == [payload["latestConsultation"]["followUp48h"][0]]
+    assert "agentFindings" in payload["latestConsultation"]
+    assert "agentFindings" not in consultation
+    assert "evidenceItems" not in consultation
+    assert "todayInSchoolActions" not in consultation
+    assert "tonightAtHomeActions" not in consultation
+    assert "nextCheckpoints" not in consultation
+
+    intervention = first_byte_payload["latestInterventionCard"]
+    assert set(intervention.keys()) == {
+        "tonightHomeAction",
+        "tomorrowObservationPoint",
+        "reviewIn48h",
+    }
+    assert "homeSteps" in payload["latestInterventionCard"]
+    assert "homeSteps" not in intervention
+    assert "observationPoints" not in intervention
+    assert "teacherFollowupDraft" not in intervention
 
 
 def test_parent_storybook_service_marks_live_when_all_media_is_real(monkeypatch):
@@ -251,34 +306,12 @@ def test_parent_storybook_service_marks_mixed_when_only_image_is_real(monkeypatc
 def test_parent_storybook_service_heavy_payload_returns_first_byte_without_waiting_for_live_provider(
     monkeypatch,
 ):
-    class _BlockingImageProvider:
-        provider_name = "vivo-story-image"
-
-        def __init__(self) -> None:
-            self.release = Event()
-            self.calls: list[dict] = []
-
-        def read_cached_scene(self, **kwargs):
-            del kwargs
-            return None
-
-        def render_scene(self, **kwargs):
-            self.calls.append(kwargs)
-            self.release.wait(timeout=1.0)
-            return ProviderResult(
-                output={
-                    "imagePrompt": kwargs["image_prompt"],
-                    "imageUrl": "https://cdn.example.com/story-heavy.png",
-                    "assetRef": "https://cdn.example.com/story-heavy.png",
-                    "imageStatus": "ready",
-                },
-                provider=self.provider_name,
-                mode="live",
-                source="vivo",
-                model="blocking-image-v1",
-            )
-
-    image_provider = _BlockingImageProvider()
+    release = Event()
+    image_provider = _BlockingSceneProvider(
+        provider_name="vivo-story-image",
+        image_status="ready",
+        release=release,
+    )
     audio_provider = _SceneProvider(provider_name="storybook-mock-preview", audio_status="fallback")
     get_storybook_media_cache()._entries.clear()
 
@@ -306,8 +339,97 @@ def test_parent_storybook_service_heavy_payload_returns_first_byte_without_waiti
     assert first["providerMeta"]["sceneCount"] == 6
     assert all(scene["imageSourceKind"] == "dynamic-fallback" for scene in first["scenes"])
 
-    image_provider.release.set()
+    release.set()
     assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+
+def test_parent_storybook_service_heavy_payload_returns_first_byte_without_waiting_for_blocking_audio_provider(
+    monkeypatch,
+):
+    release = Event()
+    image_provider = _SceneProvider(provider_name="storybook-dynamic-fallback", image_status="fallback")
+    audio_provider = _BlockingSceneProvider(
+        provider_name="vivo-story-tts",
+        audio_status="ready",
+        release=release,
+    )
+    get_storybook_media_cache()._entries.clear()
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = _heavy_payload("service-first-byte-audio")
+    started_at = perf_counter()
+    first = asyncio.run(run_parent_storybook(payload))
+    elapsed = perf_counter() - started_at
+
+    assert elapsed < 0.4
+    assert first["providerMeta"]["transport"] == "fastapi-brain"
+    assert first["providerMeta"]["mode"] == "fallback"
+    assert first["providerMeta"]["imageDelivery"] == "dynamic-fallback"
+    assert first["providerMeta"]["audioDelivery"] == "preview-only"
+    assert first["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "disabled"
+    assert first["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
+    assert all(scene["audioStatus"] == "fallback" for scene in first["scenes"])
+
+    release.set()
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+
+def test_parent_storybook_service_heavy_payload_returns_first_byte_without_waiting_for_dual_blocking_providers(
+    monkeypatch,
+):
+    image_release = Event()
+    audio_release = Event()
+    image_provider = _BlockingSceneProvider(
+        provider_name="vivo-story-image",
+        image_status="ready",
+        release=image_release,
+    )
+    audio_provider = _BlockingSceneProvider(
+        provider_name="vivo-story-tts",
+        audio_status="ready",
+        release=audio_release,
+    )
+    get_storybook_media_cache()._entries.clear()
+
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_image_provider",
+        lambda settings: image_provider,
+    )
+    monkeypatch.setattr(
+        "app.services.parent_storybook_service.resolve_story_audio_provider",
+        lambda settings: audio_provider,
+    )
+
+    payload = _heavy_payload("service-first-byte-dual")
+    started_at = perf_counter()
+    first = asyncio.run(run_parent_storybook(payload))
+    elapsed = perf_counter() - started_at
+
+    assert elapsed < 0.5
+    assert first["providerMeta"]["transport"] == "fastapi-brain"
+    assert first["providerMeta"]["mode"] == "fallback"
+    assert first["providerMeta"]["imageDelivery"] == "dynamic-fallback"
+    assert first["providerMeta"]["audioDelivery"] == "preview-only"
+    assert first["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
+    assert first["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
+
+    image_release.set()
+    audio_release.set()
+    assert await_storybook_media_warming(first["storyId"], timeout_seconds=2.0) is True
+
+    result = asyncio.run(run_parent_storybook(payload))
+    assert result["providerMeta"]["mode"] == "live"
+    assert result["providerMeta"]["imageDelivery"] == "real"
+    assert result["providerMeta"]["audioDelivery"] == "real"
+    assert result["fallback"] is False
 
 
 def test_parent_storybook_service_heavy_payload_warms_into_mixed(monkeypatch):
