@@ -10,6 +10,11 @@ import type {
   InstitutionPriorityEvidence,
 } from "@/lib/agent/admin-types";
 import {
+  normalizeTaskEscalationSuggestion,
+  pickHighestPriorityEscalation,
+} from "@/lib/tasks/escalation-rules";
+import type { TaskEscalationSuggestion } from "@/lib/tasks/types";
+import {
   buildConsultationEvidenceHighlights,
   normalizeConsultationEvidenceItems,
 } from "@/lib/consultation/evidence";
@@ -127,6 +132,8 @@ export interface AdminConsultationFeedItem {
   syncTargets: string[];
   shouldEscalateToAdmin: boolean;
   evidenceItems: ConsultationEvidenceItem[];
+  taskEscalations?: TaskEscalationSuggestion[];
+  activeEscalation?: TaskEscalationSuggestion;
   explainabilitySummary?: AdminConsultationFeedExplainabilitySummary;
   providerTraceSummary?: AdminConsultationFeedProviderTraceSummary;
   memoryMetaSummary?: AdminConsultationFeedMemoryMetaSummary;
@@ -141,6 +148,7 @@ export interface AdminConsultationPriorityItem {
   decision: AdminConsultationDecisionViewModel;
   trace: AdminConsultationTraceViewModel;
   recommendedOwnerRole: AdminOwnerRole;
+  activeEscalation?: TaskEscalationSuggestion;
   dispatchEvent?: AdminDispatchEvent;
   dispatchBindingScope?: AdminConsultationDispatchBindingScope;
   notificationPayload?: AdminDispatchCreatePayload;
@@ -362,6 +370,19 @@ function getOwnerFallbackLabel(role?: AdminOwnerRole) {
   if (role === "admin") return "园长待分派";
   if (role === "parent") return "家园协同";
   return "班级老师";
+}
+
+function buildEscalationOwnerLabel(
+  escalation: TaskEscalationSuggestion | undefined,
+  fallbackRole?: AdminOwnerRole
+) {
+  if (!escalation) {
+    return getOwnerFallbackLabel(fallbackRole);
+  }
+
+  if (escalation.ownerRole === "admin") return "Director Attention";
+  if (escalation.ownerRole === "parent") return "Guardian Follow-up";
+  return "Teacher Review";
 }
 
 function buildProviderLabel(providerTrace: ConsultationProviderTrace | null) {
@@ -589,6 +610,13 @@ function normalizeMemoryMetaSummary(
   };
 }
 
+function normalizeEscalationList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizeTaskEscalationSuggestion(item))
+    .flatMap((item) => (item ? [item] : []));
+}
+
 function normalizeFeedEvidenceItems(value: unknown) {
   return normalizeConsultationEvidenceItems(value);
 }
@@ -625,6 +653,9 @@ export function normalizeAdminConsultationFeedItem(
     syncTargets: asStringArray(record.syncTargets, 4),
     shouldEscalateToAdmin: Boolean(record.shouldEscalateToAdmin),
     evidenceItems: normalizeFeedEvidenceItems(record.evidenceItems),
+    taskEscalations: normalizeEscalationList(record.taskEscalations),
+    activeEscalation:
+      normalizeTaskEscalationSuggestion(record.activeEscalation) ?? undefined,
     explainabilitySummary: normalizeExplainabilitySummary(record.explainabilitySummary),
     providerTraceSummary: normalizeProviderTraceSummary(record.providerTraceSummary),
     memoryMetaSummary: normalizeMemoryMetaSummary(record.memoryMetaSummary),
@@ -637,6 +668,10 @@ function buildLocalDecisionViewModel(params: {
   dispatchEvent?: AdminDispatchEvent;
 }): AdminConsultationDecisionViewModel {
   const { consultation, child, dispatchEvent } = params;
+  const resolvedEscalation =
+    normalizeTaskEscalationSuggestion(dispatchEvent?.source?.escalation) ??
+    consultation.activeEscalation ??
+    pickHighestPriorityEscalation(consultation.taskEscalations);
   const resolvedStatus = resolveDecisionStatus({
     dispatchEvent,
     directorDecisionStatus: consultation.directorDecisionCard.status,
@@ -662,6 +697,7 @@ function buildLocalDecisionViewModel(params: {
     statusSource: resolvedStatus.statusSource,
     summary: consultation.summary,
     whyHighPriority: resolveAdminWhyHighPriorityText(
+      resolvedEscalation?.escalationReason,
       consultation.directorDecisionCard.reason,
       consultation.triggerReasons[0],
       consultation.keyFindings[0],
@@ -670,7 +706,10 @@ function buildLocalDecisionViewModel(params: {
     recommendedOwnerName:
       dispatchEvent?.recommendedOwnerName ||
       consultation.directorDecisionCard.recommendedOwnerName ||
-      getOwnerFallbackLabel(consultation.directorDecisionCard.recommendedOwnerRole),
+      buildEscalationOwnerLabel(
+        resolvedEscalation,
+        consultation.directorDecisionCard.recommendedOwnerRole
+      ),
     recommendedAt,
     recommendedAtLabel: formatDateTimeLabel(recommendedAt),
     generatedAtLabel: formatDateTimeLabel(consultation.generatedAt),
@@ -845,6 +884,32 @@ function buildFeedTraceViewModel(params: {
   };
 }
 
+function resolveConsultationEscalation(params: {
+  dispatchEvent?: AdminDispatchEvent;
+  feedItem?: AdminConsultationFeedItem;
+  localConsultation?: ConsultationResult;
+}) {
+  const dispatchEscalation = normalizeTaskEscalationSuggestion(
+    params.dispatchEvent?.source?.escalation
+  );
+  if (dispatchEscalation) return dispatchEscalation;
+
+  if (params.feedItem?.activeEscalation) {
+    return params.feedItem.activeEscalation;
+  }
+
+  const feedEscalation = pickHighestPriorityEscalation(
+    params.feedItem?.taskEscalations
+  );
+  if (feedEscalation) return feedEscalation;
+
+  if (params.localConsultation?.activeEscalation) {
+    return params.localConsultation.activeEscalation;
+  }
+
+  return pickHighestPriorityEscalation(params.localConsultation?.taskEscalations);
+}
+
 function buildFeedDecisionViewModel(params: {
   feedItem: AdminConsultationFeedItem;
   child?: AdminConsultationChildMeta;
@@ -852,12 +917,18 @@ function buildFeedDecisionViewModel(params: {
   localConsultation?: ConsultationResult;
 }): AdminConsultationDecisionViewModel {
   const { feedItem, child, dispatchEvent, localConsultation } = params;
+  const resolvedEscalation = resolveConsultationEscalation({
+    dispatchEvent,
+    feedItem,
+    localConsultation,
+  });
   const resolvedStatus = resolveDecisionStatus({
     dispatchEvent,
     feedStatus: feedItem.status,
     directorDecisionStatus: feedItem.directorDecisionCard.status,
   });
   const resolvedOwnerRole =
+    (resolvedEscalation?.ownerRole as AdminOwnerRole | undefined) ||
     dispatchEvent?.recommendedOwnerRole ||
     feedItem.ownerRole ||
     feedItem.directorDecisionCard.recommendedOwnerRole ||
@@ -914,21 +985,22 @@ function buildFeedDecisionViewModel(params: {
     statusSource: resolvedStatus.statusSource,
     summary: feedItem.summary || localConsultation?.summary || "暂无会诊摘要",
     whyHighPriority: resolveAdminWhyHighPriorityText(
+      resolvedEscalation?.escalationReason,
+      sanitizeAdminWhyHighPriorityText(feedItem.whyHighPriority),
       feedItem.directorDecisionCard.reason,
       localConsultation?.directorDecisionCard.reason,
       feedItem.triggerReason,
       triggerReasons[0],
       keyFindings[0],
       feedItem.summary,
-      localConsultation?.summary,
-      sanitizeAdminWhyHighPriorityText(feedItem.whyHighPriority)
+      localConsultation?.summary
     ),
     recommendedOwnerName:
       dispatchEvent?.recommendedOwnerName ||
       feedItem.ownerName ||
       feedItem.directorDecisionCard.recommendedOwnerName ||
       localConsultation?.directorDecisionCard.recommendedOwnerName ||
-      getOwnerFallbackLabel(resolvedOwnerRole),
+      buildEscalationOwnerLabel(resolvedEscalation, resolvedOwnerRole),
     recommendedAt,
     recommendedAtLabel: formatDateTimeLabel(recommendedAt),
     generatedAtLabel: formatDateTimeLabel(feedItem.generatedAt),
@@ -992,34 +1064,47 @@ function buildPrioritySortValue(item: AdminConsultationPriorityItem) {
 }
 
 function collapsePriorityItemsByChild(items: AdminConsultationPriorityItem[]) {
-  const byChildId = new Map<string, AdminConsultationPriorityItem>();
+  const byChildId = new Map<string, AdminConsultationPriorityItem[]>();
 
   for (const item of items) {
-    const existing = byChildId.get(item.childId);
-    if (!existing) {
-      byChildId.set(item.childId, item);
+    const group = byChildId.get(item.childId) ?? [];
+    group.push(item);
+    byChildId.set(item.childId, group);
+  }
+
+  const collapsed: AdminConsultationPriorityItem[] = [];
+  for (const group of byChildId.values()) {
+    const consultationIds = new Set(group.map((item) => item.consultationId));
+    if (consultationIds.size > 1) {
+      collapsed.push(...group);
       continue;
     }
 
-    const existingSort = buildPrioritySortValue(existing);
-    const nextSort = buildPrioritySortValue(item);
-    const shouldReplace =
-      nextSort.escalation < existingSort.escalation ||
-      (nextSort.escalation === existingSort.escalation && nextSort.risk < existingSort.risk) ||
-      (nextSort.escalation === existingSort.escalation &&
-        nextSort.risk === existingSort.risk &&
-        nextSort.status < existingSort.status) ||
-      (nextSort.escalation === existingSort.escalation &&
-        nextSort.risk === existingSort.risk &&
-        nextSort.status === existingSort.status &&
-        nextSort.generatedAt > existingSort.generatedAt);
+    let best = group[0];
+    for (const item of group.slice(1)) {
+      const existingSort = buildPrioritySortValue(best);
+      const nextSort = buildPrioritySortValue(item);
+      const shouldReplace =
+        nextSort.escalation < existingSort.escalation ||
+        (nextSort.escalation === existingSort.escalation &&
+          nextSort.risk < existingSort.risk) ||
+        (nextSort.escalation === existingSort.escalation &&
+          nextSort.risk === existingSort.risk &&
+          nextSort.status < existingSort.status) ||
+        (nextSort.escalation === existingSort.escalation &&
+          nextSort.risk === existingSort.risk &&
+          nextSort.status === existingSort.status &&
+          nextSort.generatedAt > existingSort.generatedAt);
 
-    if (shouldReplace) {
-      byChildId.set(item.childId, item);
+      if (shouldReplace) {
+        best = item;
+      }
     }
+
+    collapsed.push(best);
   }
 
-  return Array.from(byChildId.values());
+  return collapsed;
 }
 
 function buildConsultationRecommendedOwnerRole(params: {
@@ -1027,8 +1112,10 @@ function buildConsultationRecommendedOwnerRole(params: {
   feedOwnerRole?: AdminOwnerRole;
   directorDecisionOwnerRole?: AdminOwnerRole;
   localConsultation?: ConsultationResult;
+  escalation?: TaskEscalationSuggestion;
 }) {
   return (
+    (params.escalation?.ownerRole as AdminOwnerRole | undefined) ||
     params.dispatchEvent?.recommendedOwnerRole ||
     params.feedOwnerRole ||
     params.directorDecisionOwnerRole ||
@@ -1038,7 +1125,10 @@ function buildConsultationRecommendedOwnerRole(params: {
 }
 
 function buildConsultationNotificationEvidence(
-  item: Pick<AdminConsultationPriorityItem, "riskLevel" | "decision" | "trace">
+  item: Pick<
+    AdminConsultationPriorityItem,
+    "riskLevel" | "decision" | "trace" | "activeEscalation"
+  >
 ) {
   const priorityScore = CONSULTATION_PRIORITY_SCORE[item.riskLevel];
   const evidence: InstitutionPriorityEvidence[] = [
@@ -1049,6 +1139,15 @@ function buildConsultationNotificationEvidence(
       detail: item.decision.summary,
     },
   ];
+
+  if (item.activeEscalation) {
+    evidence.push({
+      label: "Task escalation",
+      value: item.activeEscalation.escalationLevel,
+      weight: Math.max(priorityScore - 10, 20),
+      detail: item.activeEscalation.escalationReason,
+    });
+  }
 
   const triggerReason = item.decision.triggerReasons[0];
   if (triggerReason) {
@@ -1092,12 +1191,14 @@ export function buildAdminConsultationNotificationPayload(params: {
     | "decision"
     | "trace"
     | "recommendedOwnerRole"
+    | "activeEscalation"
   >;
   institutionName?: string;
 }): AdminDispatchCreatePayload {
   const { item } = params;
   const priorityScore = CONSULTATION_PRIORITY_SCORE[item.riskLevel];
   const recommendedAction =
+    item.activeEscalation?.recommendedNextStep ||
     item.decision.schoolActions[0] ||
     item.decision.homeActions[0] ||
     item.decision.followUpActions[0] ||
@@ -1118,7 +1219,8 @@ export function buildAdminConsultationNotificationPayload(params: {
     recommendedOwnerName: item.decision.recommendedOwnerName,
     recommendedAction,
     recommendedDeadline: item.decision.recommendedAt || item.generatedAt,
-    reasonText: item.decision.whyHighPriority,
+    reasonText:
+      item.activeEscalation?.escalationReason || item.decision.whyHighPriority,
     evidence: buildConsultationNotificationEvidence(item),
     source: {
       institutionName: params.institutionName || "当前机构",
@@ -1130,6 +1232,12 @@ export function buildAdminConsultationNotificationPayload(params: {
           : undefined,
       consultationId: item.consultationId,
       relatedConsultationIds: [item.consultationId],
+      taskId: item.activeEscalation?.taskId,
+      relatedTaskIds:
+        item.activeEscalation?.relatedTaskIds.length
+          ? item.activeEscalation.relatedTaskIds
+          : undefined,
+      escalation: item.activeEscalation,
     },
   };
 }
@@ -1182,11 +1290,17 @@ export function buildAdminConsultationPriorityItems(params: {
           const localTrace = localConsultation
             ? buildLocalTraceViewModel(localConsultation)
             : undefined;
+          const activeEscalation = resolveConsultationEscalation({
+            dispatchEvent,
+            feedItem,
+            localConsultation,
+          });
           const recommendedOwnerRole = buildConsultationRecommendedOwnerRole({
             dispatchEvent,
             feedOwnerRole: feedItem.ownerRole,
             directorDecisionOwnerRole: feedItem.directorDecisionCard.recommendedOwnerRole,
             localConsultation,
+            escalation: activeEscalation,
           });
           const priorityItem = {
             consultationId: feedItem.consultationId,
@@ -1205,6 +1319,7 @@ export function buildAdminConsultationPriorityItems(params: {
               localTrace,
             }),
             recommendedOwnerRole,
+            activeEscalation,
             dispatchEvent,
             dispatchBindingScope: dispatchBinding?.scope,
           } satisfies AdminConsultationPriorityItem;
@@ -1231,6 +1346,10 @@ export function buildAdminConsultationPriorityItems(params: {
                 visibleConsultationCountByChildId.get(consultation.childId) ?? 0,
             });
             const dispatchEvent = dispatchBinding?.event;
+            const activeEscalation = resolveConsultationEscalation({
+              dispatchEvent,
+              localConsultation: consultation,
+            });
             const priorityItem = {
               consultationId: consultation.consultationId,
               childId: consultation.childId,
@@ -1246,7 +1365,9 @@ export function buildAdminConsultationPriorityItems(params: {
               recommendedOwnerRole: buildConsultationRecommendedOwnerRole({
                 dispatchEvent,
                 localConsultation: consultation,
+                escalation: activeEscalation,
               }),
+              activeEscalation,
               dispatchEvent,
               dispatchBindingScope: dispatchBinding?.scope,
             } satisfies AdminConsultationPriorityItem;

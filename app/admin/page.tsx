@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { AlertCircle, ClipboardCheck, ShieldAlert, TrendingUp, Workflow } from "lucide-react";
+import AdminQualityMetricsPanel from "@/components/admin/AdminQualityMetricsPanel";
 import RiskPriorityBoard from "@/components/admin/RiskPriorityBoard";
 import EmptyState from "@/components/EmptyState";
 import {
@@ -199,6 +200,8 @@ export default function AdminHomePage() {
                 ))}
               </div>
             </SectionCard>
+
+            <AdminQualityMetricsPanel institutionId={currentUser.institutionId} />
 
             <div className="grid gap-6 xl:grid-cols-2">
               <SectionCard

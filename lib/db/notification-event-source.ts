@@ -1,3 +1,4 @@
+import { normalizeTaskEscalationSuggestion } from "@/lib/tasks/escalation-rules";
 import type { TaskSourceType } from "@/lib/tasks/types";
 
 const TASK_SOURCE_TYPES = new Set<TaskSourceType>([
@@ -48,6 +49,7 @@ export function normalizeAdminNotificationSource(value: unknown) {
   const sourceType = asTaskSourceType(record.sourceType);
   const sourceId = asText(record.sourceId) || undefined;
   const relatedTaskIds = asStringArray(record.relatedTaskIds);
+  const escalation = normalizeTaskEscalationSuggestion(record.escalation);
 
   if (
     !institutionName &&
@@ -59,7 +61,8 @@ export function normalizeAdminNotificationSource(value: unknown) {
     !taskId &&
     !sourceType &&
     !sourceId &&
-    relatedTaskIds.length === 0
+    relatedTaskIds.length === 0 &&
+    !escalation
   ) {
     return null;
   }
@@ -76,5 +79,6 @@ export function normalizeAdminNotificationSource(value: unknown) {
     sourceType,
     sourceId,
     relatedTaskIds: relatedTaskIds.length > 0 ? relatedTaskIds : undefined,
+    escalation: escalation ?? undefined,
   };
 }

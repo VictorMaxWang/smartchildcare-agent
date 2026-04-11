@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { normalizeAppStateSnapshot } from "@/lib/persistence/snapshot";
 import {
+  evaluateTaskEscalations,
+  pickHighestPriorityEscalation,
+} from "@/lib/tasks/escalation-rules";
+import {
   buildCurrentInterventionCardFromTask,
   buildInterventionTasksFromCard,
   buildReminderFromTask,
@@ -224,4 +228,132 @@ test("reminder status mapping keeps snoozed tasks pending", () => {
   assert.equal(mapReminderStatusToTaskStatus("acknowledged"), "in_progress");
   assert.equal(mapReminderStatusToTaskStatus("done"), "completed");
   assert.equal(mapReminderStatusToTaskStatus("snoozed"), "pending");
+});
+
+test("materialized canonical tasks support parent-completed and teacher-stalled escalation", () => {
+  const tasks = materializeTasksFromLegacy({
+    interventionCards: [
+      {
+        id: "card-stalled",
+        title: "Evening Decompression",
+        targetChildId: "c-1",
+        tonightHomeAction: "Keep a calm bedtime routine.",
+        reviewIn48h: "Check next-day drop-off.",
+        createdAt: "2026-04-08T08:00:00.000Z",
+        updatedAt: "2026-04-08T08:00:00.000Z",
+      },
+    ],
+    guardianFeedbacks: [
+      {
+        id: "feedback-stalled",
+        childId: "c-1",
+        date: "2026-04-08T19:00:00.000Z",
+        status: "completed",
+        content: "The family action was completed.",
+        interventionCardId: "card-stalled",
+        executionStatus: "completed",
+        createdBy: "Parent",
+        createdByRole: "瀹堕暱",
+      },
+    ],
+    now: "2026-04-09T10:30:00.000Z",
+  });
+
+  const parentTask = tasks.find((task) => task.ownerRole === "parent");
+  const teacherTask = tasks.find((task) => task.ownerRole === "teacher");
+  assert.equal(parentTask?.status, "completed");
+  assert.equal(teacherTask?.status, "pending");
+
+  const highest = pickHighestPriorityEscalation(
+    evaluateTaskEscalations({
+      tasks,
+      now: "2026-04-09T10:30:00.000Z",
+    })
+  );
+
+  assert.equal(highest?.taskId, teacherTask?.taskId);
+  assert.ok(highest?.triggeredRules.includes("teacher_follow_up_stalled"));
+});
+
+test("materialized canonical tasks expose repeated follow-up within 48 hours", () => {
+  const tasks = materializeTasksFromLegacy({
+    interventionCards: [
+      {
+        id: "card-repeat-1",
+        title: "Sleep Support",
+        targetChildId: "c-1",
+        tonightHomeAction: "Reduce screen time.",
+        reviewIn48h: "Check bedtime resistance.",
+        createdAt: "2026-04-09T08:00:00.000Z",
+        updatedAt: "2026-04-09T08:00:00.000Z",
+      },
+      {
+        id: "card-repeat-2",
+        title: "Morning Transition",
+        targetChildId: "c-1",
+        tonightHomeAction: "Prepare morning routine.",
+        reviewIn48h: "Check drop-off regulation.",
+        createdAt: "2026-04-10T10:00:00.000Z",
+        updatedAt: "2026-04-10T10:00:00.000Z",
+      },
+    ],
+    now: "2026-04-10T18:00:00.000Z",
+  });
+
+  const highest = pickHighestPriorityEscalation(
+    evaluateTaskEscalations({
+      tasks: tasks.filter(
+        (task) => task.ownerRole === "teacher" && task.taskType === "follow_up"
+      ),
+      now: "2026-04-10T18:00:00.000Z",
+    })
+  );
+
+  assert.ok(highest?.triggeredRules.includes("same_child_repeated_follow_up_48h"));
+  assert.equal(highest?.escalationLevel, "reconsult_required");
+});
+
+test("materialized canonical tasks escalate multiple pending tasks for the same child", () => {
+  const tasks = materializeTasksFromLegacy({
+    interventionCards: [
+      {
+        id: "card-backlog-1",
+        title: "Action One",
+        targetChildId: "c-1",
+        tonightHomeAction: "Action one",
+        reviewIn48h: "Review one",
+        createdAt: "2026-04-10T08:00:00.000Z",
+        updatedAt: "2026-04-10T08:00:00.000Z",
+      },
+      {
+        id: "card-backlog-2",
+        title: "Action Two",
+        targetChildId: "c-1",
+        tonightHomeAction: "Action two",
+        reviewIn48h: "Review two",
+        createdAt: "2026-04-10T09:00:00.000Z",
+        updatedAt: "2026-04-10T09:00:00.000Z",
+      },
+      {
+        id: "card-backlog-3",
+        title: "Action Three",
+        targetChildId: "c-1",
+        tonightHomeAction: "Action three",
+        reviewIn48h: "Review three",
+        createdAt: "2026-04-10T10:00:00.000Z",
+        updatedAt: "2026-04-10T10:00:00.000Z",
+      },
+    ],
+    now: "2026-04-10T12:00:00.000Z",
+  });
+
+  const highest = pickHighestPriorityEscalation(
+    evaluateTaskEscalations({
+      tasks,
+      now: "2026-04-10T12:00:00.000Z",
+    })
+  );
+
+  assert.equal(highest?.escalationLevel, "director_attention");
+  assert.ok(highest?.triggeredRules.includes("multiple_pending_tasks_same_child"));
 });

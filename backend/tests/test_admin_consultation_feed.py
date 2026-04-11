@@ -35,6 +35,8 @@ def build_consultation_result(
     owner_name: str,
     status: str,
     trigger_reason: str,
+    task_escalations: list[dict] | None = None,
+    active_escalation: dict | None = None,
 ) -> tuple[dict, dict]:
     payload = {
         "targetChildId": child_id,
@@ -89,6 +91,10 @@ def build_consultation_result(
         "realProvider": False,
         "fallback": True,
     }
+    if task_escalations is not None:
+        raw["taskEscalations"] = task_escalations
+    if active_escalation is not None:
+        raw["activeEscalation"] = active_escalation
 
     normalized = normalize_high_risk_consultation_result(
         raw,
@@ -115,6 +121,46 @@ def seed_feed_snapshots():
         owner_name="Director Wang",
         status="pending",
         trigger_reason="urgent family loop is still open",
+        task_escalations=[
+            {
+                "taskId": "task-child-1-followup",
+                "childId": "child-1",
+                "shouldEscalate": True,
+                "escalationLevel": "director_attention",
+                "escalationReason": "Repeated follow-up needs director attention.",
+                "recommendedNextStep": "Review and consolidate the follow-up loop today.",
+                "triggeredRules": ["same_child_repeated_follow_up_48h"],
+                "relatedTaskIds": ["task-child-1-followup", "task-child-1-parent"],
+                "ownerRole": "admin",
+                "dueRiskWindow": {
+                    "referenceDueAt": "2026-04-07T12:00:00+08:00",
+                    "windowStartAt": "2026-04-06T12:00:00+08:00",
+                    "windowEndAt": "2026-04-09T12:00:00+08:00",
+                    "status": "overdue",
+                    "hoursOverdue": 8,
+                    "label": "Overdue by 8h",
+                },
+            }
+        ],
+        active_escalation={
+            "taskId": "task-child-1-followup",
+            "childId": "child-1",
+            "shouldEscalate": True,
+            "escalationLevel": "director_attention",
+            "escalationReason": "Repeated follow-up needs director attention.",
+            "recommendedNextStep": "Review and consolidate the follow-up loop today.",
+            "triggeredRules": ["same_child_repeated_follow_up_48h"],
+            "relatedTaskIds": ["task-child-1-followup", "task-child-1-parent"],
+            "ownerRole": "admin",
+            "dueRiskWindow": {
+                "referenceDueAt": "2026-04-07T12:00:00+08:00",
+                "windowStartAt": "2026-04-06T12:00:00+08:00",
+                "windowEndAt": "2026-04-09T12:00:00+08:00",
+                "status": "overdue",
+                "hoursOverdue": 8,
+                "label": "Overdue by 8h",
+            },
+        },
     )
     _, result_two = build_consultation_result(
         child_id="child-2",
@@ -232,6 +278,8 @@ def test_admin_consultation_feed_reads_snapshots_and_skips_invalid(tmp_path, mon
     assert first_item["providerTraceSummary"]["transport"] == "fastapi-brain"
     assert first_item["memoryMetaSummary"]["backend"] == "sqlite"
     assert first_item["memoryMetaSummary"]["usedSources"]
+    assert first_item["taskEscalations"][0]["taskId"] == "task-child-1-followup"
+    assert first_item["activeEscalation"]["escalationLevel"] == "director_attention"
 
 
 def test_admin_consultation_feed_filters_by_status_owner_and_escalation(tmp_path, monkeypatch):

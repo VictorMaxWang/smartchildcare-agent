@@ -10,7 +10,7 @@ import {
   buildTasksFromFollowUpCardContext,
   pickActiveTask,
 } from "@/lib/tasks/task-model";
-import type { CanonicalTask } from "@/lib/tasks/types";
+import type { CanonicalTask, FollowUpTask } from "@/lib/tasks/types";
 
 function mergeTasks(...taskGroups: Array<CanonicalTask[] | undefined>) {
   const taskMap = new Map<string, CanonicalTask>();
@@ -22,6 +22,10 @@ function mergeTasks(...taskGroups: Array<CanonicalTask[] | undefined>) {
   return Array.from(taskMap.values());
 }
 
+function isFollowUpTask(task: CanonicalTask | undefined): task is FollowUpTask {
+  return Boolean(task && task.taskType === "follow_up");
+}
+
 function buildTaskContext(payload: AiFollowUpPayload) {
   if (payload.scope === "institution" || !("child" in payload.snapshot)) {
     return {
@@ -29,8 +33,10 @@ function buildTaskContext(payload: AiFollowUpPayload) {
       tasks: payload.tasks ?? [],
       currentInterventionCard: payload.currentInterventionCard,
       followUpTask:
-        payload.tasks?.find((task) => task.ownerRole === "teacher" && task.taskType === "follow_up") ??
-        (payload.activeTask?.ownerRole === "teacher" && payload.activeTask.taskType === "follow_up"
+        payload.tasks?.find(
+          (task): task is FollowUpTask => task.ownerRole === "teacher" && task.taskType === "follow_up"
+        ) ??
+        (isFollowUpTask(payload.activeTask) && payload.activeTask.ownerRole === "teacher"
           ? payload.activeTask
           : undefined),
     };
@@ -62,7 +68,9 @@ function buildTaskContext(payload: AiFollowUpPayload) {
             relatedTasks: tasks,
           })
         : undefined),
-    followUpTask: tasks.find((task) => task.ownerRole === "teacher" && task.taskType === "follow_up"),
+    followUpTask: tasks.find(
+      (task): task is FollowUpTask => task.ownerRole === "teacher" && task.taskType === "follow_up"
+    ),
   };
 }
 

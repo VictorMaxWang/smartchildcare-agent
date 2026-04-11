@@ -19,6 +19,8 @@
 - T7 health-file-bridge：`/teacher/health-file-bridge`、`/api/ai/health-file-bridge` 与 backend schema/service skeleton 已落地；OCR / writeback / live escalation 仍未验证
 - T24/T25 Teacher Copilot：backend contract 与 `/teacher/agent` UI 已合入；仍缺人工 walkthrough
 - T26 Weekly Report V2：backend-only contract / generator / route 已落地，`/api/ai/weekly-report` 与 FastAPI `/api/v1/agents/reports/weekly` 已能区分 `teacher / admin / parent`；页面接入仍留给 `T27`
+- T28 Admin 质量驾驶舱 metrics engine：backend-only 聚合链路已落地，`POST /api/v1/agents/metrics/admin-quality` 可稳定输出 8 个 named metrics 与 `source / fallback / confidence / coverage`
+- T29 Admin 质量驾驶舱 UI：`/admin` 已新增第二层治理区，位于风险优先级与 TOP 3 之后、风险儿童/班级区之前；仍需完整 walkthrough / 录屏再验
 - staging 与 vivo provider：仍必须保守表达，不写成 `fully healthy`、`fully switched` 或 `fully live`
 
 ## 最稳定 Walkthrough
@@ -134,8 +136,8 @@
 | `T25` | Teacher Copilot：UI 接入 | `Done-code-only` | Teacher Copilot | `T24` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T26` | Weekly Report V2：三版本行动化 schema / generator | `Done-code-only` | Actionized Weekly Report | - | 中 | generator smoke | `TR+A` |
 | `T27` | Weekly Report V2：前端接入 | `Planned` | Actionized Weekly Report | `T26` | 中 | walkthrough / 录屏 | `TR+L+A` |
-| `T28` | Admin 质量驾驶舱：metrics engine | `Planned` | Admin 质量治理 | - | 中 | aggregation smoke | `TR+A` |
-| `T29` | Admin 质量驾驶舱：UI | `Planned` | Admin 质量治理 | `T28` | 中 | walkthrough / 录屏 | `TR+L+A` |
+| `T28` | Admin 质量驾驶舱：metrics engine | `Done-code-only` | Admin 质量治理 | - | 中 | aggregation smoke | `TR+A` |
+| `T29` | Admin 质量驾驶舱：UI | `Done-code-only` | Admin 质量治理 | `T28` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T30` | 需求洞察引擎 | `Done-code-only` | 需求洞察与信任透明 | - | 中 | aggregation smoke / walkthrough | `TR+A` |
 | `T31` | 信任透明层 | `Planned` | 需求洞察与信任透明 | `T18`、`T19`、`T30` | 中低 | walkthrough / 录屏 | `TR+L+A` |
 
@@ -163,6 +165,8 @@
 - `T7` 已落地 `/teacher/health-file-bridge` 页面、`/api/ai/health-file-bridge` 桥接与 backend `health_file_bridge` schema/service skeleton；当前仍是 skeleton，不宣称 OCR / writeback / escalation 已闭环
 - `T6` 已把主视角补水表达收敛到状态化文案；底层 hydration 数据仍保留给趋势、聚合与风险判断链路
 - `T26` 已把 weekly report shared contract 扩到 `schemaVersion / role / sections / primaryAction`，并保持旧 `summary / highlights / risks / nextWeekActions / trendPrediction` 字段兼容；三角色 backend section ids 已固定，但页面级 walkthrough 与 UI shape 细化仍未开始，不写成 `T27` 已完成
+- `T28` 已落地 `backend/app/schemas/admin_quality_metrics.py`、`backend/app/services/admin_quality_metrics_engine.py`、`backend/app/services/orchestrator.py` 与 `POST /api/v1/agents/metrics/admin-quality`；当前输出 8 个 named metrics，并携带 `window / sourceSummary / source / fallback / warnings`
+- `T29` 已在 `/admin` 主列挂入独立质量驾驶舱区块，通过 `app/api/ai/admin-quality-metrics/route.ts` 薄代理与 `components/admin/AdminQualityMetricsPanel.tsx` 展示 8 个指标；UI 显式保留 `source / fallback / confidence / coverage`，不把 demo/proxy 指标包装成真实机构经营结论
 - `T30` 已落地 `backend/app/services/demand_insight_engine.py`、`backend/app/schemas/demand_insight.py` 与 `/api/v1/agents/insights/demand`；当前稳定输出 `topConcernTopics`、`consultationTriggerHeat`、`actionDifficultyTopics`、`weakFeedbackSegments`、`recurringIssueClusters`，并附带 `window / sourceSummary / dataQuality / source / fallback / warnings`
 - `T30` 当前主数据链路来自 `backend/app/db/childcare_repository.py` 的 `children / feedback / growth / health / meals / taskCheckIns / interventionCards / reminders`，叠加 memory snapshots 里的 `consultation-result`；`weekly-report-result` 与 `parent-follow-up-result` 仅作为辅助来源统计或弱信号，不宣称真实机构运营洞察
 

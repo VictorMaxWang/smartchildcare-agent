@@ -1,11 +1,12 @@
 import type { ConsultationResult, ReminderItem } from "@/lib/ai/types";
 import type { InterventionCard } from "@/lib/agent/intervention-card";
+import { pickHighestPriorityEscalation } from "@/lib/tasks/escalation-rules";
 import {
   buildConsultationAdminTask,
   buildInterventionTasksFromCard,
   buildReminderFromTask,
 } from "@/lib/tasks/task-model";
-import type { CanonicalTask } from "@/lib/tasks/types";
+import type { CanonicalTask, TaskEscalationSuggestion } from "@/lib/tasks/types";
 
 function dedupeReminders(items: ReminderItem[]) {
   const reminderMap = new Map<string, ReminderItem>();
@@ -64,4 +65,28 @@ export function getReminderStatusLabel(status: ReminderItem["status"]) {
   if (status === "snoozed") return "稍后提醒";
   if (status === "acknowledged") return "已确认";
   return "待提醒";
+}
+
+export function getReminderEscalationSummary(params: {
+  task: CanonicalTask;
+  taskEscalations?: TaskEscalationSuggestion[] | null;
+}) {
+  const matchingEscalation = pickHighestPriorityEscalation(
+    (params.taskEscalations ?? []).filter(
+      (item) =>
+        item.taskId === params.task.taskId ||
+        item.relatedTaskIds.includes(params.task.taskId)
+    )
+  );
+
+  if (!matchingEscalation) {
+    return null;
+  }
+
+  return {
+    escalationLevel: matchingEscalation.escalationLevel,
+    escalationReason: matchingEscalation.escalationReason,
+    recommendedNextStep: matchingEscalation.recommendedNextStep,
+    dueRiskLabel: matchingEscalation.dueRiskWindow.label,
+  };
 }

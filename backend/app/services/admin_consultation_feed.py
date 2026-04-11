@@ -323,6 +323,12 @@ async def list_high_risk_consultation_feed(
             "followUp48h": follow_up_48h,
             "syncTargets": _build_sync_targets(normalized_result),
             "shouldEscalateToAdmin": bool(normalized_result.get("shouldEscalateToAdmin")),
+            "taskEscalations": [
+                record
+                for record in (safe_dict(item) for item in safe_list(normalized_result.get("taskEscalations")))
+                if record
+            ],
+            "activeEscalation": safe_dict(normalized_result.get("activeEscalation")) or None,
             "evidenceItems": _build_evidence_items(normalized_result),
             "explainabilitySummary": _build_explainability_summary(normalized_result),
             "providerTraceSummary": _build_provider_trace_summary(

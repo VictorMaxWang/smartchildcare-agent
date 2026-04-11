@@ -56,3 +56,77 @@ export interface FollowUpTask extends BaseTask {
 }
 
 export type CanonicalTask = InterventionTask | FollowUpTask;
+
+export type TaskEscalationRuleCode =
+  | "overdue_48h"
+  | "continuous_non_completion"
+  | "guardian_feedback_negative_no_improvement"
+  | "same_child_repeated_follow_up_48h"
+  | "teacher_follow_up_stalled"
+  | "multiple_pending_tasks_same_child"
+  | "legacy_low_response_proxy";
+
+export type TaskEscalationLevel =
+  | "none"
+  | "review_required"
+  | "reconsult_required"
+  | "director_attention";
+
+export interface TaskEscalationDueRiskWindow {
+  referenceDueAt: string;
+  windowStartAt: string;
+  windowEndAt: string;
+  status: "on_track" | "due_soon" | "overdue";
+  hoursOverdue: number;
+  label: string;
+}
+
+export interface TaskEscalationSuggestion {
+  taskId: string;
+  childId: string;
+  shouldEscalate: boolean;
+  escalationLevel: TaskEscalationLevel;
+  escalationReason: string;
+  recommendedNextStep: string;
+  triggeredRules: TaskEscalationRuleCode[];
+  relatedTaskIds: string[];
+  ownerRole: TaskOwnerRole;
+  dueRiskWindow: TaskEscalationDueRiskWindow;
+}
+
+export interface TaskEscalationFeedbackSignal {
+  childId: string;
+  date: string;
+  interventionCardId?: string;
+  status?: string;
+  content?: string;
+  executionStatus?: "completed" | "partial" | "not_started";
+  executed?: boolean;
+  improved?: boolean | "unknown";
+  freeNote?: string;
+}
+
+export interface TaskEscalationTaskCheckInSignal {
+  childId: string;
+  taskId: string;
+  date: string;
+}
+
+export interface TaskEscalationReminderSignal {
+  reminderId?: string;
+  childId?: string;
+  taskId?: string;
+  sourceId?: string;
+  sourceType?: TaskSourceType;
+  reminderType?: string;
+  scheduledAt?: string;
+  status?: "pending" | "acknowledged" | "done" | "snoozed";
+}
+
+export interface EvaluateTaskEscalationsInput {
+  tasks: CanonicalTask[];
+  guardianFeedbacks?: TaskEscalationFeedbackSignal[];
+  taskCheckIns?: TaskEscalationTaskCheckInSignal[];
+  reminders?: TaskEscalationReminderSignal[];
+  now?: string;
+}

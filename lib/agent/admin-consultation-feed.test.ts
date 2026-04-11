@@ -250,6 +250,161 @@ test("normalizeAdminConsultationFeedItem keeps valid feed payloads and rejects m
   );
 });
 
+test("buildAdminConsultationPriorityItems projects feed escalation into decision and notification payload", () => {
+  const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
+    feedItems: [
+      {
+        consultationId: "consult-escalation-feed",
+        childId: "child-1",
+        generatedAt: "2026-04-08T10:30:00.000Z",
+        riskLevel: "high",
+        summary: "Escalation projection test",
+        directorDecisionCard: {
+          title: "Escalation Decision",
+          status: "pending",
+          recommendedAt: "2026-04-08T12:30:00.000Z",
+        },
+        shouldEscalateToAdmin: true,
+        activeEscalation: {
+          taskId: "task-feed-escalation",
+          childId: "child-1",
+          shouldEscalate: true,
+          escalationLevel: "director_attention",
+          escalationReason: "Repeated follow-up needs director attention.",
+          recommendedNextStep: "Review and consolidate the follow-up loop today.",
+          triggeredRules: ["same_child_repeated_follow_up_48h"],
+          relatedTaskIds: ["task-feed-escalation", "task-feed-related"],
+          ownerRole: "admin",
+          dueRiskWindow: {
+            referenceDueAt: "2026-04-08T12:30:00.000Z",
+            windowStartAt: "2026-04-07T12:30:00.000Z",
+            windowEndAt: "2026-04-10T12:30:00.000Z",
+            status: "overdue",
+            hoursOverdue: 20,
+            label: "Overdue by 20h",
+          },
+        },
+      },
+    ],
+    children: [{ id: "child-1", name: "瀹夊畨", className: "鍚戞棩钁电彮" }],
+    notificationEvents: [],
+    limit: 4,
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.decision.whyHighPriority, "Repeated follow-up needs director attention.");
+  assert.equal(
+    items[0]?.notificationPayload?.recommendedAction,
+    "Review and consolidate the follow-up loop today."
+  );
+  assert.equal(
+    items[0]?.notificationPayload?.reasonText,
+    "Repeated follow-up needs director attention."
+  );
+  assert.equal(items[0]?.notificationPayload?.source.taskId, "task-feed-escalation");
+  assert.equal(
+    items[0]?.notificationPayload?.source.escalation?.escalationLevel,
+    "director_attention"
+  );
+  assert.equal(items[0]?.notificationPayload?.evidence[1]?.label, "Task escalation");
+});
+
+test("buildAdminConsultationPriorityItems lets notification source escalation override feed metadata", () => {
+  const items = buildAdminConsultationPriorityItems({
+    institutionName: "SmartChildcare",
+    feedItems: [
+      {
+        consultationId: "consult-escalation-override",
+        childId: "child-1",
+        generatedAt: "2026-04-08T10:30:00.000Z",
+        riskLevel: "high",
+        summary: "Dispatch escalation override test",
+        directorDecisionCard: {
+          title: "Override Decision",
+          status: "pending",
+          recommendedAt: "2026-04-08T12:30:00.000Z",
+        },
+        shouldEscalateToAdmin: true,
+        activeEscalation: {
+          taskId: "task-feed-review",
+          childId: "child-1",
+          shouldEscalate: true,
+          escalationLevel: "review_required",
+          escalationReason: "Teacher review is due soon.",
+          recommendedNextStep: "Check with the teacher.",
+          triggeredRules: ["teacher_follow_up_stalled"],
+          relatedTaskIds: ["task-feed-review"],
+          ownerRole: "teacher",
+          dueRiskWindow: {
+            referenceDueAt: "2026-04-08T12:30:00.000Z",
+            windowStartAt: "2026-04-07T12:30:00.000Z",
+            windowEndAt: "2026-04-10T12:30:00.000Z",
+            status: "due_soon",
+            hoursOverdue: 0,
+            label: "Due in 4h",
+          },
+        },
+      },
+    ],
+    children: [{ id: "child-1", name: "瀹夊畨", className: "鍚戞棩钁电彮" }],
+    notificationEvents: [
+      buildNotificationEvent({
+        id: "event-escalation-override",
+        priorityItemId: "consult-escalation-override",
+        source: {
+          institutionName: "SmartChildcare",
+          workflow: "daily-priority",
+          relatedChildIds: ["child-1"],
+          relatedClassNames: ["鍚戞棩钁电彮"],
+          consultationId: "consult-escalation-override",
+          relatedConsultationIds: ["consult-escalation-override"],
+          escalation: {
+            taskId: "task-dispatch-director",
+            childId: "child-1",
+            shouldEscalate: true,
+            escalationLevel: "director_attention",
+            escalationReason: "Dispatch source requires director attention.",
+            recommendedNextStep: "Assign a director review before noon.",
+            triggeredRules: ["multiple_pending_tasks_same_child"],
+            relatedTaskIds: ["task-dispatch-director", "task-feed-review"],
+            ownerRole: "admin",
+            dueRiskWindow: {
+              referenceDueAt: "2026-04-08T12:30:00.000Z",
+              windowStartAt: "2026-04-07T12:30:00.000Z",
+              windowEndAt: "2026-04-10T12:30:00.000Z",
+              status: "overdue",
+              hoursOverdue: 12,
+              label: "Overdue by 12h",
+            },
+          },
+        },
+      }),
+    ],
+    limit: 4,
+  });
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.decision.whyHighPriority, "Dispatch source requires director attention.");
+  assert.equal(items[0]?.recommendedOwnerRole, "admin");
+  assert.equal(
+    items[0]?.decision.recommendedOwnerName,
+    items[0]?.dispatchEvent?.recommendedOwnerName
+  );
+  assert.equal(
+    items[0]?.notificationPayload?.reasonText,
+    "Dispatch source requires director attention."
+  );
+  assert.equal(
+    items[0]?.notificationPayload?.recommendedAction,
+    "Assign a director review before noon."
+  );
+  assert.equal(
+    items[0]?.notificationPayload?.source.escalation?.taskId,
+    "task-dispatch-director"
+  );
+});
+
 test("buildAdminConsultationPriorityItems prefers backend-native actions, sync targets and consultation-level overlay", () => {
   const items = buildAdminConsultationPriorityItems({
     institutionName: "SmartChildcare",

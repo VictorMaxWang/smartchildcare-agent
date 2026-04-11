@@ -235,7 +235,8 @@
 - 是否适合并行：中
 - 最小验收方式：桥接输出能直接给出园内动作、家庭动作、复查点与升级建议
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 trace walkthrough
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 当前完成边界：backend-only metrics engine 已落地，`POST /api/v1/agents/metrics/admin-quality` 与 schema / engine / orchestrator 已可供前端消费；完整 UI 接入留给 `T29`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T10｜外部健康文件桥接助手：写回主系统闭环
@@ -251,7 +252,8 @@
 - 是否适合并行：中低
 - 最小验收方式：桥接输出能在 memory / consultation / follow-up / weekly report 至少一条主链路中被真实消费
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 当前完成边界：`/admin` 首页已接入不打断主流程的质量驾驶舱 UI，8 个 named metrics 通过薄 Next route 展示；仍需完整 walkthrough / 录屏再验后再升到 `Demo-ready`
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T11｜关怀模式 / 祖辈模式：大字卡片 + 简化交互

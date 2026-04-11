@@ -1,5 +1,5 @@
 import type { AiFollowUpMessage, InstitutionSuggestionSnapshot, MemoryContextMeta } from "@/lib/ai/types";
-import type { TaskSourceType } from "@/lib/tasks/types";
+import type { TaskEscalationSuggestion, TaskSourceType } from "@/lib/tasks/types";
 
 export type AdminAgentWorkflowType = "daily-priority" | "question-follow-up" | "weekly-ops-report";
 export type InstitutionPriorityTargetType = "child" | "class" | "issue" | "family";
@@ -137,6 +137,7 @@ export interface AdminDispatchCreatePayload {
     sourceType?: TaskSourceType;
     sourceId?: string;
     relatedTaskIds?: string[];
+    escalation?: TaskEscalationSuggestion;
   };
 }
 
@@ -178,6 +179,7 @@ export interface AdminDispatchEvent {
     sourceType?: TaskSourceType;
     sourceId?: string;
     relatedTaskIds?: string[];
+    escalation?: TaskEscalationSuggestion;
   } | null;
   createdBy: string;
   updatedBy: string;

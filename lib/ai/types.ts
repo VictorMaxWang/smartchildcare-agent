@@ -1,5 +1,10 @@
 import type { AppStateSnapshot } from "@/lib/persistence/snapshot";
-import type { CanonicalTask, FollowUpTask, TaskSourceType } from "@/lib/tasks/types";
+import type {
+  CanonicalTask,
+  FollowUpTask,
+  TaskEscalationSuggestion,
+  TaskSourceType,
+} from "@/lib/tasks/types";
 
 export type AiRiskLevel = "low" | "medium" | "high";
 export type AiTrendPrediction = "up" | "stable" | "down";
@@ -218,6 +223,8 @@ export interface HighRiskConsultationResult {
   observationPoints: string[];
   reviewIn48h: string;
   shouldEscalateToAdmin: boolean;
+  taskEscalations?: TaskEscalationSuggestion[];
+  activeEscalation?: TaskEscalationSuggestion;
   continuityNotes?: string[];
   memoryMeta?: MemoryContextMeta;
   source: ConsultationResultSource;
@@ -463,6 +470,8 @@ export interface AiFollowUpPayload {
   };
   activeTask?: CanonicalTask;
   tasks?: CanonicalTask[];
+  taskEscalations?: TaskEscalationSuggestion[];
+  activeEscalation?: TaskEscalationSuggestion;
   institutionContext?: {
     priorityTopItems: InstitutionPrioritySummaryItem[];
     pendingDispatches?: InstitutionSuggestionSnapshot["pendingDispatches"];
@@ -493,6 +502,8 @@ export interface AiFollowUpResponse {
   memoryMeta?: MemoryContextMeta;
   followUpTask?: FollowUpTask;
   tasks?: CanonicalTask[];
+  taskEscalations?: TaskEscalationSuggestion[];
+  activeEscalation?: TaskEscalationSuggestion;
   disclaimer: string;
   source: "ai" | "fallback" | "mock";
   model?: string;
