@@ -2,6 +2,10 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { normalizeAppStateSnapshot, type AppStateSnapshot } from "@/lib/persistence/snapshot";
+import {
+  filterChildrenForSessionUser,
+  scopeSnapshotForSessionUser,
+} from "@/lib/persistence/state-scope";
 import type { ConsultationResult, MobileDraft, MobileDraftSyncStatus, ReminderItem } from "@/lib/ai/types";
 import {
   normalizeGuardianFeedbackCollection,
@@ -2214,15 +2218,7 @@ function buildFreshDemoSnapshot(targetToday = getLocalToday()): AppStateSnapshot
 }
 
 function filterChildrenByUser(children: Child[], user: User) {
-  if (user.role === "机构管理员") {
-    return children.filter((child) => child.institutionId === user.institutionId);
-  }
-  if (user.role === "教师") {
-    return children.filter(
-      (child) => child.institutionId === user.institutionId && child.className === user.className
-    );
-  }
-  return children.filter((child) => child.parentUserId === user.id || user.childIds?.includes(child.id));
+  return filterChildrenForSessionUser(children, user);
 }
 
 function startOfDay(dateString: string) {
@@ -4118,10 +4114,39 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
   const isNormalUser = isAuthenticated && currentUser.accountKind === "normal";
   const currentStorageNamespace =
     isNormalUser && currentUser.institutionId
-      ? currentUser.institutionId
+      ? `normal:${currentUser.institutionId}:${currentUser.role}:${currentUser.id}`
       : isDemoUser
         ? `demo:${DEMO_DATASET_VERSION}:${currentUser.id}`
         : null;
+  const snapshotStateRef = useRef({
+    children: [] as Child[],
+    attendance: [] as AttendanceRecord[],
+    meals: [] as MealRecord[],
+    growth: [] as GrowthRecord[],
+    feedback: [] as GuardianFeedback[],
+    health: [] as HealthCheckRecord[],
+    taskCheckIns: [] as TaskCheckInRecord[],
+    interventionCards: [] as InterventionCard[],
+    consultations: [] as ConsultationResult[],
+    mobileDrafts: [] as MobileDraft[],
+    reminders: [] as ReminderItem[],
+    tasks: [] as CanonicalTask[],
+  });
+
+  snapshotStateRef.current = {
+    children: childrenList,
+    attendance: attendanceRecords,
+    meals: mealRecords,
+    growth: growthRecords,
+    feedback: guardianFeedbacks,
+    health: healthCheckRecords,
+    taskCheckIns: taskCheckInRecords,
+    interventionCards,
+    consultations,
+    mobileDrafts,
+    reminders,
+    tasks,
+  };
 
   const applySnapshot = useCallback((snapshot: AppStateSnapshot) => {
     setChildrenList(snapshot.children);
@@ -4140,34 +4165,21 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
 
   const buildSnapshotWithOverride = useCallback(
     (override?: Partial<AppStateSnapshot>): AppStateSnapshot => ({
-      children: override?.children ?? childrenList,
-      attendance: override?.attendance ?? attendanceRecords,
-      meals: override?.meals ?? mealRecords,
-      growth: override?.growth ?? growthRecords,
-      feedback: override?.feedback ?? guardianFeedbacks,
-      health: override?.health ?? healthCheckRecords,
-      taskCheckIns: override?.taskCheckIns ?? taskCheckInRecords,
-      interventionCards: override?.interventionCards ?? interventionCards,
-      consultations: override?.consultations ?? consultations,
-      mobileDrafts: override?.mobileDrafts ?? mobileDrafts,
-      reminders: override?.reminders ?? reminders,
-      tasks: override?.tasks ?? tasks,
+      children: override?.children ?? snapshotStateRef.current.children,
+      attendance: override?.attendance ?? snapshotStateRef.current.attendance,
+      meals: override?.meals ?? snapshotStateRef.current.meals,
+      growth: override?.growth ?? snapshotStateRef.current.growth,
+      feedback: override?.feedback ?? snapshotStateRef.current.feedback,
+      health: override?.health ?? snapshotStateRef.current.health,
+      taskCheckIns: override?.taskCheckIns ?? snapshotStateRef.current.taskCheckIns,
+      interventionCards: override?.interventionCards ?? snapshotStateRef.current.interventionCards,
+      consultations: override?.consultations ?? snapshotStateRef.current.consultations,
+      mobileDrafts: override?.mobileDrafts ?? snapshotStateRef.current.mobileDrafts,
+      reminders: override?.reminders ?? snapshotStateRef.current.reminders,
+      tasks: override?.tasks ?? snapshotStateRef.current.tasks,
       updatedAt: override?.updatedAt ?? new Date().toISOString(),
     }),
-    [
-      childrenList,
-      attendanceRecords,
-      mealRecords,
-      growthRecords,
-      guardianFeedbacks,
-      healthCheckRecords,
-      taskCheckInRecords,
-      interventionCards,
-      consultations,
-      mobileDrafts,
-      reminders,
-      tasks,
-    ]
+    []
   );
 
   useEffect(() => {
@@ -4183,9 +4195,38 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     );
   }, [consultations, guardianFeedbacks, interventionCards, reminders, taskCheckInRecords]);
 
-  const remoteSnapshot = useMemo<AppStateSnapshot>(() => buildSnapshotWithOverride(), [
-    buildSnapshotWithOverride,
-  ]);
+  const remoteSnapshot = useMemo<AppStateSnapshot>(
+    () =>
+      buildSnapshotWithOverride({
+        children: childrenList,
+        attendance: attendanceRecords,
+        meals: mealRecords,
+        growth: growthRecords,
+        feedback: guardianFeedbacks,
+        health: healthCheckRecords,
+        taskCheckIns: taskCheckInRecords,
+        interventionCards,
+        consultations,
+        mobileDrafts,
+        reminders,
+        tasks,
+      }),
+    [
+      buildSnapshotWithOverride,
+      childrenList,
+      attendanceRecords,
+      mealRecords,
+      growthRecords,
+      guardianFeedbacks,
+      healthCheckRecords,
+      taskCheckInRecords,
+      interventionCards,
+      consultations,
+      mobileDrafts,
+      reminders,
+      tasks,
+    ]
+  );
 
   const remoteSnapshotKey = useMemo(() => JSON.stringify(remoteSnapshot), [remoteSnapshot]);
 
@@ -4260,12 +4301,11 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
 
       if (isDemoUser) {
         lastSyncedSnapshotKeyRef.current = null;
-        applySnapshot(
-          readScopedSnapshot(
-            currentStorageNamespace ?? `demo:${currentUser.id}`,
-            buildFreshDemoSnapshot(getLocalToday())
-          )
+        const demoSnapshot = readScopedSnapshot(
+          currentStorageNamespace ?? `demo:${currentUser.id}`,
+          buildFreshDemoSnapshot(getLocalToday())
         );
+        applySnapshot(scopeSnapshotForSessionUser(demoSnapshot, currentUser));
         if (active) {
           setDataLoading(false);
         }
@@ -4283,7 +4323,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
 
       const fallbackSnapshot = emptyInstitutionSnapshot();
       const localSnapshot = readScopedSnapshot(currentStorageNamespace, fallbackSnapshot);
-      applySnapshot(localSnapshot);
+      applySnapshot(scopeSnapshotForSessionUser(localSnapshot, currentUser));
       lastSyncedSnapshotKeyRef.current = null;
 
       try {
@@ -4303,8 +4343,9 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
           return;
         }
 
-        applySnapshot(data.snapshot);
-        lastSyncedSnapshotKeyRef.current = JSON.stringify(data.snapshot);
+        const scopedSnapshot = scopeSnapshotForSessionUser(data.snapshot, currentUser);
+        applySnapshot(scopedSnapshot);
+        lastSyncedSnapshotKeyRef.current = JSON.stringify(scopedSnapshot);
       } catch {
         // Remote sync remains optional during local development.
       } finally {
@@ -4319,7 +4360,7 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [authLoading, applySnapshot, currentStorageNamespace, currentUser.id, isAuthenticated, isDemoUser, isSnapshotEffectivelyEmpty]);
+  }, [authLoading, applySnapshot, currentStorageNamespace, currentUser, isAuthenticated, isDemoUser, isSnapshotEffectivelyEmpty]);
 
   const persistAppSnapshotNow = useCallback(
     async (override?: Partial<AppStateSnapshot>): Promise<PersistAppSnapshotResult> => {

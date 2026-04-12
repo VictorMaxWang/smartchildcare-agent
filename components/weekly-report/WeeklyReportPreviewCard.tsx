@@ -25,6 +25,7 @@ type WeeklyReportPreviewCardProps = {
   ctaVariant?: "outline" | "premium" | "secondary";
   className?: string;
   careMode?: boolean;
+  showRuntimeMeta?: boolean;
 };
 
 function pickCareSection(report: WeeklyReportResponse | null) {
@@ -51,9 +52,10 @@ export default function WeeklyReportPreviewCard({
   ctaVariant = "outline",
   className,
   careMode = false,
+  showRuntimeMeta = true,
 }: WeeklyReportPreviewCardProps) {
   const roleMeta = getWeeklyReportRoleMeta(role);
-  const sourceMeta = report ? getWeeklyReportSourceMeta(report.source) : null;
+  const sourceMeta = report && showRuntimeMeta ? getWeeklyReportSourceMeta(report.source) : null;
   const careSection = pickCareSection(report);
   const speechText = buildParentSpeechScript({
     title,
@@ -76,7 +78,7 @@ export default function WeeklyReportPreviewCard({
         report ? (
           <ParentSpeakButton
             text={speechText}
-            label={"\u64ad\u62a5\u6458\u8981"}
+            label="播报摘要"
             careMode={careMode}
             className={careMode ? "min-w-[220px]" : ""}
           />
@@ -87,13 +89,11 @@ export default function WeeklyReportPreviewCard({
         <div className="flex flex-wrap gap-2">
           <Badge variant="info">{roleMeta.label}</Badge>
           <Badge variant="outline">{periodLabel}</Badge>
-          {!careMode && sourceMeta ? (
-            <Badge variant={sourceMeta.variant}>{sourceMeta.label}</Badge>
-          ) : null}
-          {!careMode && report?.source === "ai" && report.model ? (
+          {!careMode && sourceMeta ? <Badge variant={sourceMeta.variant}>{sourceMeta.label}</Badge> : null}
+          {!careMode && showRuntimeMeta && report?.source === "ai" && report.model ? (
             <Badge variant="outline">{report.model}</Badge>
           ) : null}
-          {!careMode && report?.memoryMeta?.degraded ? (
+          {!careMode && showRuntimeMeta && report?.memoryMeta?.degraded ? (
             <Badge variant="warning">Stable fallback</Badge>
           ) : null}
           {loading && report ? <Badge variant="secondary">Refreshing</Badge> : null}
@@ -130,19 +130,13 @@ export default function WeeklyReportPreviewCard({
             {careMode ? (
               careSection ? (
                 <div className="rounded-3xl border border-slate-100 bg-white p-4">
-                  <p className="text-base font-semibold text-slate-900">
-                    {careSection.title}
-                  </p>
-                  <p className="mt-3 text-base leading-8 text-slate-700">
-                    {careSection.summary}
-                  </p>
+                  <p className="text-base font-semibold text-slate-900">{careSection.title}</p>
+                  <p className="mt-3 text-base leading-8 text-slate-700">{careSection.summary}</p>
                   {careSection.items.length > 0 ? (
                     <ul className="mt-4 space-y-3 text-base leading-7 text-slate-600">
                       {careSection.items.slice(0, 2).map((item) => (
                         <li key={`${careSection.id}-${item.label}`}>
-                          <span className="font-medium text-slate-800">
-                            {item.label}:
-                          </span>{" "}
+                          <span className="font-medium text-slate-800">{item.label}:</span>{" "}
                           {item.detail}
                         </li>
                       ))}
@@ -162,19 +156,13 @@ export default function WeeklyReportPreviewCard({
                         : ""
                     )}
                   >
-                    <p className="text-sm font-semibold text-slate-900">
-                      {section.title}
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      {section.summary}
-                    </p>
+                    <p className="text-sm font-semibold text-slate-900">{section.title}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{section.summary}</p>
                     {section.items.length > 0 ? (
                       <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
                         {section.items.slice(0, 2).map((item) => (
                           <li key={`${section.id}-${item.label}`}>
-                            <span className="font-medium text-slate-800">
-                              {item.label}:
-                            </span>{" "}
+                            <span className="font-medium text-slate-800">{item.label}:</span>{" "}
                             {item.detail}
                           </li>
                         ))}
@@ -190,7 +178,7 @@ export default function WeeklyReportPreviewCard({
             {loading ? (
               <div className="flex items-center gap-3 text-sm text-slate-600">
                 <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
-                Generating weekly preview…
+                Generating weekly preview...
               </div>
             ) : error ? (
               <div className="flex items-start gap-3 text-sm text-amber-800">
@@ -198,9 +186,7 @@ export default function WeeklyReportPreviewCard({
                 <p>{error}</p>
               </div>
             ) : (
-              <p className="text-sm text-slate-500">
-                Weekly preview is unavailable right now.
-              </p>
+              <p className="text-sm text-slate-500">Weekly preview is unavailable right now.</p>
             )}
           </div>
         )}
@@ -209,15 +195,11 @@ export default function WeeklyReportPreviewCard({
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-2">
               <Badge variant="secondary">
-                {report?.primaryAction
-                  ? report.primaryAction.title
-                  : "Continue tonight's home action"}
+                {report?.primaryAction ? report.primaryAction.title : "Continue tonight's home action"}
               </Badge>
               <p
                 className={
-                  careMode
-                    ? "text-base leading-8 text-slate-700"
-                    : "text-sm leading-6 text-slate-700"
+                  careMode ? "text-base leading-8 text-slate-700" : "text-sm leading-6 text-slate-700"
                 }
               >
                 {report?.primaryAction?.detail ??
@@ -240,7 +222,7 @@ export default function WeeklyReportPreviewCard({
           </div>
         </div>
 
-        {!careMode && report?.disclaimer ? (
+        {!careMode && showRuntimeMeta && report?.disclaimer ? (
           <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-xs leading-6 text-slate-500">
             {report.disclaimer}
           </div>

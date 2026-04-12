@@ -77,13 +77,15 @@ export default function TeacherWorkbenchPage() {
     >
       <RoleSplitLayout
         main={
-          <div className="space-y-6">
-            <MetricGrid
+          <div className="flex flex-col gap-6">
+            <div className="order-last">
+              <MetricGrid
               items={viewModel.heroStats.map((item, index) => ({
                 ...item,
                 tone: index === 0 ? "amber" : index === 1 ? "sky" : index === 2 ? "indigo" : "emerald",
               }))}
-            />
+              />
+            </div>
 
             <SectionCard title="今日异常儿童" description="优先处理晨检异常，避免高频事项被淹没。">
               <div className="space-y-3">
@@ -196,7 +198,7 @@ export default function TeacherWorkbenchPage() {
           <div className="space-y-6">
             <UnifiedIntentEntryCard
               roleHint="teacher"
-              sourcePage="/teacher/home"
+              sourcePage="/teacher"
               title="一句话让老师助手帮你找对入口"
               placeholder="例如：帮我看看今天最需要优先处理的孩子，或生成本周周报"
               examples={[

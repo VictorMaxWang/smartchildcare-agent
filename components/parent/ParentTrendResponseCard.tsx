@@ -65,11 +65,11 @@ function formatTrendErrorMessage(error: string | null) {
     trimmed.includes("未接通") ||
     trimmed.includes("后端趋势服务")
   ) {
-    return "后端趋势服务暂时未接通，当前只能先显示失败态，请稍后再试。";
+    return "趋势解读暂时不可用，请稍后再试。";
   }
 
   if (lower.includes("timeout") || trimmed.includes("超时")) {
-    return "后端趋势服务响应超时，请稍后再试。";
+    return "趋势解读响应超时，请稍后再试。";
   }
 
   return trimmed;

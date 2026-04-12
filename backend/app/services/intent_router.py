@@ -40,6 +40,10 @@ PRIORITY_KEYWORDS = (
     "top 3",
     "top3",
     "p1",
+    "最该先处理",
+    "最该先处理什么",
+    "最需要优先处理",
+    "优先处理的孩子",
     "优先",
     "优先级",
     "最该处理",
@@ -267,6 +271,29 @@ def route_intent(payload: IntentRouterRequest | dict[str, Any]) -> dict[str, Any
                 child_id=request.child_id,
             ),
             rule_id="intent-router:teacher:start_consultation:v1",
+            confidence="medium",
+            matched_signals=matched_signals,
+        )
+    elif effective_role == "teacher" and intent == "view_priority":
+        response = IntentRouterResponse(
+            detected_role=effective_role,
+            intent=intent,
+            target_workflow="teacher.agent.follow-up",
+            target_page="/teacher/agent",
+            deeplink=_append_query("/teacher/agent", [("action", "follow-up"), ("childId", request.child_id)]),
+            preview_card=_preview_card(
+                "查看今日优先处理孩子",
+                "将当前诉求路由到教师今日跟进工作流，优先打开最需要先处理的孩子与后续动作。",
+                "打开今日跟进",
+                ["teacher", "view_priority"],
+            ),
+            optional_payload=_optional_payload(
+                "teacher-agent-run",
+                message=request.message,
+                workflow="follow-up",
+                child_id=request.child_id,
+            ),
+            rule_id="intent-router:teacher:view_priority:v1",
             confidence="medium",
             matched_signals=matched_signals,
         )

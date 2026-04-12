@@ -99,6 +99,7 @@ export default function TeacherAgentPage() {
   const [, startTransition] = useTransition();
   const preloadHandledRef = useRef<string | null>(null);
   const queryChildHandledRef = useRef<string | null>(null);
+  const queryDraftHandledRef = useRef<string | null>(null);
   const sourceDraftChildHandledRef = useRef<string | null>(null);
   const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
   const [selectedSourceDraftId, setSelectedSourceDraftId] = useState<string | null>(
@@ -108,7 +109,7 @@ export default function TeacherAgentPage() {
   const preloadAction = searchParams.get("action");
   const queryDraftId = searchParams.get("draftId");
   const queryChildId = searchParams.get("childId");
-  const effectiveQueryChildId = useMemo(
+  const seededQueryChildId = useMemo(
     () =>
       queryChildId && visibleChildren.some((child) => child.id === queryChildId)
         ? queryChildId
@@ -119,11 +120,11 @@ export default function TeacherAgentPage() {
     if (isWorkflow(preloadAction)) {
       return preloadAction;
     }
-    if (routeIntent === "record_observation" && effectiveQueryChildId) {
+    if (routeIntent === "record_observation" && seededQueryChildId) {
       return "follow-up";
     }
     return null;
-  }, [effectiveQueryChildId, preloadAction, routeIntent]);
+  }, [preloadAction, routeIntent, seededQueryChildId]);
   const intentEntryHint =
     routeIntent === "record_observation"
       ? "已从统一入口定位到观察记录入口，可先确认草稿，或直接生成今日跟进行动。"
@@ -147,11 +148,45 @@ export default function TeacherAgentPage() {
     [currentUser.className, currentUser.institutionId, currentUser.name, currentUser.role, guardianFeedbacks, growthRecords, healthCheckRecords, presentChildren, visibleChildren]
   );
   const defaultChildId = useMemo(() => pickTeacherAgentDefaultChildId(classContext) ?? "", [classContext]);
-  const selectedChildContext = useMemo(
-    () => buildTeacherAgentChildContext(classContext, selectedChildId || defaultChildId),
-    [classContext, defaultChildId, selectedChildId]
+  const availableChildIds = useMemo(
+    () => new Set(visibleChildren.map((child) => child.id)),
+    [visibleChildren]
   );
-  const latestResult = history.at(-1)?.result ?? null;
+  const activeChildId = useMemo(() => {
+    if (selectedChildId && availableChildIds.has(selectedChildId)) {
+      return selectedChildId;
+    }
+
+    if (seededQueryChildId && availableChildIds.has(seededQueryChildId)) {
+      return seededQueryChildId;
+    }
+
+    return defaultChildId;
+  }, [availableChildIds, defaultChildId, seededQueryChildId, selectedChildId]);
+  const activeChildContext = useMemo(
+    () => buildTeacherAgentChildContext(classContext, activeChildId),
+    [activeChildId, classContext]
+  );
+  const latestChildResult = useMemo(
+    () =>
+      [...history]
+        .reverse()
+        .find(
+          (item) =>
+            item.result.mode === "child" &&
+            item.result.targetChildId &&
+            item.result.targetChildId === activeChildId
+        )?.result ?? null,
+    [activeChildId, history]
+  );
+  const latestClassResult = useMemo(
+    () => [...history].reverse().find((item) => item.result.mode === "class")?.result ?? null,
+    [history]
+  );
+  const currentResult = useMemo(
+    () => (scope === "class" ? latestClassResult : latestChildResult),
+    [latestChildResult, latestClassResult, scope]
+  );
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportResponse | null>(null);
   const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
   const [weeklyReportError, setWeeklyReportError] = useState<string | null>(null);
@@ -173,9 +208,9 @@ export default function TeacherAgentPage() {
   const teacherDrafts = useMemo(
     () =>
       teacherRoleDrafts.filter(
-        (draft) => draft.targetRole === "teacher" && (!selectedChildContext || draft.childId === selectedChildContext.child.id)
+        (draft) => draft.targetRole === "teacher" && (!activeChildContext || draft.childId === activeChildContext.child.id)
       ),
-    [selectedChildContext, teacherRoleDrafts]
+    [activeChildContext, teacherRoleDrafts]
   );
   const sortedTeacherDrafts = useMemo(
     () =>
@@ -184,7 +219,7 @@ export default function TeacherAgentPage() {
       ),
     [teacherDrafts]
   );
-  const teacherVoiceSourceDrafts = useMemo<TeacherVoiceSourceDraftItem[]>(
+  const allTeacherVoiceSourceDrafts = useMemo<TeacherVoiceSourceDraftItem[]>(
     () =>
       teacherRoleDrafts
         .flatMap((draft) => {
@@ -214,47 +249,54 @@ export default function TeacherAgentPage() {
         .sort((left, right) => right.draft.updatedAt.localeCompare(left.draft.updatedAt)),
     [teacherRoleDrafts, visibleChildren]
   );
+  const teacherVoiceSourceDrafts = useMemo(
+    () =>
+      allTeacherVoiceSourceDrafts.filter(
+        (item) => !activeChildContext || item.draft.childId === activeChildContext.child.id
+      ),
+    [activeChildContext, allTeacherVoiceSourceDrafts]
+  );
   const teacherReminders = useMemo(
     () =>
       reminders.filter(
         (item) =>
-          (item.targetRole === "teacher" || item.targetRole === "admin") &&
-          (!selectedChildContext || item.childId === selectedChildContext.child.id)
+          item.targetRole === "teacher" &&
+          (!activeChildContext || item.childId === activeChildContext.child.id)
       ),
-    [reminders, selectedChildContext]
+    [activeChildContext, reminders]
   );
 
   const createVoiceDraft = useCallback(() => {
-    if (!selectedChildContext) return;
+    if (!activeChildContext) return;
     saveMobileDraft(
       buildMockVoiceDraft({
-        childId: selectedChildContext.child.id,
+        childId: activeChildContext.child.id,
         targetRole: "teacher",
-        childName: selectedChildContext.child.name,
+        childName: activeChildContext.child.name,
         scenario: "teacher-observation",
       })
     );
-  }, [saveMobileDraft, selectedChildContext]);
+  }, [activeChildContext, saveMobileDraft]);
 
   const createOcrDraft = useCallback(() => {
-    if (!selectedChildContext) return;
+    if (!activeChildContext) return;
     saveMobileDraft(
       buildMockOcrDraft({
-        childId: selectedChildContext.child.id,
+        childId: activeChildContext.child.id,
         targetRole: "teacher",
-        childName: selectedChildContext.child.name,
+        childName: activeChildContext.child.name,
       })
     );
-  }, [saveMobileDraft, selectedChildContext]);
+  }, [activeChildContext, saveMobileDraft]);
 
   const handleCreateMockUnderstandingDraft = useCallback(
     (transcript: string) => {
-      if (!selectedChildContext) return;
+      if (!activeChildContext) return;
 
       const understanding = buildTeacherVoiceUnderstandFallback({
         transcript,
-        childId: selectedChildContext.child.id,
-        childName: selectedChildContext.child.name,
+        childId: activeChildContext.child.id,
+        childName: activeChildContext.child.name,
         attachmentName: "mock-understanding-note.txt",
         scene: "teacher-agent-t5a-demo",
         inputMode: "json",
@@ -267,14 +309,14 @@ export default function TeacherAgentPage() {
 
       saveMobileDraft(
         createMobileDraft({
-          childId: selectedChildContext.child.id,
+          childId: activeChildContext.child.id,
           draftType: "voice",
           targetRole: "teacher",
           content: transcript,
           attachmentName: "mock-understanding-note.txt",
           syncStatus: "local_pending",
           structuredPayload: createTeacherVoiceDraftPayload({
-            childName: selectedChildContext.child.name,
+            childName: activeChildContext.child.name,
             transcript: understanding.transcript.text,
             upload: {
               draftContent: transcript,
@@ -291,25 +333,16 @@ export default function TeacherAgentPage() {
         })
       );
     },
-    [saveMobileDraft, selectedChildContext]
+    [activeChildContext, saveMobileDraft]
   );
 
   const selectedStructuredDraftSource = useMemo(() => {
     if (selectedSourceDraftId) {
-      const selectedSource = teacherVoiceSourceDrafts.find(
+      const selectedSource = allTeacherVoiceSourceDrafts.find(
         (item) => item.draft.draftId === selectedSourceDraftId
       );
       if (selectedSource) {
         return selectedSource;
-      }
-    }
-
-    if (queryDraftId) {
-      const querySource = teacherVoiceSourceDrafts.find(
-        (item) => item.draft.draftId === queryDraftId
-      );
-      if (querySource) {
-        return querySource;
       }
     }
 
@@ -318,7 +351,7 @@ export default function TeacherAgentPage() {
       teacherVoiceSourceDrafts[0] ??
       null
     );
-  }, [queryDraftId, selectedSourceDraftId, teacherVoiceSourceDrafts]);
+  }, [allTeacherVoiceSourceDrafts, selectedSourceDraftId, teacherVoiceSourceDrafts]);
 
   const fallbackTeacherSourceDraft = useMemo(() => {
     if (selectedStructuredDraftSource) {
@@ -342,8 +375,8 @@ export default function TeacherAgentPage() {
       transcript: fallbackTeacherSourceDraft.content,
       childId: fallbackTeacherSourceDraft.childId,
       childName:
-        selectedChildContext?.child.id === fallbackTeacherSourceDraft.childId
-          ? selectedChildContext.child.name
+        activeChildContext?.child.id === fallbackTeacherSourceDraft.childId
+          ? activeChildContext.child.name
           : undefined,
       attachmentName: fallbackTeacherSourceDraft.attachmentName,
       scene: "teacher-agent-t5a-fallback",
@@ -357,7 +390,7 @@ export default function TeacherAgentPage() {
       asrConfidence: null,
       asrFallback: true,
     });
-  }, [fallbackTeacherSourceDraft, selectedChildContext]);
+  }, [activeChildContext, fallbackTeacherSourceDraft]);
 
   const fallbackStructuredPayload = useMemo(() => {
     if (!fallbackTeacherSourceDraft || !fallbackUnderstanding) {
@@ -366,8 +399,8 @@ export default function TeacherAgentPage() {
 
     return createTeacherVoiceDraftPayload({
       childName:
-        selectedChildContext?.child.id === fallbackTeacherSourceDraft.childId
-          ? selectedChildContext.child.name
+        activeChildContext?.child.id === fallbackTeacherSourceDraft.childId
+          ? activeChildContext.child.name
           : undefined,
       transcript: fallbackUnderstanding.transcript.text,
       upload: {
@@ -384,7 +417,7 @@ export default function TeacherAgentPage() {
       },
       understanding: fallbackUnderstanding,
     });
-  }, [fallbackTeacherSourceDraft, fallbackUnderstanding, selectedChildContext]);
+  }, [activeChildContext, fallbackTeacherSourceDraft, fallbackUnderstanding]);
 
   const draftPayloadOverrides = useMemo(() => {
     if (!fallbackTeacherSourceDraft || !fallbackStructuredPayload) {
@@ -444,7 +477,7 @@ export default function TeacherAgentPage() {
           fallbackStructuredPayload.transcript || fallbackStructuredPayload.t5Seed.transcript,
         childName:
           visibleChildren.find((child) => child.id === fallbackTeacherSourceDraft.childId)?.name ??
-          selectedChildContext?.child.name,
+          activeChildContext?.child.name,
         sourceDraftLabel: `${fallbackTeacherSourceDraft.draftType.toUpperCase()} 草稿`,
         sourceModeLabel: "本地 Fallback Understanding",
         sourceSyncStatusLabel: getDraftSyncStatusLabel(
@@ -461,13 +494,13 @@ export default function TeacherAgentPage() {
   }, [
     fallbackStructuredPayload,
     fallbackTeacherSourceDraft,
-    selectedChildContext?.child.name,
+    activeChildContext?.child.name,
     selectedStructuredDraftSource,
     visibleChildren,
   ]);
 
   const mockDraftPresets = useMemo(() => {
-    const childName = selectedChildContext?.child.name ?? "当前幼儿";
+    const childName = activeChildContext?.child.name ?? "当前幼儿";
 
     return [
       {
@@ -489,29 +522,30 @@ export default function TeacherAgentPage() {
         transcript: `${childName} 下午因为咳嗽提前离园，家长表示今晚会在家观察，明早再反馈是否返园。`,
       },
     ];
-  }, [selectedChildContext]);
+  }, [activeChildContext]);
 
   useEffect(() => {
-    if (queryDraftId) {
+    if (queryDraftId && queryDraftHandledRef.current !== queryDraftId) {
+      queryDraftHandledRef.current = queryDraftId;
       setSelectedSourceDraftId(queryDraftId);
     }
   }, [queryDraftId]);
 
   useEffect(() => {
     if (
-      queryChildId &&
-      queryChildHandledRef.current !== queryChildId &&
-      visibleChildren.some((child) => child.id === queryChildId)
+      !selectedChildId &&
+      seededQueryChildId &&
+      queryChildHandledRef.current !== seededQueryChildId
     ) {
-      queryChildHandledRef.current = queryChildId;
-      setSelectedChildId(queryChildId);
+      queryChildHandledRef.current = seededQueryChildId;
+      setSelectedChildId(seededQueryChildId);
       return;
     }
 
-    if (!selectedChildId || !visibleChildren.some((child) => child.id === selectedChildId)) {
+    if (selectedChildId && !availableChildIds.has(selectedChildId)) {
       setSelectedChildId(defaultChildId);
     }
-  }, [defaultChildId, queryChildId, selectedChildId, visibleChildren]);
+  }, [availableChildIds, defaultChildId, seededQueryChildId, selectedChildId]);
 
   useEffect(() => {
     const sourceDraft = selectedStructuredDraftSource?.draft ?? fallbackTeacherSourceDraft;
@@ -519,33 +553,66 @@ export default function TeacherAgentPage() {
       return;
     }
 
-    if (sourceDraftChildHandledRef.current === sourceDraft.draftId) {
+    if (!availableChildIds.has(sourceDraft.childId)) {
       return;
     }
 
-    if (!visibleChildren.some((child) => child.id === sourceDraft.childId)) {
+    const shouldTakeOverChild =
+      selectedSourceDraftId === sourceDraft.draftId ||
+      !activeChildId ||
+      !availableChildIds.has(activeChildId);
+
+    if (!shouldTakeOverChild) {
+      return;
+    }
+
+    if (
+      sourceDraftChildHandledRef.current === sourceDraft.draftId &&
+      selectedChildId === sourceDraft.childId
+    ) {
       return;
     }
 
     sourceDraftChildHandledRef.current = sourceDraft.draftId;
     setSelectedChildId(sourceDraft.childId);
-  }, [fallbackTeacherSourceDraft, selectedStructuredDraftSource, visibleChildren]);
+  }, [
+    activeChildId,
+    availableChildIds,
+    fallbackTeacherSourceDraft,
+    selectedChildId,
+    selectedSourceDraftId,
+    selectedStructuredDraftSource,
+  ]);
+
+  const handleSelectChild = useCallback(
+    (nextChildId: string) => {
+      setSelectedChildId(nextChildId);
+      setSelectedSourceDraftId((current) => {
+        if (!current) return null;
+        const selectedDraft = allTeacherVoiceSourceDrafts.find(
+          (item) => item.draft.draftId === current
+        );
+        return selectedDraft?.draft.childId === nextChildId ? current : null;
+      });
+    },
+    [allTeacherVoiceSourceDrafts]
+  );
 
   const handleSelectSourceDraft = useCallback(
     (draft: MobileDraft) => {
       setSelectedSourceDraftId(draft.draftId);
-      if (draft.childId && visibleChildren.some((child) => child.id === draft.childId)) {
+      if (draft.childId && availableChildIds.has(draft.childId)) {
         setSelectedChildId(draft.childId);
       }
     },
-    [visibleChildren]
+    [availableChildIds]
   );
 
   const runWorkflow = useCallback(async (workflow: TeacherAgentWorkflowType) => {
     const nextScope: TeacherAgentMode = workflow === "weekly-summary" ? "class" : "child";
     const targetChildId =
       nextScope === "child"
-        ? effectiveQueryChildId || selectedChildId || defaultChildId
+        ? activeChildId
         : undefined;
 
     if (nextScope === "child" && !targetChildId) {
@@ -591,8 +658,12 @@ export default function TeacherAgentPage() {
       const result = (await response.json()) as TeacherAgentResult;
       const resultChildId = result.targetChildId ?? targetChildId;
 
+      if (resultChildId && availableChildIds.has(resultChildId)) {
+        setSelectedChildId(resultChildId);
+      }
+
       if (resultChildId) {
-        teacherDrafts
+        teacherRoleDrafts
           .filter((draft) => draft.childId === resultChildId && draft.syncStatus === "local_pending")
           .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
 
@@ -628,17 +699,16 @@ export default function TeacherAgentPage() {
     currentUser.institutionId,
     currentUser.name,
     currentUser.role,
-    defaultChildId,
+    activeChildId,
+    availableChildIds,
     guardianFeedbacks,
     growthRecords,
     healthCheckRecords,
     presentChildren,
-    selectedChildId,
-    teacherDrafts,
+    teacherRoleDrafts,
     visibleChildren,
     markMobileDraftSyncStatus,
     upsertReminder,
-    effectiveQueryChildId,
   ]);
 
   useEffect(() => {
@@ -716,7 +786,7 @@ export default function TeacherAgentPage() {
       description="这一轮教师 Agent 直接围绕班级上下文、单个儿童上下文和三个核心工作流展开：家长沟通建议、今日跟进行动、本周观察总结。"
       actions={
         <>
-          <InlineLinkButton href="/teacher/home" label="返回教师工作台" />
+          <InlineLinkButton href="/teacher" label="返回教师工作台" />
           <InlineLinkButton href="/teacher/agent" label="刷新教师 AI 助手" variant="premium" />
         </>
       }
@@ -753,7 +823,7 @@ export default function TeacherAgentPage() {
                   <div className="rounded-3xl bg-slate-50 p-4">
                     <p className="text-sm font-semibold text-slate-900">当前服务对象</p>
                     <p className="mt-2 text-2xl font-semibold text-slate-900">
-                      {scope === "class" ? `${classContext.visibleChildren.length} 名幼儿` : selectedChildContext?.child.name ?? "未选择"}
+                      {scope === "class" ? `${classContext.visibleChildren.length} 名幼儿` : activeChildContext?.child.name ?? "未选择"}
                     </p>
                   </div>
                 </div>
@@ -761,7 +831,7 @@ export default function TeacherAgentPage() {
                 {scope === "child" ? (
                   <div className="max-w-md">
                     <p className="mb-2 text-sm font-semibold text-slate-900">选择目标儿童</p>
-                    <Select value={selectedChildId || defaultChildId} onValueChange={setSelectedChildId}>
+                    <Select value={activeChildId} onValueChange={handleSelectChild}>
                       <SelectTrigger>
                         <SelectValue placeholder="选择目标儿童" />
                       </SelectTrigger>
@@ -784,22 +854,22 @@ export default function TeacherAgentPage() {
 
             <SectionCard title="今日异常摘要" description="展示真实业务数据，不再只显示固定壳。">
               <div className="space-y-3">
-                {scope === "child" && selectedChildContext ? (
+                {scope === "child" && activeChildContext ? (
                   <>
-                    {selectedChildContext.todayAbnormalChecks.length > 0 ? (
-                      selectedChildContext.todayAbnormalChecks.map((record) => (
+                    {activeChildContext.todayAbnormalChecks.length > 0 ? (
+                      activeChildContext.todayAbnormalChecks.map((record) => (
                         <div key={record.id} className="rounded-3xl border border-rose-100 bg-rose-50/60 p-4 text-sm text-slate-700">
-                          {record.date} · {selectedChildContext.child.name} · 体温 {record.temperature}℃ · {record.mood} · {record.handMouthEye}
+                          {record.date} · {activeChildContext.child.name} · 体温 {record.temperature}℃ · {record.mood} · {record.handMouthEye}
                           {record.remark ? ` · ${record.remark}` : ""}
                         </div>
                       ))
                     ) : (
                       <div className="rounded-3xl border border-slate-100 bg-white p-4 text-sm text-slate-600">
-                        {selectedChildContext.child.name} 今日暂无晨检异常，适合继续围绕待复查记录和家长反馈生成建议。
+                        {activeChildContext.child.name} 今日暂无晨检异常，适合继续围绕待复查记录和家长反馈生成建议。
                       </div>
                     )}
 
-                    {selectedChildContext.pendingReviews.slice(0, 2).map((record) => (
+                    {activeChildContext.pendingReviews.slice(0, 2).map((record) => (
                       <div key={record.id} className="rounded-3xl border border-amber-100 bg-amber-50/60 p-4 text-sm text-slate-700">
                         待复查 · {record.category} · {record.followUpAction ?? record.description}
                       </div>
@@ -821,11 +891,11 @@ export default function TeacherAgentPage() {
             <SectionCard title="移动端协同入口" description="教师可先用语音速记或 OCR 形成本地草稿，工作流完成后再同步。">
               <div className="space-y-4">
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" className="rounded-full" onClick={createVoiceDraft} disabled={!selectedChildContext}>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={createVoiceDraft} disabled={!activeChildContext}>
                     <Mic className="mr-2 h-4 w-4" />
                     语音速记
                   </Button>
-                  <Button type="button" variant="outline" className="rounded-full" onClick={createOcrDraft} disabled={!selectedChildContext}>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={createOcrDraft} disabled={!activeChildContext}>
                     <ScanSearch className="mr-2 h-4 w-4" />
                     OCR 草稿
                   </Button>
@@ -988,8 +1058,8 @@ export default function TeacherAgentPage() {
                   </div>
                 ) : null}
 
-                {latestResult ? (
-                  <TeacherAgentResultCard result={latestResult} />
+                {currentResult ? (
+                  <TeacherAgentResultCard result={currentResult} />
                 ) : (
                   <p className="text-sm text-slate-500">
                     点击上方任一快捷操作，教师 Agent 会基于当前班级或儿童上下文生成结构化结果。
@@ -1061,9 +1131,9 @@ export default function TeacherAgentPage() {
             </SectionCard>
 
             <SectionCard title="当前结果摘要" description="方便演示时在侧边快速回看。">
-              {latestResult ? (
+              {currentResult ? (
                 <div className="rounded-2xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-600">
-                  {buildTeacherAgentResultSummary(latestResult)}
+                  {buildTeacherAgentResultSummary(currentResult)}
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">还没有结果，先运行一个工作流。</p>

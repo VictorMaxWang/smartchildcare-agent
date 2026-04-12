@@ -8,7 +8,7 @@ test("admin nav keeps root overview and institution home as separate entries", (
   const navItems = buildPrimaryNavItems(getDemoAccountById("u-admin")!.role);
 
   assert.equal(navItems[0]?.href, "/");
-  assert.equal(navItems[0]?.label, "数据概览");
+  assert.equal(navItems[0]?.label, "数据总览");
   assert.equal(navItems[1]?.href, "/admin");
   assert.equal(navItems[1]?.label, "园所首页");
   assert.equal(navItems.filter((item) => item.href === "/").length, 1);
@@ -16,13 +16,13 @@ test("admin nav keeps root overview and institution home as separate entries", (
   assert.ok(navItems.some((item) => item.href === "/teacher" && item.label === "机构大屏"));
 });
 
-test("teacher nav keeps root overview, teacher home, and institution screen separate", () => {
+test("teacher nav points workbench home to /teacher and hides institution screen entry", () => {
   const navItems = buildPrimaryNavItems(getDemoAccountById("u-teacher")!.role);
 
   assert.equal(navItems[0]?.href, "/");
-  assert.equal(navItems[1]?.href, "/teacher/home");
-  assert.equal(navItems[1]?.label, "教师首页");
-  assert.ok(navItems.some((item) => item.href === "/teacher" && item.label === "机构大屏"));
+  assert.equal(navItems[1]?.href, "/teacher");
+  assert.equal(navItems[1]?.label, "教师工作台");
+  assert.equal(navItems.some((item) => item.label === "机构大屏"), false);
 });
 
 test("parent nav is scoped to parent home only", () => {

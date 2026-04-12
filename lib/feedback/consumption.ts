@@ -23,6 +23,12 @@ const EXECUTION_LABELS: Record<ParentStructuredFeedbackLite["executionStatus"], 
   unable_to_execute: "暂时无法执行",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  ...EXECUTION_LABELS,
+  pending: "待补充",
+  synced: "已同步",
+};
+
 const REACTION_LABELS: Record<ParentStructuredFeedbackLite["childReaction"], string> = {
   resisted: "孩子明显抗拒",
   neutral: "孩子反应一般",
@@ -74,6 +80,12 @@ export function getStructuredFeedbackBindingCardId(feedback: ParentStructuredFee
       ? feedback.interventionCardId
       : undefined)
   );
+}
+
+export function formatParentFeedbackStatusLabel(status: string | undefined) {
+  const normalized = status?.trim();
+  if (!normalized) return "最近暂无反馈";
+  return STATUS_LABELS[normalized] ?? normalized;
 }
 
 export function collectStructuredFeedbackCandidates(

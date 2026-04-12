@@ -44,15 +44,15 @@ function mergeVoiceNote(currentValue: string, transcript: string) {
 function toRecorderMessage(errorCode: string | null) {
   switch (errorCode) {
     case "microphone_permission_denied":
-      return "Local audio capture requires microphone permission.";
+      return "需要先打开麦克风权限，才能录一段补充语音。";
     case "microphone_not_found":
-      return "No microphone is available on this device.";
+      return "当前设备没有可用麦克风。";
     case "microphone_not_readable":
-      return "The microphone is busy or unavailable right now.";
+      return "麦克风暂时不可用，请稍后再试。";
     case "voice_recorder_not_supported":
-      return "This browser does not support local audio capture.";
+      return "当前浏览器暂不支持本地录音。";
     default:
-      return "Local audio capture did not complete successfully.";
+      return "这次录音没有成功完成，请再试一次。";
   }
 }
 
@@ -68,12 +68,12 @@ export default function ParentVoiceNoteInput({
   );
   const [statusMessage, setStatusMessage] = useState(() => {
     if (support.recognitionSupported) {
-      return "Browser speech recognition is available. Results will be appended to notes.";
+      return "可以直接说话，识别结果会自动补到文字备注里。";
     }
     if (support.recordingSupported) {
-      return "Speech recognition is unavailable here. You can still capture a local audio fallback, but it will not be transcribed.";
+      return "当前环境不能直接转文字，但仍可以先录一段语音，稍后人工补充。";
     }
-    return "This browser supports neither speech recognition nor local audio capture.";
+    return "当前浏览器暂不支持语音输入。";
   });
   const [recordingPreview, setRecordingPreview] = useState<LocalRecordingPreview | null>(null);
 
@@ -98,21 +98,21 @@ export default function ParentVoiceNoteInput({
       onStatusChange(nextStatus) {
         setRecognitionStatus(nextStatus);
         if (nextStatus === "listening") {
-          setStatusMessage("Listening in the browser. When you stop, the transcript will be appended to notes.");
+          setStatusMessage("正在听你说话，停止后会把识别结果补到备注里。");
           return;
         }
         if (nextStatus === "stopping") {
-          setStatusMessage("Stopping recognition and finalizing the browser transcript.");
+          setStatusMessage("正在整理刚才的语音内容。");
           return;
         }
         if (nextStatus === "idle") {
-          setStatusMessage("Browser speech recognition is available. Results will be appended to notes.");
+          setStatusMessage("可以直接说话，识别结果会自动补到文字备注里。");
         }
       },
       onResult(result) {
         const nextValue = mergeVoiceNote(valueRef.current, result.transcript);
         onChangeRef.current(nextValue);
-        setStatusMessage("The browser transcript was appended to notes. Please review it before submitting.");
+        setStatusMessage("语音内容已经补到备注里，提交前记得顺手看一眼。");
       },
       onError(message) {
         setStatusMessage(message);
@@ -148,7 +148,7 @@ export default function ParentVoiceNoteInput({
 
       recognizer.start();
     } catch {
-      setStatusMessage("Browser speech recognition could not start. Please try again.");
+      setStatusMessage("这次没能开始收听，请再试一次。");
     }
   }
 
@@ -158,7 +158,7 @@ export default function ParentVoiceNoteInput({
     if (recorder.isRecording) {
       const result = await recorder.stopRecording();
       if (!result) {
-        setStatusMessage("Local audio capture did not complete successfully.");
+        setStatusMessage("这次录音没有成功完成，请再试一次。");
         return;
       }
 
@@ -171,17 +171,17 @@ export default function ParentVoiceNoteInput({
         url: URL.createObjectURL(result.blob),
       });
       setStatusMessage(
-        `A local audio clip was captured for ${formatDuration(result.durationMs)}. This phase does not auto-transcribe or upload it.`
+        `已保存一段 ${formatDuration(result.durationMs)} 的语音补充，仅在当前页面预览。`
       );
       return;
     }
 
     try {
       await recorder.startRecording("parent-voice-note");
-      setStatusMessage("Capturing local audio. It will stay in the browser and will not be transcribed automatically.");
+      setStatusMessage("正在录音，这段语音只会留在当前页面里。");
     } catch (error) {
       setStatusMessage(
-        error instanceof Error ? toRecorderMessage(error.message) : "Local audio capture did not complete successfully."
+        error instanceof Error ? toRecorderMessage(error.message) : "这次录音没有成功完成，请再试一次。"
       );
     }
   }
@@ -191,13 +191,13 @@ export default function ParentVoiceNoteInput({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">
-            <Badge variant="info">Browser preview</Badge>
+            <Badge variant="info">当前设备</Badge>
             {support.recognitionSupported ? (
-              <Badge variant="secondary">Speech recognition</Badge>
+              <Badge variant="secondary">语音转文字</Badge>
             ) : support.recordingSupported ? (
-              <Badge variant="outline">Local audio fallback</Badge>
+              <Badge variant="outline">语音补充</Badge>
             ) : (
-              <Badge variant="warning">Unsupported</Badge>
+              <Badge variant="warning">暂不支持</Badge>
             )}
           </div>
           <div>
@@ -205,7 +205,7 @@ export default function ParentVoiceNoteInput({
               {"\u8bed\u97f3\u53cd\u9988"}
             </p>
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              Browser-first only. This phase does not connect to backend ASR.
+              只在当前设备上处理，方便先把补充信息留下来。
             </p>
           </div>
         </div>
@@ -261,10 +261,10 @@ export default function ParentVoiceNoteInput({
       {recordingPreview ? (
         <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-3">
           <p className="text-sm font-medium text-slate-900">
-            Local audio preview: {formatDuration(recordingPreview.durationMs)}
+            语音补充预览：{formatDuration(recordingPreview.durationMs)}
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            This clip stays on the current page only. It is not transcribed and not uploaded.
+            这段语音只保留在当前页面里，不会自动转成文字，也不会自动上传。
           </p>
           <audio controls src={recordingPreview.url} className="mt-3 w-full" />
         </div>

@@ -530,7 +530,7 @@ export default function TeacherHighRiskConsultationPage() {
       description="按长期画像、最近会诊、当前建议分阶段流式展示，适合移动端录屏。"
       actions={
         <>
-          <InlineLinkButton href="/teacher/home" label="返回教师工作台" />
+          <InlineLinkButton href="/teacher" label="返回教师工作台" />
           <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />
         </>
       }

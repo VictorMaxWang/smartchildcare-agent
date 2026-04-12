@@ -12,6 +12,7 @@ import type {
   ParentFeedbackImprovementStatus,
 } from "@/lib/feedback/types";
 import type { CanonicalTask } from "@/lib/tasks/types";
+import { formatParentFeedbackStatusLabel } from "@/lib/feedback/consumption";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -107,7 +108,7 @@ interface ParentStructuredFeedbackComposerProps {
   latestFeedback?: GuardianFeedback;
   statusMessage?: string | null;
   notePrefill?: { value: string; token: number } | null;
-  onSubmit: (input: ParentStructuredFeedbackComposerSubmitInput) => void;
+  onSubmit: (input: ParentStructuredFeedbackComposerSubmitInput) => Promise<boolean>;
   onSnoozeReminder?: () => void;
   careMode?: boolean;
 }
@@ -145,6 +146,7 @@ export default function ParentStructuredFeedbackComposer({
     careMode ? false : Boolean(notePrefill?.value)
   );
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const composerMessage = validationMessage ?? statusMessage;
   const reviewLabel =
@@ -161,7 +163,7 @@ export default function ParentStructuredFeedbackComposer({
     }
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!interventionCard) {
       setValidationMessage("当前还没有可关联的干预卡，暂时无法提交结构化反馈。");
       return;
@@ -180,7 +182,8 @@ export default function ParentStructuredFeedbackComposer({
     }
 
     setValidationMessage(null);
-    onSubmit({
+    setSubmitting(true);
+    const submitted = await onSubmit({
       childId,
       executionStatus,
       executionCount:
@@ -196,6 +199,11 @@ export default function ParentStructuredFeedbackComposer({
       interventionCardId: interventionCard.id,
       attachments: {},
     });
+
+    setSubmitting(false);
+    if (!submitted) {
+      return;
+    }
 
     setExecutionStatus(null);
     setExecutionCount(1);
@@ -217,7 +225,7 @@ export default function ParentStructuredFeedbackComposer({
               <Badge variant="warning">已关联复查上下文</Badge>
             ) : null}
             {latestFeedback ? (
-              <Badge variant="secondary">最近反馈：{latestFeedback.status}</Badge>
+              <Badge variant="secondary">最近反馈：{formatParentFeedbackStatusLabel(latestFeedback.status)}</Badge>
             ) : (
               <Badge variant="secondary">今晚可提交首条结构化反馈</Badge>
             )}
@@ -409,7 +417,7 @@ export default function ParentStructuredFeedbackComposer({
               <Textarea
                 value={notes}
                 onChange={(event) => handleNotesChange(event.target.value)}
-                placeholder="补充今晚的场景、持续时间、孩子状态，或 OCR 草稿里的细节。"
+                placeholder="补充今晚的场景、持续时间、孩子状态，或家里观察到的细节。"
                 className={cn("mt-3 bg-white", careMode ? "min-h-32 text-base" : "min-h-28")}
               />
             </div>
@@ -423,10 +431,10 @@ export default function ParentStructuredFeedbackComposer({
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button type="button" variant="outline" className={optionButtonClassName} disabled>
-                  语音补充 即将支持
+                  语音补充 稍后开放
                 </Button>
                 <Button type="button" variant="outline" className={optionButtonClassName} disabled>
-                  图片补充 即将支持
+                  图片补充 稍后开放
                 </Button>
               </div>
             </div>
@@ -437,11 +445,11 @@ export default function ParentStructuredFeedbackComposer({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-100 bg-emerald-50/70 p-4">
         <div>
           <p className={careMode ? "text-base font-semibold leading-8 text-slate-900" : "text-sm font-semibold text-slate-900"}>
-            {feedbackPrompt ?? "提交后，下一轮 follow-up 会自动带入这条结构化反馈。"}
+            {feedbackPrompt ?? "提交后，今晚反馈会进入下一轮家长建议与跟进。"}
           </p>
           {!careMode ? (
             <p className="mt-1 text-sm text-slate-600">
-              数据会先进入 canonical feedback shape，再自动镜像 legacy 兼容字段。
+              先把关键结果记下来，后续建议会据此继续更新。
             </p>
           ) : null}
         </div>
@@ -459,10 +467,10 @@ export default function ParentStructuredFeedbackComposer({
           <Button
             type="button"
             className={careMode ? "min-h-12 rounded-2xl px-5 text-base" : "rounded-xl"}
-            onClick={handleSubmit}
-            disabled={!interventionCard}
+            onClick={() => void handleSubmit()}
+            disabled={!interventionCard || submitting}
           >
-            提交今晚反馈
+            {submitting ? "提交中..." : "提交今晚反馈"}
           </Button>
         </div>
       </div>

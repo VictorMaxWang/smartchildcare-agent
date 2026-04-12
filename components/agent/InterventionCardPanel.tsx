@@ -6,13 +6,20 @@ import { getInterventionRiskBadgeLabel, type InterventionCard } from "@/lib/agen
 
 export default function InterventionCardPanel({
   card,
-  title = "AI 干预卡",
+  title,
   footer,
+  audience = "staff",
 }: {
   card: InterventionCard;
   title?: string;
   footer?: ReactNode;
+  audience?: "staff" | "parent";
 }) {
+  const displayTitle = title ?? (audience === "parent" ? "今晚行动卡" : "AI 干预卡");
+  const showTechnicalBadges = audience !== "parent";
+  const showParticipants = audience !== "parent";
+  const summaryTitle = audience === "parent" ? "协同说明" : "会诊摘要";
+
   return (
     <Card className="border-indigo-100 bg-linear-to-br from-indigo-50/80 via-white to-sky-50/80 shadow-sm">
       <CardHeader className="gap-3">
@@ -20,23 +27,27 @@ export default function InterventionCardPanel({
           <Badge variant={card.riskLevel === "high" ? "warning" : card.riskLevel === "medium" ? "info" : "success"}>
             {getInterventionRiskBadgeLabel(card.riskLevel)}
           </Badge>
-          {card.consultationMode ? <Badge variant="warning">会诊模式</Badge> : null}
-          <Badge variant="secondary">对象：{card.targetChildId}</Badge>
-          <Badge
-            variant={
-              card.source === "ai" || card.source === "vivo"
-                ? "success"
-                : card.source === "mock"
-                  ? "info"
-                  : "secondary"
-            }
-          >
-            {card.source}
-          </Badge>
-          {card.model ? <Badge variant="secondary">{card.model}</Badge> : null}
+          {card.consultationMode && audience !== "parent" ? <Badge variant="warning">会诊模式</Badge> : null}
+          {showTechnicalBadges ? (
+            <>
+              <Badge variant="secondary">对象：{card.targetChildId}</Badge>
+              <Badge
+                variant={
+                  card.source === "ai" || card.source === "vivo"
+                    ? "success"
+                    : card.source === "mock"
+                      ? "info"
+                      : "secondary"
+                }
+              >
+                {card.source}
+              </Badge>
+              {card.model ? <Badge variant="secondary">{card.model}</Badge> : null}
+            </>
+          ) : null}
         </div>
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-indigo-500">{title}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-indigo-500">{displayTitle}</p>
           <CardTitle className="mt-2 text-xl text-slate-900">{card.title}</CardTitle>
           <p className="mt-3 text-sm leading-7 text-slate-600">{card.summary}</p>
         </div>
@@ -50,9 +61,9 @@ export default function InterventionCardPanel({
           <p className="mt-2 text-sm leading-6 text-slate-600">{card.triggerReason}</p>
           {card.consultationSummary ? (
             <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
-              <p className="text-sm font-semibold text-slate-900">会诊摘要</p>
+              <p className="text-sm font-semibold text-slate-900">{summaryTitle}</p>
               <p className="mt-2 text-sm leading-6 text-slate-600">{card.consultationSummary}</p>
-              {card.participants?.length ? (
+              {showParticipants && card.participants?.length ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {card.participants.map((item) => (
                     <Badge key={item} variant="outline">

@@ -224,13 +224,13 @@ function buildSourceBadges(params: {
   if (params.sourceMode === "fallback" || params.sourceMode === "mixed") {
     badges.push({
       id: "fallback",
-      label: "保守补位",
+      label: "记录待补充",
       variant: "warning",
     });
   } else if (params.sourceMode === "demo") {
     badges.push({
       id: "demo",
-      label: "演示样例",
+      label: "参考示例",
       variant: "warning",
     });
   }
@@ -297,7 +297,7 @@ function buildBoundaryNotes(params: {
     "这里提供的是照护建议，不是医疗诊断。",
     params.pendingFeedback ? "持续反馈越完整，下一轮判断会更稳。" : "系统会持续结合后续反馈更新判断。",
     params.sourceMode === "demo" || params.sourceMode === "fallback" || params.sourceMode === "mixed"
-      ? "若当前为演示或补位结果，请不要把它当作 fully live 结论。"
+      ? "如果当前结果还在补充阶段，请结合老师和孩子的实际状态一起判断。"
       : "如孩子持续不适或症状明显，请优先联系老师或专业医生。",
   ];
 }

@@ -201,9 +201,11 @@ function buildTerminalFallback(traceId: string, fallbackReason: string, message:
 async function buildFallbackEvents(
   payload: Record<string, unknown>,
   origin: string,
-  brainForward: BrainForwardResult
+  brainForward: BrainForwardResult,
+  requestHeaders?: Headers
 ): Promise<StreamEvent[]> {
   const traceId = getTraceId(payload.traceId);
+  const cookie = requestHeaders?.get("cookie");
 
   let response: Response;
   try {
@@ -212,6 +214,7 @@ async function buildFallbackEvents(
       headers: {
         "Content-Type": "application/json",
         "x-debug-memory": "1",
+        ...(cookie ? { cookie } : {}),
       },
       body: JSON.stringify(payload),
     });
@@ -371,6 +374,6 @@ export async function POST(request: Request) {
     });
   }
 
-  const events = await buildFallbackEvents(payload, new URL(request.url).origin, brainForward);
+  const events = await buildFallbackEvents(payload, new URL(request.url).origin, brainForward, request.headers);
   return streamResponse(events, 200, buildLocalStreamHeaders(brainForward));
 }

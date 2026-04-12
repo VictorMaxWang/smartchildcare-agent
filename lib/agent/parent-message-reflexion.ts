@@ -3,6 +3,10 @@ import type {
   ParentMessageReflexionRequest,
   ParentMessageReflexionResponse,
 } from "@/lib/ai/types";
+import {
+  sanitizeParentFacingList,
+  sanitizeParentFacingText,
+} from "@/lib/agent/parent-copy";
 import type {
   ParentAgentChildContext,
   ParentAgentResult,
@@ -100,21 +104,30 @@ function buildAssistantAnswer(params: {
   followUpWindow: string;
   estimatedTime: string;
 }) {
-  const topAction = params.tonightActions[0] || params.fallbackTopAction;
-  const actionLines = uniqueItems(params.tonightActions, 4).map((item, index) => `${index + 1}. ${item}`);
+  const wordingForParent = sanitizeParentFacingText(params.wordingForParent);
+  const whyThisMatters = sanitizeParentFacingText(params.whyThisMatters);
+  const topAction =
+    sanitizeParentFacingText(params.tonightActions[0]) ||
+    sanitizeParentFacingText(params.fallbackTopAction);
+  const actionLines = sanitizeParentFacingList(params.tonightActions, 4).map(
+    (item, index) => `${index + 1}. ${item}`
+  );
+  const followUpWindow = sanitizeParentFacingText(params.followUpWindow);
+  const estimatedTime = sanitizeParentFacingText(params.estimatedTime);
 
   return [
-    params.wordingForParent,
+    wordingForParent,
+    whyThisMatters ? `为什么这件事值得今晚先做：${whyThisMatters}` : "",
+    topAction ? `今晚先做这一步：${topAction}` : "",
     "",
-    `Why it matters: ${params.whyThisMatters}`,
-    `Tonight's top action: ${topAction}`,
-    "",
-    "Tonight actions:",
+    "今晚可以这样做：",
     ...(actionLines.length > 0 ? actionLines : [`1. ${params.fallbackTopAction}`]),
     "",
-    `Follow-up window: ${params.followUpWindow}`,
-    `Estimated time: ${params.estimatedTime}`,
-  ].join("\n");
+    followUpWindow ? `接下来重点观察：${followUpWindow}` : "",
+    estimatedTime ? `大约需要：${estimatedTime}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildParentMessageReflexionPayload(params: {
@@ -184,14 +197,18 @@ export function mergeParentMessageReflexionResult(params: {
 }): ParentAgentResult {
   const { baseResult, response } = params;
   const finalOutput = readFinalOutput(response);
-  const mergedHomeSteps = uniqueItems([...finalOutput.tonightActions, ...baseResult.homeSteps]);
+  const mergedHomeSteps = sanitizeParentFacingList(
+    [...finalOutput.tonightActions, ...baseResult.homeSteps],
+    4
+  );
   const tonightTopAction = mergedHomeSteps[0] ?? baseResult.tonightTopAction;
   const nextReviewWindow = finalOutput.followUpWindow || baseResult.interventionCard.reviewIn48h;
-  const nextTitle = finalOutput.title || baseResult.title;
-  const nextSummary = finalOutput.summary || baseResult.summary;
-  const nextWhyThisMatters = finalOutput.whyThisMatters || baseResult.whyNow;
+  const nextTitle = sanitizeParentFacingText(finalOutput.title) || baseResult.title;
+  const nextSummary = sanitizeParentFacingText(finalOutput.summary) || baseResult.summary;
+  const nextWhyThisMatters = sanitizeParentFacingText(finalOutput.whyThisMatters) || baseResult.whyNow;
   const nextWordingForParent =
-    finalOutput.wordingForParent || baseResult.interventionCard.parentMessageDraft;
+    sanitizeParentFacingText(finalOutput.wordingForParent) ||
+    sanitizeParentFacingText(baseResult.interventionCard.parentMessageDraft);
 
   return {
     ...baseResult,
@@ -204,7 +221,9 @@ export function mergeParentMessageReflexionResult(params: {
       ...baseResult.interventionCard,
       title: finalOutput.title || baseResult.interventionCard.title,
       summary: nextSummary,
-      tonightHomeAction: finalOutput.tonightActions[0] || baseResult.interventionCard.tonightHomeAction,
+      tonightHomeAction:
+        sanitizeParentFacingText(finalOutput.tonightActions[0]) ||
+        sanitizeParentFacingText(baseResult.interventionCard.tonightHomeAction),
       homeSteps: mergedHomeSteps.length > 0 ? mergedHomeSteps : baseResult.interventionCard.homeSteps,
       reviewIn48h: nextReviewWindow,
       parentMessageDraft: nextWordingForParent,
@@ -217,7 +236,28 @@ export function mergeParentMessageReflexionResult(params: {
       followUpWindow: nextReviewWindow,
       estimatedTime: finalOutput.estimatedTime,
     }),
-    highlights: uniqueItems([nextWhyThisMatters, ...baseResult.highlights]),
+    highlights: sanitizeParentFacingList([nextWhyThisMatters, ...baseResult.highlights], 4),
     parentMessageMeta: buildParentMessageMeta(response),
+  };
+}
+
+export function sanitizeParentMessageReflexionResponse(
+  response: ParentMessageReflexionResponse
+): ParentMessageReflexionResponse {
+  return {
+    ...response,
+    finalOutput: {
+      ...response.finalOutput,
+      title: sanitizeParentFacingText(response.finalOutput?.title),
+      summary: sanitizeParentFacingText(response.finalOutput?.summary),
+      tonightActions: sanitizeParentFacingList(response.finalOutput?.tonightActions ?? [], 4),
+      wordingForParent: sanitizeParentFacingText(response.finalOutput?.wordingForParent),
+      whyThisMatters: sanitizeParentFacingText(response.finalOutput?.whyThisMatters),
+      estimatedTime: sanitizeParentFacingText(response.finalOutput?.estimatedTime),
+      followUpWindow: sanitizeParentFacingText(response.finalOutput?.followUpWindow),
+    },
+    continuityNotes: sanitizeParentFacingList(response.continuityNotes ?? [], 4),
+    memoryMeta: undefined,
+    debugIterations: null,
   };
 }

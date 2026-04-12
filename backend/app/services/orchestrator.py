@@ -358,9 +358,31 @@ def _memory_query(task: str, payload: dict[str, Any]) -> str | None:
         return "最近跟进 家长反馈 连续观察"
     if task == "parent-trend-query":
         return "最近儿童趋势 变化 家长问答"
-    if task == "weekly-report":
+    if task in {"weekly-report", "teacher-weekly-summary", "admin-weekly-ops-report"}:
         return "最近重点儿童 风险 闭环 周报"
     return None
+
+
+def _resolve_weekly_memory_task(payload: dict[str, Any]) -> str:
+    role = _coerce_string(payload.get("role"))
+    if not role:
+        snapshot = safe_dict(payload.get("snapshot"))
+        role = _coerce_string(snapshot.get("role"))
+
+    if role == "teacher":
+        return "teacher-weekly-summary"
+    if role == "admin":
+        return "admin-weekly-ops-report"
+    return "weekly-report"
+
+
+def _resolve_weekly_snapshot_type(payload: dict[str, Any]) -> str:
+    memory_task = _resolve_weekly_memory_task(payload)
+    if memory_task == "teacher-weekly-summary":
+        return "teacher-weekly-summary-result"
+    if memory_task == "admin-weekly-ops-report":
+        return "admin-weekly-ops-report-result"
+    return "weekly-report-result"
 
 
 @dataclass
@@ -426,14 +448,15 @@ class Orchestrator:
             child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "teacher-agent":
             if workflow == "weekly-summary":
-                memory_task = "weekly-report"
+                memory_task = "teacher-weekly-summary"
                 child_ids = _extract_child_ids(effective_payload, limit=3)
             else:
                 child_ids = _extract_child_ids(effective_payload, limit=1)
         elif task == "admin-agent" and workflow == "weekly-ops-report":
-            memory_task = "weekly-report"
+            memory_task = "admin-weekly-ops-report"
             child_ids = _extract_child_ids(effective_payload, limit=3)
         elif task == "weekly-report":
+            memory_task = _resolve_weekly_memory_task(effective_payload)
             child_ids = _extract_child_ids(effective_payload, limit=3)
 
         if not child_ids:
@@ -708,7 +731,7 @@ class Orchestrator:
             payload=payload,
             runner=run_weekly_report,
             node_name="weekly-report",
-            snapshot_type="weekly-report-result",
+            snapshot_type=_resolve_weekly_snapshot_type(payload),
         )
 
     async def high_risk_consultation(self, payload: dict[str, Any]) -> dict[str, Any]:

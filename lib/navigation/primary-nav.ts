@@ -16,7 +16,7 @@ export interface PrimaryNavItem {
   icon: PrimaryNavIconKey;
 }
 
-const OVERVIEW_ITEM: PrimaryNavItem = { href: "/", label: "数据概览", icon: "overview" };
+const OVERVIEW_ITEM: PrimaryNavItem = { href: "/", label: "数据总览", icon: "overview" };
 const CHILDREN_ITEM: PrimaryNavItem = { href: "/children", label: "幼儿档案", icon: "children" };
 const HEALTH_ITEM: PrimaryNavItem = { href: "/health", label: "晨检与健康", icon: "health" };
 const GROWTH_ITEM: PrimaryNavItem = { href: "/growth", label: "成长行为", icon: "growth" };
@@ -29,8 +29,8 @@ const INSTITUTION_SCREEN_ITEM: PrimaryNavItem = {
 };
 const ADMIN_HOME_ITEM: PrimaryNavItem = { href: "/admin", label: "园所首页", icon: "role-home" };
 const TEACHER_HOME_ITEM: PrimaryNavItem = {
-  href: "/teacher/home",
-  label: "教师首页",
+  href: "/teacher",
+  label: "教师工作台",
   icon: "role-home",
 };
 const PARENT_HOME_ITEM: PrimaryNavItem = {
@@ -58,7 +58,6 @@ const TEACHER_NAV_ITEMS: PrimaryNavItem[] = [
   GROWTH_ITEM,
   DIET_ITEM,
   PARENT_ITEM,
-  INSTITUTION_SCREEN_ITEM,
 ];
 
 const PARENT_NAV_ITEMS: PrimaryNavItem[] = [PARENT_HOME_ITEM];
@@ -70,7 +69,7 @@ export function getRoleStandaloneHomeItem(role: AccountRole): PrimaryNavItem | n
     return ADMIN_HOME_ITEM;
   }
 
-  if (roleHomePath === "/teacher/home") {
+  if (roleHomePath === "/teacher") {
     return TEACHER_HOME_ITEM;
   }
 
@@ -88,7 +87,7 @@ export function buildPrimaryNavItems(role: AccountRole): PrimaryNavItem[] {
     return [...ADMIN_NAV_ITEMS];
   }
 
-  if (roleHomePath === "/teacher/home") {
+  if (roleHomePath === "/teacher") {
     return [...TEACHER_NAV_ITEMS];
   }
 

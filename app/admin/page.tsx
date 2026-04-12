@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ClipboardCheck, ShieldAlert, TrendingUp, Workflow } from "lucide-react";
+import { ClipboardCheck, ShieldAlert, Workflow } from "lucide-react";
 import AdminQualityMetricsPanel from "@/components/admin/AdminQualityMetricsPanel";
 import RiskPriorityBoard from "@/components/admin/RiskPriorityBoard";
 import EmptyState from "@/components/EmptyState";
@@ -16,10 +16,7 @@ import {
   SectionCard,
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
-import {
-  buildAdminHomeViewModel,
-  buildAdminWeeklyReportSnapshot,
-} from "@/lib/agent/admin-agent";
+import { buildAdminHomeViewModel, buildAdminWeeklyReportSnapshot } from "@/lib/agent/admin-agent";
 import { dedupeAdminHomeExposure } from "@/lib/agent/admin-home-dedupe";
 import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
 import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
@@ -65,9 +62,9 @@ export default function AdminHomePage() {
     feedStatus,
     feedBadge,
     notificationEvents,
-    notificationError,
     createConsultationScopedNotification,
     isCreatingNotification,
+    dispatchAvailable,
   } = useAdminConsultationWorkspace({
     institutionName: INSTITUTION_NAME,
     visibleChildren,
@@ -77,10 +74,12 @@ export default function AdminHomePage() {
       escalatedOnly: true,
     },
   });
+  const dispatchStatusMessage = dispatchAvailable ? "通知派单服务正常" : "通知派单暂不可用";
   const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportResponse | null>(null);
   const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
   const [weeklyReportError, setWeeklyReportError] = useState<string | null>(null);
+
   const adminHomePayload = useMemo(
     () => ({
       workflow: "daily-priority" as const,
@@ -129,10 +128,7 @@ export default function AdminHomePage() {
     }),
     [adminHomePayload, home.adminContext]
   );
-  const weeklyReportKey = useMemo(
-    () => JSON.stringify(weeklyReportPayload),
-    [weeklyReportPayload]
-  );
+  const weeklyReportKey = useMemo(() => JSON.stringify(weeklyReportPayload), [weeklyReportPayload]);
 
   useEffect(() => {
     if (visibleChildren.length === 0) return;
@@ -197,8 +193,8 @@ export default function AdminHomePage() {
   return (
     <RolePageShell
       badge={`园长首页 · ${INSTITUTION_NAME} · ${TODAY_TEXT}`}
-      title="先看机构级优先级，再决定今天最该推动什么"
-      description="首页不再只是看统计，而是把今日机构优先事项、重点风险儿童、班级闭环问题和待处理派单直接放到首屏。"
+      title="先看机构优先级，再决定今天最该推动什么"
+      description="首页保留今日优先级、重点风险、待处理事项和周报预览，帮助园长快速进入决策和派单闭环。"
       actions={
         <>
           <InlineLinkButton href="/admin/agent" label="进入园长 Agent" variant="premium" />
@@ -213,8 +209,8 @@ export default function AdminHomePage() {
             <UnifiedIntentEntryCard
               roleHint="admin"
               sourcePage="/admin"
-              title="一句话直达机构优先级、周报或 AI 入口"
-              placeholder="例如：帮我看今天机构最该先处理什么，或生成本周周报"
+              title="一站式直达机构优先级、周报或 AI 入口"
+              placeholder="例如：帮我看今天机构最该先处理什么，或者生成本周周报。"
               examples={[
                 "帮我看今天机构最该先处理什么",
                 "生成本周周报",
@@ -232,8 +228,8 @@ export default function AdminHomePage() {
 
             <SectionCard
               title="今日重点会诊 / 高风险优先事项"
-              description="把教师发起的一键会诊直接升级成园长今天最该盯的决策区，适合移动端录屏和答辩展示。"
-              actions={<Badge variant="warning">AI 园长办公会</Badge>}
+              description="把教师发起的一键会诊直接升级成园长今天最该盯的决策区。"
+              actions={<Badge variant={dispatchAvailable ? "success" : "outline"}>{dispatchStatusMessage}</Badge>}
             >
               <RiskPriorityBoard
                 items={consultationPriorityItems}
@@ -243,7 +239,8 @@ export default function AdminHomePage() {
                 sourceBadgeVariant={feedBadge.variant}
                 onCreateConsultationNotification={createConsultationScopedNotification}
                 isCreatingConsultationNotification={isCreatingNotification}
-                notificationError={notificationError}
+                dispatchAvailable={dispatchAvailable}
+                dispatchStatusMessage={dispatchStatusMessage}
                 emptyTitle={
                   feedStatus === "unavailable"
                     ? "高风险会诊 feed 暂时不可用"
@@ -253,9 +250,9 @@ export default function AdminHomePage() {
                 }
                 emptyDescription={
                   feedStatus === "unavailable"
-                    ? "页面会在 transport 失败时回退到本地 consultation；如果这里仍为空，说明本地也没有可展示的高风险会诊。"
+                    ? "页面会在 transport 失败时回退到本地 consultation 视图。"
                     : feedStatus === "ready"
-                      ? "backend feed 已接管园长会诊区；当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
+                      ? "backend feed 已接管园长会诊区，当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
                       : undefined
                 }
               />
@@ -263,7 +260,7 @@ export default function AdminHomePage() {
 
             <SectionCard
               title="今日机构优先级 TOP 3"
-              description="先展示最该盯的三件事，移动端首屏优先显示这里。"
+              description="优先展示最该盯的三件事，移动端首屏优先显示这里。"
               actions={<Badge variant="warning">机构级排序</Badge>}
             >
               <div className="grid gap-4 md:grid-cols-3">
@@ -342,25 +339,22 @@ export default function AdminHomePage() {
             <SectionCard
               title="待处理事项与派单"
               description="整改建议与通知派单汇总在一起，方便后续直接进入 Agent 推动作业闭环。"
-              actions={
-                notificationError ? (
-                  <Badge variant="outline">{notificationError}</Badge>
-                ) : (
-                  <Badge variant="success">支持派单沉淀</Badge>
-                )
-              }
+              actions={<Badge variant={dispatchAvailable ? "success" : "outline"}>{dispatchStatusMessage}</Badge>}
             >
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="space-y-3">
                   {displayHome.pendingItems.length > 0 ? (
                     displayHome.pendingItems.map((item) => (
-                      <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-700">
+                      <div
+                        key={item}
+                        className="rounded-3xl border border-slate-100 bg-white p-4 text-sm leading-6 text-slate-700"
+                      >
                         {item}
                       </div>
                     ))
                   ) : (
                     <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                      当前没有新的待处理事项需要园长首页继续承接。
+                      当前没有新的待处理事项需要园长继续承接。
                     </div>
                   )}
                 </div>
@@ -379,7 +373,7 @@ export default function AdminHomePage() {
                     ))
                   ) : (
                     <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                      当前还没有已创建的派单，建议从园长 Agent 中直接生成。
+                      当前还没有已经创建的派单。
                     </div>
                   )}
                 </div>
@@ -413,30 +407,10 @@ export default function AdminHomePage() {
               ctaHref="/admin/agent?action=weekly-report"
               ctaLabel="进入完整周报工作区"
               ctaVariant="premium"
+              showRuntimeMeta={false}
             />
 
-            {false ? (
-              <SectionCard title="本周运营亮点" description="用于周报和大屏复用的高层摘要。">
-              <div className="space-y-3">
-                {displayHome.weeklyHighlights.length > 0 ? (
-                  displayHome.weeklyHighlights.map((item) => (
-                    <div key={item} className="rounded-3xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-start gap-3">
-                        <TrendingUp className="mt-0.5 h-4 w-4 text-indigo-500" />
-                        <p className="text-sm leading-6 text-slate-700">{item}</p>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                    当前没有新的周报高层亮点需要额外展示。
-                  </div>
-                )}
-              </div>
-              </SectionCard>
-            ) : null}
-
-            <SectionCard title="园长今日顺序" description="比赛 demo 中适合直接讲清楚的处理顺序。">
+            <SectionCard title="园长今日顺序" description="适合录屏和现场演示的处理顺序。">
               <ol className="space-y-3 text-sm text-slate-600">
                 <li className="flex items-center gap-3">
                   <ShieldAlert className="h-4 w-4 text-amber-500" />
@@ -452,34 +426,6 @@ export default function AdminHomePage() {
                 </li>
               </ol>
             </SectionCard>
-
-            {notificationError ? (
-              <SectionCard title="派单状态" description="通知事件仓储未配置时，首页仍可展示优先级结果。">
-                <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <p>{notificationError}</p>
-                </div>
-              </SectionCard>
-            ) : (
-              <SectionCard title="派单状态" description="待推进动作会在这里同步展示。">
-                <div className="space-y-3">
-                  {notificationEvents.slice(0, 4).map((event) => (
-                    <div key={event.id} className="rounded-3xl border border-slate-100 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-semibold text-slate-900">{event.title}</p>
-                        <EventStatusBadge status={event.status} />
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{event.summary}</p>
-                    </div>
-                  ))}
-                  {notificationEvents.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                      还没有沉淀的通知事件。
-                    </div>
-                  ) : null}
-                </div>
-              </SectionCard>
-            )}
           </div>
         }
       />

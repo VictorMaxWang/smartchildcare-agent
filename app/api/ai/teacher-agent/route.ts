@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "next/server.js";
 import {
   executeFollowUp,
   executeSuggestion,
@@ -69,14 +69,15 @@ export async function POST(request: Request) {
   const classContext = buildTeacherAgentClassContext(payload);
   const childContext = buildTeacherAgentChildContext(classContext, payload.targetChildId);
   const runtimeOptions = getAiRuntimeOptions(request);
-  const memoryContext = childContext
-    ? await buildMemoryContextForPrompt({
+  const memoryContext =
+    payload.workflow !== "weekly-summary" && childContext
+      ? await buildMemoryContextForPrompt({
         childId: childContext.child.id,
         workflowType: "teacher-agent",
         query: childContext.focusReasons.join(" "),
         request,
       })
-    : null;
+      : null;
   const weeklyMemoryContexts =
     payload.workflow === "weekly-summary"
       ? await Promise.all(
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
           ).map((childId) =>
             buildMemoryContextForPrompt({
               childId,
-              workflowType: "weekly-report",
+              workflowType: "teacher-weekly-summary",
               query: "weekly report focus child continuity",
               request,
             })

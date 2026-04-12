@@ -9,6 +9,23 @@ import { Button } from "@/components/ui/button";
 import type { AdminConsultationPriorityItem } from "@/lib/agent/admin-consultation";
 import { cn } from "@/lib/utils";
 
+type RiskPriorityBoardProps = {
+  items: AdminConsultationPriorityItem[];
+  className?: string;
+  layoutVariant?: "split" | "stacked";
+  emptyHref?: string;
+  isLoading?: boolean;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  sourceBadgeLabel?: string;
+  sourceBadgeVariant?: "success" | "warning" | "outline";
+  onCreateConsultationNotification?: (item: AdminConsultationPriorityItem) => unknown;
+  isCreatingConsultationNotification?: (consultationId: string) => boolean;
+  notificationError?: string | null;
+  dispatchAvailable?: boolean;
+  dispatchStatusMessage?: string;
+};
+
 export default function RiskPriorityBoard({
   items,
   className,
@@ -22,20 +39,14 @@ export default function RiskPriorityBoard({
   onCreateConsultationNotification,
   isCreatingConsultationNotification,
   notificationError,
-}: {
-  items: AdminConsultationPriorityItem[];
-  className?: string;
-  layoutVariant?: "split" | "stacked";
-  emptyHref?: string;
-  isLoading?: boolean;
-  emptyTitle?: string;
-  emptyDescription?: string;
-  sourceBadgeLabel?: string;
-  sourceBadgeVariant?: "success" | "warning" | "outline";
-  onCreateConsultationNotification?: (item: AdminConsultationPriorityItem) => unknown;
-  isCreatingConsultationNotification?: (consultationId: string) => boolean;
-  notificationError?: string | null;
-}) {
+  dispatchAvailable = true,
+  dispatchStatusMessage,
+}: RiskPriorityBoardProps) {
+  const effectiveDispatchAvailable = notificationError ? false : dispatchAvailable;
+  const effectiveDispatchStatusMessage =
+    dispatchStatusMessage ??
+    (notificationError ? "Dispatch unavailable" : effectiveDispatchAvailable ? "Dispatch available" : "Dispatch unavailable");
+
   if (items.length === 0) {
     return (
       <div
@@ -49,24 +60,29 @@ export default function RiskPriorityBoard({
             <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
             <div className="space-y-2">
               <p className="font-semibold text-slate-900">
-                {isLoading
-                  ? "正在读取园长会诊 feed"
-                  : emptyTitle ?? "当前还没有升级到园长侧的重点会诊"}
+                {isLoading ? "Loading consultation feed" : emptyTitle ?? "No priority consultation yet"}
               </p>
               <p className="leading-6">
                 {isLoading
-                  ? "优先读取 backend feed；若 transport 不可用，页面会自动回退到本地会诊摘要。"
-                  : emptyDescription ??
-                    "教师端完成高风险会诊后，这里会自动出现“今日重点会诊 / 高风险优先事项”，用于园长答辩展示和派单闭环。"}
+                  ? "Reading backend feed. If transport is unavailable, the page falls back to local consultation summary."
+                  : emptyDescription ?? "Once teachers create high-priority consultations, they will appear here automatically."}
               </p>
+              {!effectiveDispatchAvailable ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  {effectiveDispatchStatusMessage}, read-only mode only.
+                </p>
+              ) : null}
             </div>
           </div>
-          <Button asChild variant="outline" className="min-h-11 rounded-xl md:self-start">
-            <Link href={emptyHref} className="gap-2">
-              去教师会诊入口
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
+
+          {effectiveDispatchAvailable ? (
+            <Button asChild variant="outline" className="min-h-11 rounded-xl md:self-start">
+              <Link href={emptyHref} className="gap-2">
+                Go to consultation entry
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
     );
@@ -75,12 +91,11 @@ export default function RiskPriorityBoard({
   return (
     <div className={cn("space-y-4", className)}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="warning">AI 园长办公会</Badge>
-        {sourceBadgeLabel ? (
-          <Badge variant={sourceBadgeVariant}>{sourceBadgeLabel}</Badge>
-        ) : null}
-        <Badge variant="outline">默认展示 {items.length} 条今日重点会诊</Badge>
-        <Badge variant="info">按风险等级、处理状态、生成时间排序</Badge>
+        <Badge variant="warning">Admin priority board</Badge>
+        {sourceBadgeLabel ? <Badge variant={sourceBadgeVariant}>{sourceBadgeLabel}</Badge> : null}
+        <Badge variant="outline">Showing {items.length} consultations</Badge>
+        <Badge variant="info">Sorted by risk, status, and time</Badge>
+        <Badge variant={effectiveDispatchAvailable ? "success" : "outline"}>{effectiveDispatchStatusMessage}</Badge>
       </div>
 
       <div className="space-y-4">
@@ -98,7 +113,8 @@ export default function RiskPriorityBoard({
               item={item}
               onCreateConsultationNotification={onCreateConsultationNotification}
               isCreatingNotification={isCreatingConsultationNotification?.(item.consultationId) ?? false}
-              notificationError={notificationError}
+              dispatchAvailable={effectiveDispatchAvailable}
+              dispatchStatusMessage={effectiveDispatchStatusMessage}
             />
             <ConsultationTraceCard
               item={item}

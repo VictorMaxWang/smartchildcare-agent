@@ -122,3 +122,46 @@ test("routeIntentRequest returns structured unknown fallback", () => {
   assert.equal(result.optionalPayload, null);
   assert.ok(result.previewCard.badges.includes("unknown-intent"));
 });
+
+test("routeIntentRequest routes homepage preset priority utterances", () => {
+  const teacherResult = routeIntentRequest({
+    message: "帮我看看今天最需要优先处理的孩子",
+    roleHint: "teacher",
+    sourcePage: "/teacher",
+  });
+
+  assert.equal(teacherResult.detectedRole, "teacher");
+  assert.equal(teacherResult.intent, "view_priority");
+  assert.equal(teacherResult.targetWorkflow, "teacher.agent.follow-up");
+  assert.equal(teacherResult.targetPage, "/teacher/agent");
+  assert.equal(teacherResult.deeplink, "/teacher/agent?action=follow-up");
+  assert.equal(teacherResult.optionalPayload?.kind, "teacher-agent-run");
+  assert.equal(teacherResult.optionalPayload?.workflow, "follow-up");
+  assert.equal(teacherResult.ruleId, "intent-router:teacher:view_priority:v1");
+  assert.ok(teacherResult.previewCard.badges.includes("teacher"));
+  assert.ok(teacherResult.previewCard.badges.includes("view_priority"));
+  assert.ok(teacherResult.matchedSignals.includes("roleHint:teacher"));
+  assert.ok(teacherResult.matchedSignals.includes("intent:优先"));
+  assert.ok(teacherResult.matchedSignals.includes("intent:最需要优先处理"));
+  assert.ok(teacherResult.matchedSignals.includes("intent:优先处理的孩子"));
+
+  const adminResult = routeIntentRequest({
+    message: "帮我看今天机构最该先处理什么",
+    roleHint: "admin",
+    sourcePage: "/admin",
+  });
+
+  assert.equal(adminResult.detectedRole, "admin");
+  assert.equal(adminResult.intent, "view_priority");
+  assert.equal(adminResult.targetWorkflow, "admin.agent.daily-priority");
+  assert.equal(adminResult.targetPage, "/admin/agent");
+  assert.equal(adminResult.deeplink, "/admin/agent");
+  assert.equal(adminResult.optionalPayload?.kind, "admin-agent-run");
+  assert.equal(adminResult.optionalPayload?.workflow, "daily-priority");
+  assert.equal(adminResult.ruleId, "intent-router:admin:view_priority:v1");
+  assert.ok(adminResult.previewCard.badges.includes("admin"));
+  assert.ok(adminResult.previewCard.badges.includes("view_priority"));
+  assert.ok(adminResult.matchedSignals.includes("roleHint:admin"));
+  assert.ok(adminResult.matchedSignals.includes("intent:最该先处理"));
+  assert.ok(adminResult.matchedSignals.includes("intent:最该先处理什么"));
+});

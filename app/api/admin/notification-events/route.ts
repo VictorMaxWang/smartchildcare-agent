@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
-import { getCurrentSessionUser } from "@/lib/auth/account-server";
-import type { AdminDispatchCreatePayload, AdminDispatchUpdatePayload } from "@/lib/agent/admin-types";
-import { AUTH_SESSION_SECRET_CONFIG_ERROR_MESSAGE, MissingAuthSessionSecretError } from "@/lib/auth/session-config";
-import { DATABASE_URL_CONFIG_ERROR_MESSAGE, DatabaseConfigError } from "@/lib/db/server";
+import { getCurrentSessionUser } from "../../../../lib/auth/account-server";
+import type { AdminDispatchCreatePayload, AdminDispatchUpdatePayload } from "../../../../lib/agent/admin-types";
+import { AUTH_SESSION_SECRET_CONFIG_ERROR_MESSAGE, MissingAuthSessionSecretError } from "../../../../lib/auth/session-config";
+import { DatabaseConfigError } from "../../../../lib/db/server";
 import {
   createNotificationEvent,
   listNotificationEventsByInstitution,
   updateNotificationEvent,
-} from "@/lib/db/notification-events";
+} from "../../../../lib/db/notification-events";
+import {
+  ADMIN_NOTIFICATION_EVENTS_AUTH_UNAVAILABLE_REASON_CODE,
+  ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE,
+  ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_REASON_CODE,
+  buildUnavailableResponse,
+} from "./contract";
 
 export const runtime = "nodejs";
 
@@ -31,11 +37,21 @@ async function getAdminProfile() {
     return { actorId: user.id, institutionId: user.institutionId };
   } catch (error) {
     if (error instanceof MissingAuthSessionSecretError) {
-      return { error: NextResponse.json({ error: AUTH_SESSION_SECRET_CONFIG_ERROR_MESSAGE }, { status: 503 }) };
+      return {
+        error: buildUnavailableResponse(
+          AUTH_SESSION_SECRET_CONFIG_ERROR_MESSAGE,
+          ADMIN_NOTIFICATION_EVENTS_AUTH_UNAVAILABLE_REASON_CODE
+        ),
+      };
     }
 
     if (error instanceof DatabaseConfigError) {
-      return { error: NextResponse.json({ error: DATABASE_URL_CONFIG_ERROR_MESSAGE }, { status: 503 }) };
+      return {
+        error: buildUnavailableResponse(
+          ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE,
+          ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_REASON_CODE
+        ),
+      };
     }
 
     console.error("[NOTIFICATION_EVENTS] Failed to resolve admin profile", error);
@@ -110,10 +126,13 @@ export async function GET() {
     const context = await getAdminProfile();
     if ("error" in context) return context.error;
     const items = await listNotificationEventsByInstitution(context.institutionId);
-    return NextResponse.json({ items }, { status: 200 });
+    return NextResponse.json({ items, available: true }, { status: 200 });
   } catch (error) {
     if (error instanceof DatabaseConfigError) {
-      return NextResponse.json({ error: DATABASE_URL_CONFIG_ERROR_MESSAGE }, { status: 503 });
+      return buildUnavailableResponse(
+        ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE,
+        ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_REASON_CODE
+      );
     }
 
     console.error("[NOTIFICATION_EVENTS] Unexpected GET error", error);
@@ -149,10 +168,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "failed to create notification event" }, { status: 500 });
     }
 
-    return NextResponse.json({ item }, { status: 201 });
+    return NextResponse.json({ item, available: true }, { status: 201 });
   } catch (error) {
     if (error instanceof DatabaseConfigError) {
-      return NextResponse.json({ error: DATABASE_URL_CONFIG_ERROR_MESSAGE }, { status: 503 });
+      return buildUnavailableResponse(
+        ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE,
+        ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_REASON_CODE
+      );
     }
 
     console.error("[NOTIFICATION_EVENTS] Unexpected POST error", error);
@@ -188,10 +210,13 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "notification event not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ item }, { status: 200 });
+    return NextResponse.json({ item, available: true }, { status: 200 });
   } catch (error) {
     if (error instanceof DatabaseConfigError) {
-      return NextResponse.json({ error: DATABASE_URL_CONFIG_ERROR_MESSAGE }, { status: 503 });
+      return buildUnavailableResponse(
+        ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE,
+        ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_REASON_CODE
+      );
     }
 
     console.error("[NOTIFICATION_EVENTS] Unexpected PATCH error", error);

@@ -1,22 +1,23 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import type { ConsultationResult } from "@/lib/ai/types";
+import type { ConsultationResult } from "../ai/types";
 import {
   buildAdminConsultationPriorityItems,
   type AdminConsultationChildMeta,
   type AdminConsultationPriorityItem,
-} from "@/lib/agent/admin-consultation";
-import type { AdminDispatchCreatePayload, AdminDispatchEvent } from "@/lib/agent/admin-types";
+} from "./admin-consultation";
+import type { AdminDispatchCreatePayload, AdminDispatchEvent } from "./admin-types";
 import {
+  ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE,
   useAdminWorkspaceLoader,
   type UseAdminWorkspaceLoaderOptions,
-} from "@/lib/agent/use-admin-workspace-loader";
+} from "./use-admin-workspace-loader";
 import type {
   AdminConsultationFeedState,
   AdminConsultationFeedStatus,
   UseAdminConsultationFeedOptions,
-} from "@/lib/agent/use-admin-consultation-feed";
+} from "./use-admin-consultation-feed";
 
 export interface AdminConsultationFeedBadge {
   label: string;
@@ -112,6 +113,39 @@ export function buildAdminConsultationWorkspaceView(params: {
   };
 }
 
+function sanitizeAdminDispatchStatusMessage(message?: string | null) {
+  if (!message) {
+    return ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE;
+  }
+
+  const trimmedMessage = message.trim();
+  if (!trimmedMessage) {
+    return ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE;
+  }
+
+  if (/DATABASE_URL/i.test(trimmedMessage)) {
+    return ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE;
+  }
+
+  return trimmedMessage;
+}
+
+export function getAdminDispatchUnavailableMessage(params: {
+  dispatchAvailable: boolean;
+  dispatchStatusMessage: string | null;
+  dispatchReasonCode: string | null;
+}) {
+  if (params.dispatchAvailable) {
+    return null;
+  }
+
+  if (params.dispatchReasonCode === "notification_store_unavailable") {
+    return ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE;
+  }
+
+  return sanitizeAdminDispatchStatusMessage(params.dispatchStatusMessage);
+}
+
 export function useAdminConsultationWorkspace(
   options: UseAdminConsultationWorkspaceOptions
 ) {
@@ -121,6 +155,9 @@ export function useAdminConsultationWorkspace(
     notificationEvents,
     notificationError: loaderNotificationError,
     notificationReady,
+    dispatchAvailable,
+    dispatchStatusMessage,
+    dispatchReasonCode,
     upsertNotificationEvent,
   } = useAdminWorkspaceLoader({
     visibleChildrenCount: visibleChildren.length,
@@ -155,6 +192,17 @@ export function useAdminConsultationWorkspace(
       payload: AdminDispatchCreatePayload,
       requestKey = payload.priorityItemId || payload.targetId
     ) => {
+      const unavailableMessage = getAdminDispatchUnavailableMessage({
+        dispatchAvailable,
+        dispatchStatusMessage,
+        dispatchReasonCode,
+      });
+
+      if (unavailableMessage) {
+        setMutationError(unavailableMessage);
+        return null;
+      }
+
       setCreatingNotificationKey(requestKey);
       setMutationError(null);
 
@@ -166,10 +214,12 @@ export function useAdminConsultationWorkspace(
           },
           body: JSON.stringify(payload),
         });
-        const data = (await response.json()) as { item?: AdminDispatchEvent; error?: string };
+        const data = (await response.json()) as { item?: AdminDispatchEvent; error?: string; message?: string };
 
         if (!response.ok || !data.item) {
-          setMutationError(data.error ?? "派单创建失败");
+          setMutationError(
+            sanitizeAdminDispatchStatusMessage(data.message ?? data.error)
+          );
           return null;
         }
 
@@ -177,13 +227,13 @@ export function useAdminConsultationWorkspace(
         return data.item;
       } catch (error) {
         console.error("[ADMIN_WORKSPACE] Failed to create notification event", error);
-        setMutationError("派单创建失败");
+        setMutationError(ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE);
         return null;
       } finally {
         setCreatingNotificationKey(null);
       }
     },
-    [upsertNotificationEvent]
+    [dispatchAvailable, dispatchReasonCode, dispatchStatusMessage, upsertNotificationEvent]
   );
 
   const createConsultationScopedNotification = useCallback(
@@ -200,6 +250,17 @@ export function useAdminConsultationWorkspace(
 
   const updateNotificationStatus = useCallback(
     async (eventId: string, status: AdminDispatchEvent["status"]) => {
+      const unavailableMessage = getAdminDispatchUnavailableMessage({
+        dispatchAvailable,
+        dispatchStatusMessage,
+        dispatchReasonCode,
+      });
+
+      if (unavailableMessage) {
+        setMutationError(unavailableMessage);
+        return null;
+      }
+
       setUpdatingEventId(eventId);
       setMutationError(null);
 
@@ -214,10 +275,12 @@ export function useAdminConsultationWorkspace(
             status,
           }),
         });
-        const data = (await response.json()) as { item?: AdminDispatchEvent; error?: string };
+        const data = (await response.json()) as { item?: AdminDispatchEvent; error?: string; message?: string };
 
         if (!response.ok || !data.item) {
-          setMutationError(data.error ?? "派单状态更新失败");
+          setMutationError(
+            sanitizeAdminDispatchStatusMessage(data.message ?? data.error)
+          );
           return null;
         }
 
@@ -225,13 +288,13 @@ export function useAdminConsultationWorkspace(
         return data.item;
       } catch (error) {
         console.error("[ADMIN_WORKSPACE] Failed to update notification event", error);
-        setMutationError("派单状态更新失败");
+        setMutationError(ADMIN_NOTIFICATION_EVENTS_UNAVAILABLE_MESSAGE);
         return null;
       } finally {
         setUpdatingEventId(null);
       }
     },
-    [upsertNotificationEvent]
+    [dispatchAvailable, dispatchReasonCode, dispatchStatusMessage, upsertNotificationEvent]
   );
 
   const isCreatingNotification = useCallback(
@@ -246,6 +309,9 @@ export function useAdminConsultationWorkspace(
     notificationEvents,
     notificationError: mutationError ?? loaderNotificationError,
     notificationReady,
+    dispatchAvailable,
+    dispatchStatusMessage,
+    dispatchReasonCode,
     createNotification,
     createConsultationScopedNotification,
     updateNotificationStatus,

@@ -1,359 +1,263 @@
 # SmartChildcare Agent
 
-> SmartChildcare Agent 不是一个托育后台，而是一套面向教师、家长与园长协同决策的移动端智能体系统。  
-> 它的核心价值不在于回答一个问题，而在于把托育记录、连续观察、结构化会诊、家庭执行与复查回流收束成真正可执行的闭环。
+> 面向托育场景的多角色、多智能体、移动端优先协同决策系统。  
+> 让教师记录、风险会诊、园长承接、家长执行与反馈回流，形成持续工作的智能闭环，而不是一次性的 AI 回答。
 
-这不是把托育后台接上一个聊天框，而是围绕教师、家长、园长三端，用 Multi-Agent 工作流、记忆中枢、结构化输出和移动端优先交互，把园内观察、风险识别、机构决策、家庭执行与复查反馈组织成一条可演示、可答辩、可继续演进的智能决策链路。项目叙事与能力映射优先对齐 vivo AIGC 创新赛。
+## 项目价值与现实问题
 
-**关键词**
+托育现场最难的不是“有没有记录”，而是**记录之后能否真正进入连续判断与行动闭环**。
 
-- 完整智能体系统，不是托育后台外接单点 AI 能力
-- 多角色协同，不是单轮问答
-- 记忆中枢驱动，不是一次性生成
-- 移动端优先，适合录屏、答辩、路演
+- 教师记录碎片化，现场观察常常来不及沉淀为结构化信息。
+- 家园协同容易停留在单次通知，缺少围绕同一问题的连续跟进。
+- 风险判断与机构承接之间经常断层，重要个体难以快速升级到园长视角。
+- 家长执行之后，反馈往往无法稳定写回系统，导致下一轮判断仍然“从头开始”。
+- 传统信息化系统强调台账，普通聊天式 AI 强调回答，但都不足以支撑托育场景所需的持续闭环。
 
-## 项目定位
+SmartChildcare Agent 试图解决的，正是这条链路：
 
-SmartChildcare Agent 面向教师、家长、园长三个核心角色，组织了一套移动端优先的托育 AI 智能体应用。教师端负责低成本记录与快速理解，园长端负责高风险优先级与机构级承接，家长端负责理解、执行、反馈与情感连接；中间由 FastAPI orchestrator、记忆中枢和结构化 Agent 输出把各端串成闭环。
+**教师记录 -> 系统理解 -> 风险会诊 -> 园长承接 -> 家长执行 -> 反馈回流 -> 下一轮判断**
 
-它要解决的不是“多一个 AI 功能”，而是“让托育现场的关键决策链路真正跑起来”。这也是它与普通信息化系统、普通聊天机器人、普通比赛演示页之间的本质差异。
+## 项目整体定位
 
-## 当前阶段
+SmartChildcare Agent 不是托育后台外挂一个聊天框，也不是单点式 AI 功能集合，而是一套围绕教师、园长、家长三类角色共同运行的协同决策系统。
 
-当前真实阶段是：**5 条比赛展示路径已形成稳定演示基线，仓库正在从旧 `T0-T13 / freeze 收口账本` 切换到 `T1-T31` 并行推进控制面**。
+它的核心定位包括：
 
-- 当前最稳定比赛主路径：`/teacher` -> `/teacher/high-risk-consultation` -> `/admin` -> `/parent` -> `/parent/storybook?child=c-1` -> `/parent/agent?child=c-1`
-- 当前第一展示位：高风险会诊
-- 当前第二展示位：Admin 决策区 / 风险优先级 / 会诊 trace 面板
-- Parent storybook 已具展示能力，不应再写回“未开始”
-- 前端 36 人 demo 基线已在代码里，后端 demo snapshot 仍未对齐到 36 人
-- staging 与 vivo provider 仍需保守表达，不写成 `fully healthy`、`fully switched` 或 `fully live`
-
-阶段、状态与并行任务口径以 `docs/current-status-ledger.md` 为准；`T1-T31` 详细任务说明以 `docs/task-registry.md` 为准。
-
-## 为什么这个项目重要
-
-托育场景最难的不是记录本身，而是连续闭环。
-
-教师没有时间整理碎片观察，园长需要知道今天最该盯谁，家长需要知道今晚到底做什么，以及做完之后如何把反馈带回下一轮判断。这意味着托育不是单轮问答，而是一条持续工作的智能决策链路：
-
-**记录 → 理解 → 决策 → 干预 → 反馈 → 复查**
-
-这正是智能体系统的价值所在。系统不是停在“给一句建议”，而是把结构化记录、会诊分工、决策承接、家庭执行与复查回流收束成面向真实业务闭环的 AI 助手系统。
+- `Multi-Agent`：把理解、会诊、建议、承接拆成有分工的智能体链路，而不是单轮问答。
+- `Mobile-first`：优先服务竖屏、单屏、短链路的真实使用与演示场景。
+- `Memory-driven`：以儿童画像、状态快照、会诊轨迹和反馈回流作为连续判断底座。
+- `Structured decision-making`：输出草稿、风险证据、干预卡、优先级卡、周报，而不是只输出一段文本。
+- `Closed-loop collaboration`：让教师、园长、家长围绕同一儿童与同一问题形成协同闭环。
 
 ## 系统总架构
 
 ```mermaid
 flowchart LR
-  subgraph A["前端交互层 / Mobile-First"]
-    T["Teacher<br/>/teacher<br/>/teacher/agent<br/>/teacher/high-risk-consultation"]
-    P["Parent<br/>/parent<br/>/parent/agent<br/>/parent/storybook"]
-    D["Admin<br/>/admin<br/>/admin/agent"]
+  subgraph A["角色入口层"]
+    T["Teacher 教师端"]
+    D["Admin 园长端"]
+    P["Parent 家长端"]
   end
 
-  subgraph B["Next.js 交互与桥接层"]
-    UI["Role Scaffold<br/>cards / timeline / chat / storybook viewer"]
-    API["/api/ai/*<br/>teacher-voice-understand<br/>high-risk-consultation<br/>parent-trend-query<br/>parent-storybook"]
+  subgraph B["交互与桥接层"]
+    UI["移动端页面与结构化卡片"]
+    API["统一 AI 路由与角色工作台"]
   end
 
-  subgraph C["智能体编排层 / FastAPI Brain"]
-    ORCH["orchestrator.py"]
-    TV["teacher_voice_understand.py"]
-    HC["high-risk consultation workflow"]
-    PT["parent_trend_service.py"]
-    PS["parent_storybook_service.py"]
+  subgraph C["智能体编排层"]
+    ORCH["FastAPI Orchestrator"]
+    AG["多智能体工作流与角色协同"]
   end
 
-  subgraph D1["记忆中枢"]
+  subgraph M["记忆中枢"]
     MEM["child_profile_memory"]
-    SNAP["agent_state_snapshots"]
-    TRACE["agent_trace_log"]
-    SESSION["SessionMemory"]
-    VECTOR["SimpleVectorStore<br/>placeholder boundary"]
+    SNAP["state snapshots"]
+    TRACE["trace / evidence / feedback"]
   end
 
-  subgraph E["vivo 能力层 / Provider Anchors"]
-    VLLM["vivo_llm.py"]
-    VASR["vivo_asr.py"]
-    VTTS["vivo_tts.py"]
-    VOCR["vivo_ocr.py"]
-  end
-
-  subgraph F["结构化输出层"]
-    OUT1["summary / follow-up / intervention cards"]
-    OUT2["RiskPriorityBoard / decision cards"]
-    OUT3["TrendLineChart / trend response"]
-    OUT4["StoryBookViewer / media status"]
+  subgraph O["结构化输出层"]
+    O1["草稿确认 / Teacher Copilot"]
+    O2["会诊结论 / 干预卡 / 优先级板"]
+    O3["趋势解释 / 微绘本 / 周报"]
   end
 
   T --> UI
-  P --> UI
   D --> UI
-  UI --> API
-  API --> ORCH
-  API --> TV
-  API --> HC
-  API --> PT
-  API --> PS
-  ORCH --> MEM
-  ORCH --> SNAP
-  ORCH --> TRACE
-  HC --> SESSION
-  HC --> VECTOR
-  TV --> VASR
-  ORCH --> VLLM
-  PS --> VTTS
-  PS --> VOCR
-  HC --> OUT1
-  ORCH --> OUT2
-  PT --> OUT3
-  PS --> OUT4
+  P --> UI
+  UI --> API --> ORCH --> AG
+  ORCH <--> MEM
+  ORCH <--> SNAP
+  ORCH <--> TRACE
+  AG --> O1
+  AG --> O2
+  AG --> O3
 ```
 
-这套架构直接说明了一件事：系统的核心不是“托育后台外接单点 AI 能力”，而是“多角色前端入口 + 智能体编排层 + 记忆中枢 + 结构化输出层”。评委不需要先看代码，也能通过这张图理解它为什么是完整系统，而不是单点能力拼接。
+这套架构表达的重点不是某一个模型、某一个页面或某一条接口，而是一个完整系统如何运转：  
+角色入口负责采集与使用，编排层负责理解与决策，记忆中枢负责连续性，结构化输出负责承接行动。
 
-## 主线
-
-### 1. Teacher 语音智能体主线
-
-- 用户是谁：教师
-- AI 在做什么：把现场观察通过语音入口压缩成 transcript、understanding 与可确认草稿
-- 为什么体现智能体价值：系统先捕捉、再理解、再推动执行，而不是让教师先写完一整份记录
-- 为什么适合录屏答辩：移动端入口明确，单屏任务清晰，能够快速形成“输入到执行”的主路径
-
-### 2. 高风险会诊 + Admin 决策主线
-
-- 用户是谁：教师与园长
-- AI 在做什么：把高风险儿童的长期画像、最近上下文与当前观察汇入 Multi-Agent 会诊，再把结论压缩成园长当天最该处理的决策卡
-- 为什么体现智能体价值：系统不是只给一句建议，而是完成会诊分工、优先级排序与 explainability 承接
-- 为什么适合录屏答辩：stage 推进、会诊卡片、RiskPriorityBoard、决策承接全部可视化，系统感最强
-
-### 3. Parent 趋势问答 + 微绘本主线
-
-- 用户是谁：家长
-- AI 在做什么：一条引擎负责趋势解释与行动建议，一条引擎负责把成长亮点和今晚任务组织成微绘本
-- 为什么体现智能体价值：系统同时处理理性解释与情感连接，不只做效率工具
-- 为什么适合录屏答辩：既有结构化趋势图，也有具象化微绘本，易形成记忆点
-
-## 多角色闭环流程
+## 多角色闭环
 
 ```mermaid
 flowchart LR
-  R1["教师记录<br/>晨检异常 / 现场观察 / 语音录入"]
-  R2["系统理解<br/>transcript / understanding / draft"]
-  R3["高风险会诊<br/>memory context + specialist agents"]
-  R4["园长决策<br/>RiskPriorityBoard + 决策卡"]
-  R5["家长执行<br/>趋势问答 + 微绘本 + 今晚行动"]
-  R6["反馈回流<br/>guardian feedback / follow-up / reminders"]
-  R7["复查闭环<br/>下一轮观察与会诊复用"]
+  R1["教师记录<br/>语音速记 / OCR 草稿 / 现场观察"]
+  R2["系统理解<br/>草稿确认 / 风险识别 / 连续判断"]
+  R3["风险会诊<br/>多智能体分工 / 证据链 / 干预建议"]
+  R4["园长承接<br/>优先级排序 / 决策卡 / 派单"]
+  R5["家长执行<br/>趋势解释 / 今晚行动 / 微绘本"]
+  R6["反馈回流<br/>结构化反馈 / 提醒 / 周报复用"]
+  R7["下一轮判断<br/>复查 / 再会诊 / 连续观察"]
 
   R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> R2
 ```
 
-这条闭环决定了它不是普通问答产品。教师输入不是终点，家长反馈也不是终点；系统通过持续回流的上下文，把每一次观察都变成下一轮判断的起点。
+项目的系统价值，就体现在这条闭环上。  
+教师输入不是终点，家长反馈也不是终点；每一轮记录和执行，都会成为下一轮判断的输入。
 
-## Teacher 智能体主线
+## 三条主展示主链
 
-Teacher 主路径从 `/teacher` 的全局语音入口出发，经过 `/api/ai/teacher-voice-understand`、FastAPI `teacher_voice_understand.py`、ASR provider 与草稿确认面板，把一段现场观察压缩成可确认、可持久化、可继续跟进的结构化记录。这是系统从输入到执行的第一条主 Agent 路径。
+### 1. Teacher 智能体主链
 
-```mermaid
-sequenceDiagram
-  participant Teacher as 教师
-  participant Voice as Voice Layer
-  participant Next as Next AI Route
-  participant FastAPI as FastAPI
-  participant ASR as ASR Provider
-  participant Draft as Draft Confirm
-  participant Persist as Persist / Snapshot
+教师侧的目标不是增加填表负担，而是把“现场观察”尽快压缩为可确认、可跟进、可协作的结构化输入。
 
-  Teacher->>Voice: 语音输入 / 长按录音
-  Voice->>Next: 上传音频或 transcript
-  Next->>FastAPI: teacher voice understand request
-  FastAPI->>ASR: 转写音频
-  ASR-->>FastAPI: transcript + source + confidence
-  FastAPI-->>Next: understanding + draft items + warnings
-  Next-->>Draft: 草稿确认面板
-  Draft->>Persist: confirm -> persist
-  Persist-->>Teacher: 继续沟通 / follow-up / 发起会诊
-```
-
-这一段最能体现移动端优先交互。教师不是先面对复杂表单，而是先把观察捕捉下来，再由系统完成 transcript、understanding、草稿确认与后续动作承接。
-
-## 高风险会诊 Multi-Agent 工作流
-
-`/teacher/high-risk-consultation` 是当前最强的 Multi-Agent 展示位。它不是把一段提示词包成一个结果页，而是把长期画像、最近快照、当前风险信号和会诊分工收束成可解释、可推进、可承接的结构化决策链路。
-
-```mermaid
-flowchart TB
-  LT["长期画像<br/>child_profile_memory"]
-  RC["最近上下文<br/>snapshots / follow-up / feedback"]
-  SIG["当前观察<br/>teacher note / image / voice"]
-  MC["memory context builder"]
-
-  subgraph AG["专项智能体分工"]
-    H["HealthObservationAgent"]
-    DI["DietBehaviorAgent"]
-    PC["ParentCommunicationAgent"]
-    IS["InSchoolActionAgent"]
-  end
-
-  CO["CoordinatorAgent"]
-  TR["providerTrace"]
-  MM["memoryMeta"]
-  OUTA["ConsultationSummaryCard"]
-  OUTB["FollowUp48hCard"]
-  OUTC["InterventionCardPanel"]
-
-  LT --> MC
-  RC --> MC
-  SIG --> MC
-  MC --> H
-  MC --> DI
-  MC --> PC
-  MC --> IS
-  H --> CO
-  DI --> CO
-  PC --> CO
-  IS --> CO
-  CO --> TR
-  CO --> MM
-  CO --> OUTA
-  CO --> OUTB
-  CO --> OUTC
-```
-
-这条链路的价值在于三点：它显式使用记忆上下文，它显式展示多 Agent 分工，它显式保留 explainability。`providerTrace` 和 `memoryMeta` 不是装饰，而是评委理解“这不是黑箱生成”的关键证据。
-
-## 园长决策区
-
-园长端的重点不是看表格，而是看“今天最该盯谁”。`/admin` 和 `/admin/agent` 承接高风险会诊的结构化结果，用 `RiskPriorityBoard`、决策卡与通知承接把个体会诊上升为机构级决策。
+- 支持语音速记与 OCR 草稿，降低现场记录门槛。
+- 系统先完成理解与草稿化，再由教师确认，而不是要求教师先写完完整记录。
+- Teacher Copilot 会补充记录完善提示、30 秒 SOP 和家长沟通话术。
+- 同一工作区继续承接今日跟进行动、家长沟通建议与班级周报预览。
 
 ```mermaid
 flowchart LR
-  C1["consultation snapshots"]
-  C2["trace summaries / explainability"]
-  F1["/api/ai/high-risk-consultation/feed"]
-  B1["RiskPriorityBoard"]
-  B2["DirectorDecisionCard"]
-  N1["notification overlay / dispatch"]
-  A1["/admin/agent"]
-
-  C1 --> F1
-  C2 --> F1
-  F1 --> B1
-  B1 --> B2
-  B2 --> N1
-  B2 --> A1
+  A["语音速记 / OCR 草稿"] --> B["系统理解"]
+  B --> C["草稿确认"]
+  C --> D["Teacher Copilot"]
+  D --> E["今日跟进建议"]
+  D --> F["家长沟通建议"]
+  D --> G["教师周报预览"]
 ```
 
-这意味着园长看到的不是“又多了一张报表”，而是“今天最该先处理哪一位儿童、为什么、需要谁来承接、后续如何追踪”。这是机构级智能决策，而不是单页展示。
+这一主链体现的是“先捕捉，再理解，再执行”的设计逻辑，适合移动端使用，也适合评审快速理解其产品成熟度。
 
-## 家长双引擎
+### 2. 高风险会诊与园长决策主链
 
-家长侧不是附属页面，而是系统闭环里真正承担“理解、执行、反馈”的角色。一条引擎负责趋势问答与理性解释，一条引擎负责微绘本与情感连接，两条引擎共同把家庭端带入行动闭环。
+高风险会诊不是把一段提示词包装成结果页，而是把**当前观察、历史画像、最近上下文与多智能体分工**收束成可承接的结构化决策链。
+
+- 会诊过程支持阶段式流转，便于展示“如何得出结论”，而不只是展示最终结果。
+- 证据链界面把来源、置信度、人工复核需求和支撑关系显式可见。
+- 会诊结果会沉淀为园内动作、今晚家庭任务与 48 小时复查点。
+- 园长端进一步承接为风险优先级、决策卡、派单动作与治理视角。
+- Admin 首页同时提供机构级质量治理区与运营周报预览，形成“当日优先级 + 机构治理”双视角。
 
 ```mermaid
 flowchart LR
-  CTX["shared child context<br/>latest consultation + intervention + records"]
-  TQ["趋势问答引擎<br/>/parent/agent?child=c-1"]
-  SB["微绘本引擎<br/>/parent/storybook?child=c-1"]
-  TREND["TrendLineChart<br/>trendLabel / source / warnings"]
-  STORY["StoryBookViewer<br/>scene / image / audio status"]
-  ACT["今晚行动"]
-  FB["guardian feedback / next follow-up"]
-
-  CTX --> TQ
-  CTX --> SB
-  TQ --> TREND
-  SB --> STORY
-  TREND --> ACT
-  STORY --> ACT
-  ACT --> FB
+  S1["当前观察"] --> C["多智能体会诊"]
+  S2["长期画像"] --> C
+  S3["最近快照与反馈"] --> C
+  C --> E["证据链与解释层"]
+  E --> R["会诊结论"]
+  R --> I["干预卡 / 48 小时复查"]
+  R --> P["园长优先级板"]
+  P --> D["决策卡与派单"]
+  D --> G["质量治理与运营周报"]
 ```
 
-趋势问答提供理性价值，让家长知道最近 7 / 14 / 30 天到底发生了什么变化；微绘本提供情感价值，让家长愿意看、看得懂、接得住今晚任务。两者共同构成家长端的双引擎体验。
+这条主链体现的是机构级的判断闭环：不仅知道“谁需要关注”，还知道“为什么、谁来承接、后续如何追踪”。
 
-## 记忆中枢
+### 3. Parent 双引擎主链
 
-系统的闭环能力建立在记忆中枢之上，而不是建立在一次性上下文拼接之上。当前仓库中已经存在 `child_profile_memory`、`agent_state_snapshots`、`agent_trace_log`、`SessionMemory` 与 `SimpleVectorStore` 等基础设施；其中 vector 仍应按 placeholder 边界保守表述。
+家长侧不是附属页面，而是系统闭环中真正承担“理解、执行、反馈”的角色。
+
+- 一条链负责趋势解释，把近 7/14/30 天变化转成可理解、可行动的说明。
+- 一条链负责情感连接，把成长亮点、今晚任务和会诊上下文组织成微绘本。
+- 关怀模式为祖辈或低数字熟练度照护者提供更短链路、更大字、更少决策负担的首屏体验。
+- 结构化反馈把执行结果重新写回系统，进入下一轮趋势判断、会诊和周报。
+- 家庭周报预览让家长看到“本周发生了什么”与“接下来应该做什么”。
+
+```mermaid
+flowchart LR
+  CTX["共享儿童上下文"] --> T["趋势解释引擎"]
+  CTX --> S["微绘本 / 情感连接引擎"]
+  T --> TE["趋势图与行动说明"]
+  S --> SE["成长故事与睡前微绘本"]
+  TE --> A["今晚行动"]
+  SE --> A
+  A --> F["结构化反馈"]
+```
+
+Parent 双引擎的意义在于：系统同时处理理性解释与情感连接，让家长既愿意看，也看得懂、做得下去。
+
+## 记忆中枢与决策中枢
+
+SmartChildcare Agent 的关键差异，在于它不是一次性问答，而是一个持续消费上下文的系统。
+
+- `child_profile_memory` 沉淀儿童长期画像。
+- `agent_state_snapshots` 保留各轮理解、会诊、跟进与周报结果。
+- `agent_trace_log` 与证据链让系统保留过程信息，而不是只有答案。
+- 家长结构化反馈会回流到趋势解释、会诊判断、周报摘要与后续提醒。
+- 年龄分层照护策略已经开始接入 Teacher、Parent 与干预建议主链，使建议不再是泛儿童化表达。
 
 ```mermaid
 flowchart TB
-  P1["child_profile_memory"]
-  P2["agent_state_snapshots"]
-  P3["agent_trace_log"]
-  P4["SessionMemory"]
-  P5["SimpleVectorStore<br/>placeholder boundary"]
-  P6["app/api/state"]
+  M1["child_profile_memory"]
+  M2["agent_state_snapshots"]
+  M3["agent_trace_log"]
+  M4["parent structured feedback"]
+  W["weekly report"]
+  T["trend explanation"]
+  C["consultation"]
+  N["next-round decision"]
 
-  C1["high-risk consultation"]
-  C2["parent trend query"]
-  C3["parent storybook"]
-  C4["follow-up / weekly report"]
-
-  P1 --> C1
-  P2 --> C1
-  P3 --> C1
-  P2 --> C2
-  P3 --> C2
-  P1 --> C3
-  P2 --> C3
-  P4 --> C4
-  P5 -. future retrieval .-> C1
-  P6 --> P2
+  M1 --> C
+  M2 --> C
+  M3 --> C
+  C --> W
+  C --> T
+  T --> M4
+  W --> M4
+  M4 --> M2
+  M4 --> M3
+  M4 --> N
+  N --> C
 ```
 
-这也是 README 需要明确写成“记忆中枢驱动”的原因。系统的强度不在一个模型回答得多漂亮，而在每一轮记录、会诊、决策、反馈都能被下一轮继续消费。
+换句话说，系统真正积累的不是“回答”，而是**判断上下文**。  
+这也是它更接近智能体系统，而不是单次内容生成工具的原因。
 
-## 技术亮点 / Agent 亮点
+## 结构化输出与可解释性
 
-- **Multi-Agent 协同**：高风险会诊不是单 Agent 问答，而是多个专项智能体分工协同后由 Coordinator 收束。
-- **Memory / Snapshot / Trace**：系统以 `child_profile_memory`、snapshots、trace 为中枢，而不是只依赖单轮 prompt。
-- **SSE 流式会诊**：会诊过程支持 stage 化推进，天然适合答辩时展示“过程”而不只是“结果”。
-- **Explainability**：`providerTrace` 与 `memoryMeta` 让输出链路具备可解释性，便于评委理解系统不是黑箱。
-- **Mobile-first**：Teacher、Parent、Admin 三端都以移动端任务流和单屏决策感为优先。
-- **结构化输出**：summary card、follow-up card、intervention card、RiskPriorityBoard、TrendLineChart、StoryBookViewer 形成统一输出层。
-- **Feed + fallback 策略**：系统保留 feed、snapshot、trace 与 fallback 边界，强调真实展示能力，同时不夸大 live 状态。
+项目的输出设计强调可承接、可追踪、可解释，而不是只追求生成效果。
 
-## vivo 生态与能力接入
+- 教师侧输出：草稿确认卡、补全提示、微培训 SOP、家长沟通话术。
+- 会诊侧输出：总结卡、Follow-up 卡、Intervention Card、风险等级与证据链。
+- 园长侧输出：Risk Priority Board、决策卡、派单入口、质量治理指标、运营周报预览。
+- 家长侧输出：趋势解释卡、趋势图、今晚行动、微绘本、结构化反馈表单、家庭周报预览。
+- 解释层输出：`source`、`dataQuality`、`warnings`、`memoryMeta` 等元信息，用于说明判断依据与运行边界。
 
-所有涉及 vivo 能力接入的描述，都以官方文档为唯一准绳：
+这些结构化结果的意义在于，它们都不是展示终点，而是下一步动作的入口。
 
-- [vivo 官方文档入口](https://aigc.vivo.com.cn/#/document/index?id=1746)
+## 高层技术实现
 
-当前 README 仅保守陈述以下事实：
+项目采用前后端分层、工作流编排和状态回流结合的方式实现：
 
-- 仓库中存在 `backend/app/providers/vivo_llm.py`、`backend/app/providers/vivo_asr.py`、`backend/app/providers/vivo_tts.py`、`backend/app/providers/vivo_ocr.py` 等 provider 落点。
-- Teacher 语音入口优先映射 ASR，会诊与智能体编排优先映射 LLM，家长媒体链路保留 TTS / OCR / media provider 扩展位。
-- `VIVO_APP_ID` / `VIVO_APP_KEY` 只允许通过环境变量接入，不能写入代码、README、日志、截图或示例文件。
-- 本 README 不把任何 vivo provider 写成真实上游已全面接通，也不把 staging 写成已完全切到实链路。
+- 前端：`Next.js` 承载教师、园长、家长三类角色入口与移动端优先交互。
+- 后端：`FastAPI` 负责统一编排 Teacher、会诊、Parent、周报、治理等核心工作流。
+- 状态与记忆：围绕儿童画像、快照、轨迹和反馈形成持续可复用的判断底座。
+- 智能能力接入：兼容国产通用大模型能力接入，支持 `Qwen / DeepSeek` 等模型能力用于结构化推理、多模态理解与内容生成。
+- 输出策略：优先以结构化卡片、图表、周报和证据链呈现，而不是把复杂流程压成一段长文本。
 
-## 当前边界与保守口径
+## 推荐体验路径
 
-- `demo_snapshot`、`next-stream-fallback`、`next-json-fallback` 只属于后段边界说明，不是项目身份定义。
-- Teacher 语音主线可以写成“已具展示闭环”，但 ASR 真实上游状态仍保持保守表述。
-- 高风险会诊可以写成“当前最强 Multi-Agent 展示位”，但不扩写成完整远端链路已经全部验收。
-- Admin 决策区可以写成“机构级决策承接位”，但不扩写成远端聚合已经全部打通。
-- Parent 趋势问答与微绘本可以写成“已具展示能力”，但不把图像、配音和上游 provider 写成真实上游已全面接通。
-
-## 演示入口 / 评委观摩路径
-
-推荐按下面的顺序观摩系统：
+建议按以下顺序体验系统主链：
 
 1. `/teacher`  
-   看教师首页、异常儿童、待复查项与全局语音入口，理解系统如何从第一手观察开始。
+   从教师视角进入记录与工作台，理解系统如何从第一手观察开始。
 2. `/teacher/high-risk-consultation`  
-   看当前最强的 Multi-Agent 会诊工作流、stage 推进、summary / follow-up / intervention cards，以及 explainability。
+   观看高风险会诊的阶段流、证据链和干预卡，这是系统最强的智能体展示位。
 3. `/admin`  
-   看园长如何从会诊结果中识别“今天最该盯谁”，并把结果承接为机构级决策。
+   观察园长如何承接会诊结果，完成优先级判断、治理查看与决策推进。
 4. `/parent`  
-   看家长端桥接首页、今日成长故事入口与今夜行动入口，理解家长侧不是单页问答，而是桥接到 storybook 与 trend 的执行面板。
+   查看家长首页如何把今晚任务、趋势入口、关怀模式与反馈入口组织成短链路体验。
 5. `/parent/storybook?child=c-1`  
-   看微绘本、scene 状态、image/audio 状态与情感连接，理解家长端的体验价值。
+   体验微绘本如何把成长亮点与任务建议转成更具情感连接的表达。
 6. `/parent/agent?child=c-1`  
-   看趋势问答、TrendLineChart、行动建议与反馈回流，理解家长端如何从“愿意看”进入“看得懂并执行”。
+   查看趋势解释、继续追问、结构化反馈与下一轮闭环如何合并在同一工作区。
 
-## 本地运行
+## 项目亮点总结
+
+- 它把教师、园长、家长三类角色组织进同一条智能闭环，而不是分别做三个独立页面。
+- 它把会诊、干预、优先级、周报、反馈都做成结构化输出，让系统天然具备承接动作的能力。
+- 它以记忆中枢驱动连续判断，让每次记录、会诊和反馈都能进入下一轮决策。
+- 它在理性解释之外，加入微绘本与关怀模式，让家长侧同时具备行动价值与情感连接。
+- 它保留证据链、来源说明和数据质量提示，使系统更容易被理解、被审阅、被信任。
+
+## 轻量说明
+
+- 本 README 仅陈述当前已经形成稳定主链的系统能力，不把扩展能力写成既成事实。
+- 外部健康资料桥接、自动升级规则、完整透明层与全量媒体实时生成，仍按扩展能力保守表达。
+- 家长趋势、周报与会诊链路保留来源与质量说明，用于支持解释与审阅，而不是弱化系统能力。
+- 故事图像、配音、语音理解等能力不写成唯一生产事实，也不写成已完成全链路远端验收。
+
+<details>
+<summary>本地启动</summary>
 
 ### 前端
 
@@ -362,41 +266,17 @@ npm install
 npm run dev
 ```
 
-默认地址：`http://127.0.0.1:3000`
-
 ### 后端
 
 ```powershell
 py -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-建议在同一终端会话里设置：
+</details>
 
-```powershell
-$env:BRAIN_API_BASE_URL = "http://127.0.0.1:8000"
-```
+## 补充文档
 
-## 最小验证
-
-```powershell
-npm run lint
-npm run build
-$env:PYTHONPATH = "backend"
-py -m pytest backend/tests/test_teacher_voice_understand.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_admin_consultation_feed.py backend/tests/test_parent_trend_service.py backend/tests/test_parent_storybook_service.py backend/tests/test_parent_storybook_endpoint.py backend/tests/test_story_image_provider.py backend/tests/test_vivo_tts_provider.py -q
-```
-
-最新功能状态、fallback 边界与阶段口径，以 `docs/current-status-ledger.md` 为准；`T1-T31` 的 lane、依赖、并行性与回写规则，以 `docs/task-registry.md` 为准。
-
-## 延伸文档
-
-- [AGENTS.md](./AGENTS.md)
-- [docs/current-status-ledger.md](./docs/current-status-ledger.md)
-- [docs/competition-architecture.md](./docs/competition-architecture.md)
-- [docs/task-registry.md](./docs/task-registry.md)
-- [docs/agent-workflows.md](./docs/agent-workflows.md)
-- [docs/demo-script.md](./docs/demo-script.md)
-- [docs/competition-pitch.md](./docs/competition-pitch.md)
-- [docs/freeze-checklists.md](./docs/freeze-checklists.md)
-- [docs/teacher-voice-smoke.md](./docs/teacher-voice-smoke.md)
-- [docs/teacher-consultation-qa.md](./docs/teacher-consultation-qa.md)
-- [docs/parent-trend-smoke.md](./docs/parent-trend-smoke.md)
+- [当前状态账本](./docs/current-status-ledger.md)
+- [工作流地图](./docs/agent-workflows.md)
+- [演示脚本](./docs/demo-script.md)
+- [协作手册](./AGENTS.md)

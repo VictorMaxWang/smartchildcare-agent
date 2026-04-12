@@ -28,6 +28,10 @@ import {
   mergeInterventionCardWithFollowUp,
   type InterventionCard,
 } from "@/lib/agent/intervention-card";
+import {
+  sanitizeParentFacingList,
+  sanitizeParentFacingText,
+} from "@/lib/agent/parent-copy";
 import { buildInterventionTasksFromCard, materializeTasksFromLegacy, pickActiveTask } from "@/lib/tasks/task-model";
 import type { CanonicalTask } from "@/lib/tasks/types";
 
@@ -279,15 +283,23 @@ function buildAssistantAnswer(params: {
   teacherObservation: string;
   parentActionTone?: string;
 }) {
-  const stepsText = params.homeSteps.slice(0, 3).map((item, index) => `${index + 1}. ${item}`).join("\n");
-  const observationText = params.observationPoints.map((item) => `- ${item}`).join("\n");
+  const summary = sanitizeParentFacingText(params.summary);
+  const whyNow = sanitizeParentFacingText(params.whyNow);
+  const tonightTopAction = sanitizeParentFacingText(params.tonightTopAction);
+  const teacherObservation = sanitizeParentFacingText(params.teacherObservation);
+  const parentActionTone = sanitizeParentFacingText(params.parentActionTone);
+  const stepsText = sanitizeParentFacingList(params.homeSteps, 3)
+    .map((item, index) => `${index + 1}. ${item}`)
+    .join("\n");
+  const observationText = sanitizeParentFacingList(params.observationPoints, 4)
+    .map((item) => `- ${item}`)
+    .join("\n");
 
   return [
-    params.summary,
-    "",
-    `今晚最该做的一件事：${params.tonightTopAction}`,
-    `为什么现在做：${params.whyNow}`,
-    params.parentActionTone ? `当前阶段建议：${params.parentActionTone}` : "",
+    summary,
+    tonightTopAction ? `今晚先做这一步：${tonightTopAction}` : "",
+    whyNow ? `为什么现在做：${whyNow}` : "",
+    parentActionTone ? `照护提醒：${parentActionTone}` : "",
     "",
     "执行步骤：",
     stepsText,
@@ -295,8 +307,10 @@ function buildAssistantAnswer(params: {
     "今晚观察点：",
     observationText,
     "",
-    `明天老师继续观察：${params.teacherObservation}`,
-  ].join("\n");
+    teacherObservation ? `明天老师会继续关注：${teacherObservation}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildParentAgentChildContext(params: {
@@ -538,36 +552,47 @@ export function buildParentAgentSuggestionResult(params: {
     reviewIn48h: buildReviewIn48h(params.context, params.suggestion),
     generatedAt,
   });
-  const whyNow = buildWhyNow(params.context, params.suggestion, tonightTopAction);
-  const recommendedQuestions = buildRecommendedQuestions(params.context);
-  const summary = params.suggestion.summary;
+  const whyNow = sanitizeParentFacingText(buildWhyNow(params.context, params.suggestion, tonightTopAction));
+  const recommendedQuestions = sanitizeParentFacingList(buildRecommendedQuestions(params.context), 5);
+  const summary = sanitizeParentFacingText(params.suggestion.summary);
 
   const consultation = params.suggestion.consultation;
   const nextInterventionCard = attachConsultationToInterventionCard(interventionCard, consultation);
+  const displayCard = {
+    ...(nextInterventionCard ?? interventionCard),
+    title: sanitizeParentFacingText((nextInterventionCard ?? interventionCard).title),
+    summary,
+    tonightHomeAction: sanitizeParentFacingText((nextInterventionCard ?? interventionCard).tonightHomeAction),
+    homeSteps: sanitizeParentFacingList((nextInterventionCard ?? interventionCard).homeSteps, 4),
+    observationPoints: sanitizeParentFacingList((nextInterventionCard ?? interventionCard).observationPoints, 4),
+    tomorrowObservationPoint: sanitizeParentFacingText((nextInterventionCard ?? interventionCard).tomorrowObservationPoint),
+    reviewIn48h: sanitizeParentFacingText((nextInterventionCard ?? interventionCard).reviewIn48h),
+    parentMessageDraft: sanitizeParentFacingText((nextInterventionCard ?? interventionCard).parentMessageDraft),
+  } satisfies InterventionCard;
 
   return {
     title: `${params.context.child.name} 今晚行动建议`,
     summary,
     targetChildId: params.context.child.id,
     targetLabel: params.context.child.name,
-    tonightTopAction,
+    tonightTopAction: sanitizeParentFacingText(tonightTopAction),
     whyNow,
-    homeSteps: interventionCard.homeSteps,
-    tonightObservationPoints: interventionCard.observationPoints,
-    teacherTomorrowObservation: interventionCard.tomorrowObservationPoint,
+    homeSteps: displayCard.homeSteps,
+    tonightObservationPoints: displayCard.observationPoints,
+    teacherTomorrowObservation: displayCard.tomorrowObservationPoint,
     recommendedQuestions,
     feedbackPrompt: buildFeedbackPrompt(),
-    interventionCard: nextInterventionCard ?? interventionCard,
+    interventionCard: displayCard,
     consultation,
     consultationMode: Boolean(consultation),
-    highlights: uniqueItems([...params.suggestion.highlights, ...params.context.focusReasons], 4),
+    highlights: sanitizeParentFacingList([...params.suggestion.highlights, ...params.context.focusReasons], 4),
     assistantAnswer: buildAssistantAnswer({
       summary,
       whyNow,
-      tonightTopAction,
-      homeSteps: interventionCard.homeSteps,
-      observationPoints: interventionCard.observationPoints,
-      teacherObservation: interventionCard.tomorrowObservationPoint,
+      tonightTopAction: sanitizeParentFacingText(tonightTopAction),
+      homeSteps: displayCard.homeSteps,
+      observationPoints: displayCard.observationPoints,
+      teacherObservation: displayCard.tomorrowObservationPoint,
       parentActionTone: ageBandGuidance?.parentActionTone,
     }),
     source: params.suggestion.source,
@@ -626,18 +651,53 @@ export function buildParentAgentFollowUpResult(params: {
   const mergedInterventionCard = mergeInterventionCardWithFollowUp(params.baseResult.interventionCard, params.response);
   const interventionCard =
     attachConsultationToInterventionCard(mergedInterventionCard, consultation) ?? mergedInterventionCard;
-  const tonightTopAction = params.response.tonightTopAction ?? interventionCard.tonightHomeAction;
+  const displayCard = {
+    ...interventionCard,
+    title: sanitizeParentFacingText(interventionCard.title),
+    summary: sanitizeParentFacingText(interventionCard.summary),
+    tonightHomeAction: sanitizeParentFacingText(interventionCard.tonightHomeAction),
+    homeSteps: sanitizeParentFacingList(interventionCard.homeSteps, 4),
+    observationPoints: sanitizeParentFacingList(interventionCard.observationPoints, 4),
+    tomorrowObservationPoint: sanitizeParentFacingText(interventionCard.tomorrowObservationPoint),
+    reviewIn48h: sanitizeParentFacingText(interventionCard.reviewIn48h),
+    parentMessageDraft: sanitizeParentFacingText(interventionCard.parentMessageDraft),
+  } satisfies InterventionCard;
+  const tonightTopAction = sanitizeParentFacingText(
+    params.response.tonightTopAction ?? displayCard.tonightHomeAction
+  );
   const whyNow =
-    params.response.whyNow ??
+    sanitizeParentFacingText(params.response.whyNow) ||
     (ageBandGuidance
       ? `因为${ageBandGuidance.label}阶段更适合${ageBandGuidance.parentActionTone}，今晚执行结果会直接影响明天老师的跟进方式。`
       : `因为这条追问是在围绕“${params.baseResult.tonightTopAction}”继续细化，今晚执行结果会直接影响明天老师的跟进方式。`);
-  const homeSteps = params.response.homeSteps?.length ? params.response.homeSteps : interventionCard.homeSteps;
+  const homeSteps = sanitizeParentFacingList(
+    params.response.homeSteps?.length ? params.response.homeSteps : displayCard.homeSteps,
+    4
+  );
   const tonightObservationPoints =
-    params.response.observationPoints?.length ? params.response.observationPoints : interventionCard.observationPoints;
-  const teacherTomorrowObservation = params.response.teacherObservation ?? interventionCard.tomorrowObservationPoint;
-  const recommendedQuestions = buildRecommendedQuestions(params.context, params.response.recommendedQuestions);
-  const summary = params.response.answer || params.baseResult.summary;
+    sanitizeParentFacingList(
+      params.response.observationPoints?.length ? params.response.observationPoints : displayCard.observationPoints,
+      4
+    );
+  const teacherTomorrowObservation = sanitizeParentFacingText(
+    params.response.teacherObservation ?? displayCard.tomorrowObservationPoint
+  );
+  const recommendedQuestions = sanitizeParentFacingList(
+    buildRecommendedQuestions(params.context, params.response.recommendedQuestions),
+    5
+  );
+  const summary = sanitizeParentFacingText(params.response.answer) || params.baseResult.summary;
+  const assistantAnswer =
+    sanitizeParentFacingText(params.response.answer) ||
+    buildAssistantAnswer({
+      summary,
+      whyNow,
+      tonightTopAction,
+      homeSteps,
+      observationPoints: tonightObservationPoints,
+      teacherObservation: teacherTomorrowObservation,
+      parentActionTone: ageBandGuidance?.parentActionTone,
+    });
 
   return {
     title: `${params.context.child.name} 追问结果`,
@@ -651,21 +711,11 @@ export function buildParentAgentFollowUpResult(params: {
     teacherTomorrowObservation,
     recommendedQuestions,
     feedbackPrompt: buildFeedbackPrompt(),
-    interventionCard,
+    interventionCard: displayCard,
     consultation,
     consultationMode: Boolean(consultation),
-    highlights: uniqueItems([...params.response.keyPoints, ...params.response.nextSteps], 4),
-    assistantAnswer:
-      params.response.answer ||
-      buildAssistantAnswer({
-        summary,
-        whyNow,
-        tonightTopAction,
-        homeSteps,
-        observationPoints: tonightObservationPoints,
-        teacherObservation: teacherTomorrowObservation,
-        parentActionTone: ageBandGuidance?.parentActionTone,
-      }),
+    highlights: sanitizeParentFacingList([...params.response.keyPoints, ...params.response.nextSteps], 4),
+    assistantAnswer,
     source: params.response.source,
     model: params.response.model,
     generatedAt,

@@ -22,13 +22,13 @@ interface ParentSpeakButtonProps {
 function getStatusCopy(status: BrowserTtsStatus) {
   switch (status) {
     case "speaking":
-      return "Browser TTS is speaking. You can stop it at any time.";
+      return "正在用当前浏览器朗读，你可以随时停止。";
     case "unsupported":
-      return "This browser does not support TTS yet, and no backend voice is connected in this phase.";
+      return "当前浏览器暂不支持朗读，请改用支持语音播报的浏览器。";
     case "error":
-      return "Browser TTS did not finish successfully. Please try again.";
+      return "这次浏览器朗读没有完成，请稍后再试。";
     default:
-      return "Browser-only playback. This is not backend-generated voice.";
+      return "仅在当前浏览器里朗读，方便家里直接听一遍。";
   }
 }
 

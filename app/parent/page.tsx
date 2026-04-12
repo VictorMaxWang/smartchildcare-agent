@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpenText,
   BrainCircuit,
@@ -61,6 +62,9 @@ function formatTimelineTime(value: string) {
 }
 
 export default function ParentHomePage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     currentUser,
     getParentFeed,
@@ -74,7 +78,17 @@ export default function ParentHomePage() {
   } = useApp();
   const { careMode, setCareMode } = useCareMode();
   const [showMoreContent, setShowMoreContent] = useState(false);
-  const feed = getParentFeed()[0];
+  const parentFeed = getParentFeed();
+  const childFromQuery = searchParams.get("child");
+  const authorizedChildIds = useMemo(
+    () => new Set(parentFeed.map((item) => item.child.id)),
+    [parentFeed]
+  );
+  const resolvedChildId =
+    childFromQuery && authorizedChildIds.has(childFromQuery)
+      ? childFromQuery
+      : parentFeed[0]?.child.id ?? "";
+  const feed = parentFeed.find((item) => item.child.id === resolvedChildId) ?? parentFeed[0];
   const viewModel = buildParentHomeViewModel(feed);
   const [previewResult, setPreviewResult] = useState<ParentAgentResult | null>(null);
   const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
@@ -83,6 +97,22 @@ export default function ParentHomePage() {
   const [weeklyReportError, setWeeklyReportError] = useState<string | null>(null);
   const latestInterventionCard = feed ? getChildInterventionCard(feed.child.id) : undefined;
   const latestConsultation = feed ? getLatestConsultationForChild(feed.child.id) : undefined;
+
+  useEffect(() => {
+    if (!feed) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("child", feed.child.id);
+    const nextQuery = nextParams.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery === currentQuery) {
+      return;
+    }
+
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [feed, pathname, router, searchParams]);
 
   const previewContext = useMemo(() => {
     if (!feed) return null;
@@ -358,7 +388,7 @@ export default function ParentHomePage() {
                 ))}
               </div>
               <p className="text-xs text-slate-400">
-                仅展示当前孩子的 demo 影像，不暴露机构级视角或其他儿童信息。
+                这里只展示当前孩子可看的影像与记录，不会带出其他孩子的信息。
               </p>
             </>
           ) : (

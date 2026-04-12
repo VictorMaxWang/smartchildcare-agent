@@ -3,9 +3,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import { BrainCircuit, Clock3, Mic, ScanSearch, Send, Sparkles } from "lucide-react";
+import { BrainCircuit, Clock3, Send, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
 import CareModeToggle from "@/components/parent/CareModeToggle";
@@ -15,7 +16,6 @@ import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel
 import ParentStructuredFeedbackComposer, {
   type ParentStructuredFeedbackComposerSubmitInput,
 } from "@/components/parent/ParentStructuredFeedbackComposer";
-import ParentTrendQaPanel from "@/components/parent/ParentTrendQaPanel";
 import ParentTrendResponseCard from "@/components/parent/ParentTrendResponseCard";
 import {
   AgentWorkspaceCard,
@@ -43,11 +43,9 @@ import {
   mergeParentMessageReflexionResult,
 } from "@/lib/agent/parent-message-reflexion";
 import {
-  buildParentTrendDebugState,
   buildParentTrendQueryPayload,
   isLikelyTrendQuestion,
   PARENT_TREND_QUICK_QUESTIONS,
-  resolveParentTrendDebugCase,
 } from "@/lib/agent/parent-trend";
 import { resolveDefaultParentStoryBookDemoSeedId } from "@/lib/agent/parent-storybook-demo-seeds";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
@@ -59,13 +57,12 @@ import type {
   ParentTrendQueryResponse,
 } from "@/lib/ai/types";
 import { getLocalToday } from "@/lib/date";
-import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
 import { buildReminderItems } from "@/lib/mobile/reminders";
-import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
-import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 import { useCareMode } from "@/lib/care-mode";
 import { buildParentSpeechScript } from "@/lib/voice/browser-tts";
+import { sanitizeParentFacingText } from "@/lib/agent/parent-copy";
+import { formatParentFeedbackStatusLabel } from "@/lib/feedback/consumption";
 import {
   buildInterventionTasksFromCard,
   materializeTasksFromLegacy,
@@ -89,13 +86,11 @@ function formatTimelineTime(value: string) {
 }
 
 export default function ParentAgentPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const childFromQuery = searchParams.get("child");
   const routeIntent = searchParams.get("intent");
-  const trendDebugEnabled = searchParams.get("trace") === "debug";
-  const trendDebugCase = trendDebugEnabled
-    ? resolveParentTrendDebugCase(searchParams.get("trendCase"))
-    : null;
   const { careMode, setCareMode } = useCareMode();
   const {
     currentUser,
@@ -113,8 +108,8 @@ export default function ParentAgentPage() {
     consultations,
     reminders,
     mobileDrafts,
-    saveMobileDraft,
     markMobileDraftSyncStatus,
+    persistAppSnapshotNow,
     upsertReminder,
     updateReminderStatus,
     getChildInterventionCard,
@@ -122,7 +117,14 @@ export default function ParentAgentPage() {
   } = useApp();
 
   const parentFeed = getParentFeed();
-  const defaultChildId = childFromQuery || parentFeed[0]?.child.id || "";
+  const authorizedChildIds = useMemo(
+    () => new Set(parentFeed.map((item) => item.child.id)),
+    [parentFeed]
+  );
+  const defaultChildId =
+    childFromQuery && authorizedChildIds.has(childFromQuery)
+      ? childFromQuery
+      : parentFeed[0]?.child.id ?? "";
   const [selectedChildId, setSelectedChildId] = useState(defaultChildId);
   const [question, setQuestion] = useState("");
   const [currentResult, setCurrentResult] = useState<ParentAgentResult | null>(null);
@@ -134,9 +136,10 @@ export default function ParentAgentPage() {
   const [latestTrendQuery, setLatestTrendQuery] = useState<string | null>(null);
   const [latestTrendResult, setLatestTrendResult] = useState<ParentTrendQueryResponse | null>(null);
   const [showMoreContent, setShowMoreContent] = useState(false);
-  const [reflexionLoading, setReflexionLoading] = useState(false);
+  const [, setReflexionLoading] = useState(false);
   const [parentMessageStatus, setParentMessageStatus] = useState<string | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
+  const [suggestionRefreshNonce, setSuggestionRefreshNonce] = useState(0);
   const [feedbackNotePrefill, setFeedbackNotePrefill] = useState<{
     value: string;
     token: number;
@@ -146,24 +149,20 @@ export default function ParentAgentPage() {
   const selectedChildIdRef = useRef(selectedChildId);
   const autoTrendHandledRef = useRef<string | null>(null);
 
+  const resolvedChildId =
+    selectedChildId && authorizedChildIds.has(selectedChildId)
+      ? selectedChildId
+      : childFromQuery && authorizedChildIds.has(childFromQuery)
+        ? childFromQuery
+        : parentFeed[0]?.child.id ?? "";
   const selectedFeed = useMemo(
-    () => parentFeed.find((item) => item.child.id === selectedChildId) ?? parentFeed[0],
-    [parentFeed, selectedChildId]
+    () => parentFeed.find((item) => item.child.id === resolvedChildId) ?? parentFeed[0],
+    [parentFeed, resolvedChildId]
   );
-  const trendDebugState = useMemo(
-    () =>
-      selectedFeed && trendDebugCase
-        ? buildParentTrendDebugState({
-            trendCase: trendDebugCase,
-            child: selectedFeed.child,
-          })
-        : null,
-    [selectedFeed, trendDebugCase]
-  );
-  const displayedTrendQuestion = trendDebugState?.question ?? latestTrendQuery;
-  const displayedTrendResult = trendDebugState?.result ?? latestTrendResult;
-  const displayedTrendError = trendDebugState?.error ?? trendError;
-  const displayedTrendLoading = trendDebugState?.loading ?? trendLoading;
+  const displayedTrendQuestion = latestTrendQuery;
+  const displayedTrendResult = latestTrendResult;
+  const displayedTrendError = trendError;
+  const displayedTrendLoading = trendLoading;
   const hasVisibleTrendCard = Boolean(
     displayedTrendQuestion || displayedTrendLoading || displayedTrendError || displayedTrendResult
   );
@@ -264,7 +263,7 @@ export default function ParentAgentPage() {
     outro: "浏览器播报，仅用于当前设备预览，不是后端真实语音。",
   });
   const currentResultSpeechText = buildParentSpeechScript({
-    title: "家长 Agent 当前建议",
+    title: "家长当前建议",
     sections: [
       { label: "今晚动作", text: displayTonightTopAction },
       { label: "为什么推荐", text: displayWhyNow },
@@ -321,15 +320,29 @@ export default function ParentAgentPage() {
   );
 
   useEffect(() => {
-    if (!selectedChildId && parentFeed[0]?.child.id) {
-      setSelectedChildId(parentFeed[0].child.id);
+    if (resolvedChildId && resolvedChildId !== selectedChildId) {
+      setSelectedChildId(resolvedChildId);
     }
-  }, [parentFeed, selectedChildId]);
+  }, [resolvedChildId, selectedChildId]);
 
   useEffect(() => {
-    if (!childFromQuery || childFromQuery === selectedChildIdRef.current) return;
-    setSelectedChildId(childFromQuery);
-  }, [childFromQuery]);
+    if (!selectedFeed) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("child", selectedFeed.child.id);
+    nextParams.delete("trace");
+    nextParams.delete("trendCase");
+    const nextQuery = nextParams.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery === currentQuery) {
+      return;
+    }
+
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    router.replace(nextQuery ? `${pathname}?${nextQuery}${hash}` : `${pathname}${hash}`, { scroll: false });
+  }, [pathname, router, searchParams, selectedFeed]);
 
   useEffect(() => {
     selectedChildIdRef.current = selectedFeed?.child.id ?? "";
@@ -355,12 +368,12 @@ export default function ParentAgentPage() {
     setParentMessageStatus(null);
     setFeedbackStatus(null);
     setFeedbackNotePrefill(null);
-  }, [selectedChildId]);
+  }, [resolvedChildId]);
 
   useEffect(() => {
     if (!careMode) return;
     setShowMoreContent(false);
-  }, [careMode, selectedChildId]);
+  }, [careMode, resolvedChildId]);
 
   useEffect(() => {
     if (!selectedFeed || !currentResult) return;
@@ -401,11 +414,11 @@ export default function ParentAgentPage() {
       trimmed.includes("后端趋势服务") ||
       trimmed.includes("未接通");
     if (looksLikeBrainUnavailable) {
-      return "家长趋势服务暂时未接通后端，当前只能先显示失败态，请稍后再试。";
+      return "趋势解读暂时不可用，请稍后再试。";
     }
 
     if (status === 504 || lower.includes("timeout") || trimmed.includes("超时")) {
-      return "家长趋势服务响应超时，请稍后再试。";
+      return "趋势解读响应超时，请稍后再试。";
     }
 
     if (trimmed.includes("demo_snapshot") || trimmed.includes("回退") || trimmed.includes("降级")) {
@@ -437,7 +450,7 @@ export default function ParentAgentPage() {
     reflexionAbortRef.current = controller;
 
     setReflexionLoading(true);
-    setParentMessageStatus("Evaluator is refining the parent-facing message.");
+    setParentMessageStatus("正在把建议整理成更适合家长阅读的表达。");
 
     try {
       const payload = buildParentMessageReflexionPayload({
@@ -456,7 +469,7 @@ export default function ParentAgentPage() {
         throw new Error(
           await readRouteError(
             response,
-            "Parent message refinement is unavailable right now. Showing the base result instead."
+            "暂时无法补充更完整的家长说明，先展示当前可用建议。"
           )
         );
       }
@@ -484,11 +497,9 @@ export default function ParentAgentPage() {
       }
 
       if (data.fallback || data.evaluationMeta.fallback) {
-        setParentMessageStatus("Showing a backend fallback refinement result.");
+        setParentMessageStatus("已优先展示当前可用建议。");
       } else if (!data.evaluationMeta.canSend) {
-        setParentMessageStatus(
-          "Showing the evaluator output, but can_send is still false."
-        );
+        setParentMessageStatus("已展示当前建议，后续会继续结合新反馈更新。");
       } else {
         setParentMessageStatus(null);
       }
@@ -504,7 +515,7 @@ export default function ParentAgentPage() {
       setParentMessageStatus(
         error instanceof Error
           ? error.message
-          : "Parent message refinement is unavailable right now. Showing the base result instead."
+          : "暂时无法补充更完整的家长说明，先展示当前可用建议。"
       );
     } finally {
       if (
@@ -521,10 +532,6 @@ export default function ParentAgentPage() {
 
   const submitTrendQuery = useCallback(async (nextQuestion: string) => {
     if (!selectedFeed) return;
-    if (trendDebugCase) {
-      setQuestion("");
-      return;
-    }
 
     setTrendLoading(true);
     setTrendError(null);
@@ -584,7 +591,6 @@ export default function ParentAgentPage() {
     reminders,
     selectedFeed,
     taskCheckInRecords,
-    trendDebugCase,
   ]);
 
   async function submitFollowUp(prefilledQuestion?: string) {
@@ -649,7 +655,7 @@ export default function ParentAgentPage() {
   }
 
   useEffect(() => {
-    if (routeIntent !== "query_trend" || !selectedFeed || trendDebugCase) {
+    if (routeIntent !== "query_trend" || !selectedFeed) {
       return;
     }
 
@@ -661,7 +667,7 @@ export default function ParentAgentPage() {
     autoTrendHandledRef.current = autoTrendKey;
     setQuestion(unifiedTrendQuestion);
     void submitTrendQuery(unifiedTrendQuestion);
-  }, [routeIntent, selectedFeed, submitTrendQuery, trendDebugCase, unifiedTrendQuestion]);
+  }, [routeIntent, selectedFeed, submitTrendQuery, unifiedTrendQuestion]);
 
   useEffect(() => {
     if (!baseContext || !snapshot) return;
@@ -726,51 +732,67 @@ export default function ParentAgentPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [baseContext, enrichParentMessageResult, snapshot]);
+  }, [baseContext, enrichParentMessageResult, snapshot, suggestionRefreshNonce]);
 
-  function submitStructuredFeedback(
+  async function submitStructuredFeedback(
     input: ParentStructuredFeedbackComposerSubmitInput
   ) {
     if (!selectedFeed || !displayInterventionCard) {
-      setFeedbackStatus("当前还没有可提交的干预卡，请先生成今晚动作。");
-      return;
+      setFeedbackStatus("当前还没有可提交的今晚建议，请先确认当前孩子的行动卡。");
+      return false;
     }
 
-    setFeedbackStatus(null);
-    addGuardianFeedback({
-      childId: input.childId,
-      executionStatus: input.executionStatus,
-      executionCount: input.executionCount,
-      executorRole: input.executorRole,
-      childReaction: input.childReaction,
-      improvementStatus: input.improvementStatus,
-      barriers: input.barriers,
-      notes: input.notes,
-      relatedTaskId: input.relatedTaskId,
-      relatedConsultationId: input.relatedConsultationId,
-      interventionCardId: input.interventionCardId ?? displayInterventionCard.id,
-      attachments: input.attachments,
-      sourceChannel: "parent-agent",
+    setFeedbackStatus("正在提交今晚反馈...");
+
+    flushSync(() => {
+      addGuardianFeedback({
+        childId: input.childId,
+        executionStatus: input.executionStatus,
+        executionCount: input.executionCount,
+        executorRole: input.executorRole,
+        childReaction: input.childReaction,
+        improvementStatus: input.improvementStatus,
+        barriers: input.barriers,
+        notes: input.notes,
+        relatedTaskId: input.relatedTaskId,
+        relatedConsultationId: input.relatedConsultationId,
+        interventionCardId: input.interventionCardId ?? displayInterventionCard.id,
+        attachments: input.attachments,
+        sourceChannel: "parent-agent",
+      });
+
+      if (input.executionStatus !== "not_started") {
+        checkInTask(
+          selectedFeed.child.id,
+          input.relatedTaskId ?? displayInterventionCard.id,
+          getLocalToday()
+        );
+      }
+
+      parentDrafts
+        .filter((draft) => draft.syncStatus === "local_pending")
+        .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
+
+      if (familyTaskReminder) {
+        updateReminderStatus(familyTaskReminder.reminderId, "acknowledged");
+      }
     });
 
-    if (input.executionStatus !== "not_started") {
-      checkInTask(
-        selectedFeed.child.id,
-        input.relatedTaskId ?? displayInterventionCard.id,
-        getLocalToday()
-      );
-    }
-
-    parentDrafts
-      .filter((draft) => draft.syncStatus === "local_pending")
-      .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
-
-    if (familyTaskReminder) {
-      updateReminderStatus(familyTaskReminder.reminderId, "acknowledged");
-    }
-
-    setFeedbackStatus("今晚反馈已提交，下一轮 follow-up 会自动带入这条结构化记录。");
+    const persistResult = await persistAppSnapshotNow();
     setFeedbackNotePrefill(null);
+    setSuggestionRefreshNonce((current) => current + 1);
+
+    if (persistResult.status === "failed") {
+      setFeedbackStatus("反馈已记在当前设备，但远端保存还没成功，请稍后再试。");
+      return false;
+    }
+
+    setFeedbackStatus(
+      persistResult.status === "saved"
+        ? "今晚反馈已提交，家长建议会按这条新反馈继续更新。"
+        : "今晚反馈已记录在当前设备，家长建议会按这条新反馈继续更新。"
+    );
+    return true;
   }
 
   function snoozeFamilyReminder() {
@@ -783,39 +805,12 @@ export default function ParentAgentPage() {
     setFeedbackStatus("已设置稍后提醒，任务卡状态会同步保存在本地。");
   }
 
-  function createVoiceDraft() {
-    if (!selectedFeed) return;
-    const draft = buildMockVoiceDraft({
-      childId: selectedFeed.child.id,
-      targetRole: "parent",
-      childName: selectedFeed.child.name,
-      scenario: "parent-feedback",
-    });
-    saveMobileDraft(draft);
-    setQuestion(draft.content);
-  }
-
-  function createOcrDraft() {
-    if (!selectedFeed) return;
-    const draft = buildMockOcrDraft({
-      childId: selectedFeed.child.id,
-      targetRole: "parent",
-      childName: selectedFeed.child.name,
-      attachmentName: "health-note.jpg",
-    });
-    saveMobileDraft(draft);
-    setFeedbackNotePrefill({
-      value: draft.content,
-      token: Date.now(),
-    });
-  }
-
   if (!selectedFeed || !baseContext || !snapshot) {
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <EmptyState
           icon={<BrainCircuit className="h-6 w-6" />}
-          title="当前没有可用于家长 Agent 的儿童数据"
+          title="当前没有可展示的孩子数据"
           description="请先从家长首页确认当前孩子档案是否可见。"
         />
       </div>
@@ -949,6 +944,7 @@ export default function ParentAgentPage() {
                   <AgentWorkspaceCard
                     title="老师建议摘要"
                     description="关怀模式下只保留结果标题、摘要、今晚动作和明天观察点。"
+                    badgeLabel="今晚建议"
                   >
                     {suggestionLoading || !currentResult ? (
                       <div className="rounded-3xl border border-slate-100 bg-white p-5 text-base text-slate-500">
@@ -1052,7 +1048,7 @@ export default function ParentAgentPage() {
                           <p className="text-xs text-slate-500">最近家长反馈</p>
                           <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">
                             {selectedFeed.latestFeedback
-                              ? selectedFeed.latestFeedback.status
+                              ? formatParentFeedbackStatusLabel(selectedFeed.latestFeedback.status)
                               : "最近尚未形成反馈"}
                           </p>
                         </div>
@@ -1139,12 +1135,6 @@ export default function ParentAgentPage() {
                         placeholder="继续追问，例如：今晚如果孩子不配合，先从哪一步开始？"
                         className="min-h-28 bg-white"
                       />
-                      {trendDebugEnabled ? (
-                        <ParentTrendQaPanel
-                          childId={selectedFeed.child.id}
-                          activeCase={trendDebugCase}
-                        />
-                      ) : null}
                       <div className="space-y-3">
                         <div>
                           <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">
@@ -1205,11 +1195,11 @@ export default function ParentAgentPage() {
                       <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
                         {currentResult ? (
                           <div className="prose prose-sm max-w-none text-slate-700">
-                            <ReactMarkdown>{currentResult.assistantAnswer}</ReactMarkdown>
+                            <ReactMarkdown>{sanitizeParentFacingText(currentResult.assistantAnswer)}</ReactMarkdown>
                           </div>
                         ) : (
                           <p className="text-sm text-slate-500">
-                            建议生成后，这里会显示结构化 AI 回复。
+                            建议生成后，这里会显示整理好的说明。
                           </p>
                         )}
                       </div>
@@ -1242,22 +1232,15 @@ export default function ParentAgentPage() {
                       >
                         <InterventionCardPanel
                           card={displayInterventionCard}
+                          audience="parent"
                           footer={
-                            <div className="grid gap-4 lg:grid-cols-2">
+                            <div className="grid gap-4 lg:grid-cols-1">
                               <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
                                 <p className="text-sm font-semibold text-slate-900">
                                   家长沟通话术
                                 </p>
                                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                                  {displayInterventionCard.parentMessageDraft}
-                                </p>
-                              </div>
-                              <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
-                                <p className="text-sm font-semibold text-slate-900">
-                                  教师后续跟进
-                                </p>
-                                <p className="mt-2 text-sm leading-6 text-slate-600">
-                                  {displayInterventionCard.teacherFollowupDraft}
+                                  {sanitizeParentFacingText(displayInterventionCard.parentMessageDraft)}
                                 </p>
                               </div>
                             </div>
@@ -1283,7 +1266,7 @@ export default function ParentAgentPage() {
                               {item.question}
                             </p>
                             <div className="prose prose-sm mt-3 max-w-none text-slate-600">
-                              <ReactMarkdown>{item.result.assistantAnswer}</ReactMarkdown>
+                              <ReactMarkdown>{sanitizeParentFacingText(item.result.assistantAnswer)}</ReactMarkdown>
                             </div>
                           </div>
                         ))
@@ -1372,13 +1355,13 @@ export default function ParentAgentPage() {
     <RolePageShell
       badge={`家长 AI 助手 · 当前儿童 ${selectedFeed.child.name}`}
       title="把今晚怎么做、做完怎么反馈、明天老师继续看什么，放进同一条 AI 闭环里"
-      description="这一版家长 Agent 不再只是追问聊天框，而是基于真实 7 天业务数据、家庭任务、最近反馈和 AI 干预卡，给出今晚可执行动作，并把家长反馈直接送回下一轮 follow-up。"
+      description="这一版家长助手会把今晚怎么做、做完怎么反馈、以及明天老师继续看什么，串成一条完整主路径。"
       actions={normalPageActions}
     >
       <RoleSplitLayout
         main={
           <div className="space-y-6">
-            <SectionCard title="当前儿童信息卡" description="先锁定这次 Agent 服务的对象，再决定今晚先做什么。">
+            <SectionCard title="当前儿童信息卡" description="先确认正在查看哪个孩子，再决定今晚先做什么。">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="rounded-3xl border border-slate-100 bg-white p-4">
                   <p className="text-lg font-semibold text-slate-900">{selectedFeed.child.name}</p>
@@ -1421,7 +1404,9 @@ export default function ParentAgentPage() {
                 <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
                   <p className="text-xs text-slate-500">最近家长反馈</p>
                   <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">
-                    {selectedFeed.latestFeedback ? selectedFeed.latestFeedback.status : "最近尚未形成反馈"}
+                    {selectedFeed.latestFeedback
+                      ? formatParentFeedbackStatusLabel(selectedFeed.latestFeedback.status)
+                      : "最近尚未形成反馈"}
                   </p>
                 </div>
               </div>
@@ -1485,6 +1470,7 @@ export default function ParentAgentPage() {
             <AgentWorkspaceCard
               title="今日建议摘要"
               description="先读系统给出的今晚动作，再用快捷问题继续追问。"
+              badgeLabel="今晚建议"
               promptButtons={
                 <>
                   {PARENT_AGENT_QUICK_QUESTIONS.map((item) => (
@@ -1510,43 +1496,7 @@ export default function ParentAgentPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-full" onClick={createVoiceDraft}>
-                      <Mic className="mr-2 h-4 w-4" />
-                      语音速记
-                    </Button>
-                    <Button type="button" variant="outline" className="rounded-full" onClick={createOcrDraft}>
-                      <ScanSearch className="mr-2 h-4 w-4" />
-                      OCR 草稿
-                    </Button>
-                  </div>
                   <div className="rounded-3xl border border-indigo-100 bg-indigo-50/70 p-5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={currentResult.source === "ai" ? "success" : currentResult.source === "mock" ? "info" : "secondary"}>
-                        {currentResult.source}
-                      </Badge>
-                      {currentResult.model ? <Badge variant="secondary">{currentResult.model}</Badge> : null}
-                      {currentResult.parentMessageMeta ? (
-                        <>
-                          <Badge variant="outline">
-                            revisions {currentResult.parentMessageMeta.revisionCount}
-                          </Badge>
-                          <Badge variant="outline">
-                            score {currentResult.parentMessageMeta.score.toFixed(1)}
-                          </Badge>
-                          <Badge
-                            variant={
-                              currentResult.parentMessageMeta.canSend
-                                ? "success"
-                                : "secondary"
-                            }
-                          >
-                            can_send {currentResult.parentMessageMeta.canSend ? "true" : "false"}
-                          </Badge>
-                        </>
-                      ) : null}
-                      {reflexionLoading ? <Badge variant="outline">evaluator</Badge> : null}
-                    </div>
                     {parentMessageStatus ? (
                       <p className="mt-3 text-sm leading-6 text-slate-600">
                         {parentMessageStatus}
@@ -1583,23 +1533,6 @@ export default function ParentAgentPage() {
                       </p>
                     </div>
                   </div>
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    {parentDrafts.length > 0 ? (
-                      parentDrafts.slice(0, 4).map((draft) => (
-                        <div key={draft.draftId} className="rounded-3xl border border-slate-100 bg-white p-4">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-semibold text-slate-900">{draft.draftType.toUpperCase()} 草稿</p>
-                            <span className="text-xs text-slate-500">{getDraftSyncStatusLabel(draft.syncStatus)}</span>
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{draft.content}</p>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-3xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                        当前还没有待同步草稿。
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
             </AgentWorkspaceCard>
@@ -1620,12 +1553,6 @@ export default function ParentAgentPage() {
                   placeholder="继续追问，例如：今晚我具体先做哪一步？如果孩子不配合怎么办？"
                   className="min-h-28 bg-white"
                 />
-                {trendDebugEnabled ? (
-                  <ParentTrendQaPanel
-                    childId={selectedFeed.child.id}
-                    activeCase={trendDebugCase}
-                  />
-                ) : null}
                 <div className="space-y-3">
                   <div>
                     <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">继续追问</p>
@@ -1678,10 +1605,10 @@ export default function ParentAgentPage() {
                 <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
                   {currentResult ? (
                     <div className="prose prose-sm max-w-none text-slate-700">
-                      <ReactMarkdown>{currentResult.assistantAnswer}</ReactMarkdown>
+                      <ReactMarkdown>{sanitizeParentFacingText(currentResult.assistantAnswer)}</ReactMarkdown>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-500">建议生成后，这里会展示结构化 AI 回复。</p>
+                    <p className="text-sm text-slate-500">建议生成后，这里会展示整理好的说明。</p>
                   )}
                 </div>
                 {followUpLoading ? (
@@ -1703,28 +1630,27 @@ export default function ParentAgentPage() {
 
             {displayInterventionCard ? (
               <div id="intervention">
-                <SectionCard title="当前干预卡摘要区" description="这张卡既服务家长端，也能给教师端继续消费。">
-                  <InterventionCardPanel
-                    card={displayInterventionCard}
-                    footer={
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
-                          <p className="text-sm font-semibold text-slate-900">家长沟通话术</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{displayInterventionCard.parentMessageDraft}</p>
+                <SectionCard title="今晚行动卡" description="把今晚动作、观察点和沟通话术放在一起，方便家里照着执行。">
+                    <InterventionCardPanel
+                      card={displayInterventionCard}
+                      audience="parent"
+                      footer={
+                        <div className="grid gap-4 lg:grid-cols-1">
+                          <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+                            <p className="text-sm font-semibold text-slate-900">家长沟通话术</p>
+                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                              {sanitizeParentFacingText(displayInterventionCard.parentMessageDraft)}
+                            </p>
+                          </div>
                         </div>
-                        <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
-                          <p className="text-sm font-semibold text-slate-900">教师后续跟进</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{displayInterventionCard.teacherFollowupDraft}</p>
-                        </div>
-                      </div>
-                    }
+                      }
                   />
                 </SectionCard>
               </div>
             ) : null}
 
             <div id="feedback">
-              <SectionCard title="反馈提交区" description="上一轮建议执行完后，直接在这里把反馈送回下一轮 Agent。">
+              <SectionCard title="提交今晚反馈" description="把今晚做了没有、孩子反应和补充情况记下来，下一轮建议会继续参考。">
                 <ParentStructuredFeedbackComposer
                   key={`${selectedFeed.child.id}-${displayInterventionCard?.id ?? "no-card"}-${feedbackNotePrefill?.token ?? "no-prefill"}`}
                   childId={selectedFeed.child.id}
@@ -1742,7 +1668,7 @@ export default function ParentAgentPage() {
               </SectionCard>
             </div>
 
-            <SectionCard title="会话历史区" description="保留本次会话内的追问和 AI 回答，便于连续演示。">
+            <SectionCard title="本次追问记录" description="保留这次对话里的提问和回答，方便继续往下问。">
               <div className="space-y-3">
                 {history.length > 0 ? (
                   history.map((item) => (
@@ -1753,7 +1679,7 @@ export default function ParentAgentPage() {
                       </div>
                       <p className="mt-2 text-sm font-semibold text-slate-900">{item.question}</p>
                       <div className="prose prose-sm mt-3 max-w-none text-slate-600">
-                        <ReactMarkdown>{item.result.assistantAnswer}</ReactMarkdown>
+                        <ReactMarkdown>{sanitizeParentFacingText(item.result.assistantAnswer)}</ReactMarkdown>
                       </div>
                     </div>
                   ))
@@ -1766,7 +1692,7 @@ export default function ParentAgentPage() {
         }
         aside={
           <div className="space-y-6">
-            <SectionCard title="当前服务对象" description="作为 Agent 上下文的固定摘要。">
+            <SectionCard title="当前孩子摘要" description="这里固定显示当前孩子和今晚任务，避免问串对象。">
               <ul className="space-y-3 text-sm text-slate-600">
                 <li>当前儿童：{selectedFeed.child.name}</li>
                 <li>当前班级：{selectedFeed.child.className}</li>

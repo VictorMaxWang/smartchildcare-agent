@@ -276,11 +276,86 @@ def test_weekly_report_writes_trace_and_snapshot_and_uses_memory(tmp_path, monke
     assert result["continuityNotes"]
     assert result["memoryMeta"]["memory_context_used"] is True
     assert any(item.action_type == "weekly-report" and item.status == "succeeded" for item in traces)
-    assert any(item.snapshot_type == "weekly-report-result" for item in snapshots)
+    assert any(item.snapshot_type == "teacher-weekly-summary-result" for item in snapshots)
     assert any(
         item.node_name == "weekly-report" and item.metadata_json.get("memory_context_used") is True
         for item in traces
     )
+
+
+def test_weekly_memory_namespaces_split_teacher_from_admin(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "weekly-namespace-memory.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    orchestrator = build_orchestrator()
+    calls: list[tuple[str, str]] = []
+
+    class _StubContext:
+        def __init__(self, child_id: str, workflow_type: str) -> None:
+            self.child_id = child_id
+            self.workflow_type = workflow_type
+
+        def model_dump(self, mode: str = "json") -> dict:
+            del mode
+            return {
+                "child_id": self.child_id,
+                "workflow_type": self.workflow_type,
+                "meta": {"backend": "sqlite"},
+            }
+
+    async def fake_build_memory_context_for_prompt(child_id, workflow_type, options):
+        del options
+        calls.append((child_id, workflow_type))
+        return _StubContext(child_id, workflow_type)
+
+    monkeypatch.setattr(
+        orchestrator.memory,
+        "build_memory_context_for_prompt",
+        fake_build_memory_context_for_prompt,
+    )
+
+    asyncio.run(
+        orchestrator._prepare_payload_with_memory(
+            "teacher-agent",
+            {
+                "workflow": "weekly-summary",
+                "visibleChildren": [{"id": "child-1"}, {"id": "child-2"}],
+            },
+        )
+    )
+
+    assert calls
+    assert all(workflow_type == "teacher-weekly-summary" for _, workflow_type in calls)
+
+    calls.clear()
+
+    asyncio.run(
+        orchestrator._prepare_payload_with_memory(
+            "admin-agent",
+            {
+                "workflow": "weekly-ops-report",
+                "visibleChildren": [{"id": "child-1"}, {"id": "child-2"}],
+            },
+        )
+    )
+
+    assert calls
+    assert all(workflow_type == "admin-weekly-ops-report" for _, workflow_type in calls)
+
+    calls.clear()
+
+    asyncio.run(
+        orchestrator._prepare_payload_with_memory(
+            "weekly-report",
+            {
+                "role": "teacher",
+                "visibleChildren": [{"id": "child-1"}, {"id": "child-2"}],
+            },
+        )
+    )
+
+    assert calls
+    assert all(workflow_type == "teacher-weekly-summary" for _, workflow_type in calls)
 
 
 def test_parent_trend_query_writes_trace_and_snapshot_and_uses_memory(tmp_path, monkeypatch):

@@ -137,3 +137,56 @@ def test_intent_router_endpoint_returns_unknown_fallback():
     assert body["deeplink"] == "/"
     assert body["optionalPayload"] is None
     assert "unknown-intent" in body["previewCard"]["badges"]
+
+
+def test_intent_router_endpoint_routes_homepage_priority_presets():
+    teacher_response = client.post(
+        "/api/v1/agents/intent-router",
+        json={
+            "message": "帮我看看今天最需要优先处理的孩子",
+            "roleHint": "teacher",
+            "sourcePage": "/teacher",
+        },
+    )
+
+    assert teacher_response.status_code == 200
+    teacher_body = teacher_response.json()
+    assert teacher_body["detectedRole"] == "teacher"
+    assert teacher_body["intent"] == "view_priority"
+    assert teacher_body["targetWorkflow"] == "teacher.agent.follow-up"
+    assert teacher_body["targetPage"] == "/teacher/agent"
+    assert teacher_body["deeplink"] == "/teacher/agent?action=follow-up"
+    assert teacher_body["optionalPayload"]["kind"] == "teacher-agent-run"
+    assert teacher_body["optionalPayload"]["workflow"] == "follow-up"
+    assert teacher_body["ruleId"] == "intent-router:teacher:view_priority:v1"
+    assert "teacher" in teacher_body["previewCard"]["badges"]
+    assert "view_priority" in teacher_body["previewCard"]["badges"]
+    assert "roleHint:teacher" in teacher_body["matchedSignals"]
+    assert "intent:优先" in teacher_body["matchedSignals"]
+    assert "intent:最需要优先处理" in teacher_body["matchedSignals"]
+    assert "intent:优先处理的孩子" in teacher_body["matchedSignals"]
+
+    admin_response = client.post(
+        "/api/v1/agents/intent-router",
+        json={
+            "message": "帮我看今天机构最该先处理什么",
+            "roleHint": "admin",
+            "sourcePage": "/admin",
+        },
+    )
+
+    assert admin_response.status_code == 200
+    admin_body = admin_response.json()
+    assert admin_body["detectedRole"] == "admin"
+    assert admin_body["intent"] == "view_priority"
+    assert admin_body["targetWorkflow"] == "admin.agent.daily-priority"
+    assert admin_body["targetPage"] == "/admin/agent"
+    assert admin_body["deeplink"] == "/admin/agent"
+    assert admin_body["optionalPayload"]["kind"] == "admin-agent-run"
+    assert admin_body["optionalPayload"]["workflow"] == "daily-priority"
+    assert admin_body["ruleId"] == "intent-router:admin:view_priority:v1"
+    assert "admin" in admin_body["previewCard"]["badges"]
+    assert "view_priority" in admin_body["previewCard"]["badges"]
+    assert "roleHint:admin" in admin_body["matchedSignals"]
+    assert "intent:最该先处理" in admin_body["matchedSignals"]
+    assert "intent:最该先处理什么" in admin_body["matchedSignals"]

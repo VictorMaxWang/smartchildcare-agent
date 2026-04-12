@@ -146,13 +146,14 @@ export default function AdminAgentPage() {
     feedStatus,
     feedBadge,
     notificationEvents,
-    notificationError,
     notificationReady,
     createNotification,
     createConsultationScopedNotification,
     updateNotificationStatus,
     isCreatingNotification,
     updatingEventId,
+    dispatchAvailable = true,
+    dispatchStatusMessage = null,
   } = useAdminConsultationWorkspace({
     institutionName: INSTITUTION_NAME,
     visibleChildren,
@@ -321,6 +322,11 @@ export default function AdminAgentPage() {
   async function handleCreateDispatch(actionItem: AdminAgentActionItem) {
     setRequestError(null);
 
+    if (!dispatchAvailable) {
+      setRequestError(dispatchStatusMessage ?? "通知派单暂不可用");
+      return;
+    }
+
     const nextEvent = await createNotification(actionItem.dispatchPayload, actionItem.id);
     if (!nextEvent) {
       setRequestError("派单创建失败");
@@ -333,6 +339,11 @@ export default function AdminAgentPage() {
   async function handleUpdateEventStatus(eventId: string, status: AdminDispatchEvent["status"]) {
     setRequestError(null);
 
+    if (!dispatchAvailable) {
+      setRequestError(dispatchStatusMessage ?? "通知派单暂不可用");
+      return;
+    }
+
     const nextEvent = await updateNotificationStatus(eventId, status);
     if (!nextEvent) {
       setRequestError("派单状态更新失败");
@@ -344,6 +355,11 @@ export default function AdminAgentPage() {
 
   async function handleCreateConsultationNotification(item: AdminConsultationPriorityItem) {
     setRequestError(null);
+
+    if (!dispatchAvailable) {
+      setRequestError(dispatchStatusMessage ?? "通知派单暂不可用");
+      return;
+    }
 
     const nextEvent = await createConsultationScopedNotification(item);
     if (!nextEvent) {
@@ -372,6 +388,324 @@ export default function AdminAgentPage() {
   const quickQuestions = displayResult?.quickQuestions ?? [...ADMIN_AGENT_QUICK_QUESTIONS];
   const scope = displayResult?.institutionScope;
   const rerunCurrentMode = () => void runWorkflow(modeConfig.workflow, { label: modeConfig.label });
+  const safeDispatchStatusMessage = dispatchStatusMessage ?? "通知派单暂不可用";
+
+  if (isWeeklyMode) {
+    return (
+      <RolePageShell
+        badge={`机构运营 AI 助手 · ${INSTITUTION_NAME}`}
+        title="园长周报 Agent 工作区"
+        description="只保留本周总结、周报追问和周报落地动作，不再混入日常优先级、历史记录和通知侧栏。"
+        actions={<InlineLinkButton href="/admin" label="返回园长首页" />}
+      >
+        <RoleSplitLayout
+          stacked
+          main={
+            <div className="space-y-6">
+              <div className="rounded-[32px] border border-indigo-100 bg-linear-to-r from-indigo-50 via-white to-sky-50 p-6 shadow-sm">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="info">周报工作区</Badge>
+                      <Badge variant="outline">{INSTITUTION_NAME}</Badge>
+                      <Badge variant={dispatchAvailable ? "success" : "outline"}>
+                        {safeDispatchStatusMessage}
+                      </Badge>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-lg font-semibold text-slate-900">本周运营周报</p>
+                      <p className="mt-2 max-w-3xl whitespace-normal break-words text-sm leading-6 text-slate-600">
+                        当前页面只保留周报总结、周报追问、下周动作和必要的返回日常入口。机构上下文、重点会诊板、历史记录、通知列表和 raw/mock/dev 元信息都不会同屏暴露。
+                      </p>
+                    </div>
+                    {requestError ? (
+                      <div className="flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <p>{requestError}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2 xl:max-w-sm xl:justify-end">
+                    <Button type="button" variant="outline" onClick={() => switchMode("daily")}>
+                      切回日常模式
+                    </Button>
+                    <Button type="button" variant="premium" onClick={rerunCurrentMode} disabled={loading}>
+                      <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                      重新生成周报
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {scope ? (
+                <MetricGrid
+                  items={[
+                    {
+                      label: "本周到园基线",
+                      value: `${scope.todayPresentCount}/${scope.visibleChildren}`,
+                      tone: "emerald",
+                    },
+                    { label: "本周风险儿童", value: `${scope.riskChildrenCount}`, tone: "amber" },
+                    { label: "反馈完成率", value: `${scope.feedbackCompletionRate}%`, tone: "sky" },
+                    { label: "待承接动作", value: `${scope.pendingDispatchCount}`, tone: "indigo" },
+                  ]}
+                />
+              ) : null}
+
+              <SectionCard
+                title="本周运营周报"
+                description="周报模式下只保留 summary、continuity、highlights 与风险承接，不显示 source、model、fallback 或 disclaimer。"
+                actions={<Badge variant="info">单一周报工作区</Badge>}
+              >
+                {loading && !displayResult ? (
+                  <div className="flex items-center gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-5 text-sm text-slate-600">
+                    <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+                    正在生成本周运营周报...
+                  </div>
+                ) : displayResult ? (
+                  <div className="space-y-4">
+                    <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="info">{displayResult.title}</Badge>
+                      </div>
+                      <p className="mt-4 whitespace-normal break-words text-base leading-8 text-slate-800">
+                        {displayResult.summary}
+                      </p>
+                    </div>
+
+                    {displayResult.continuityNotes?.length ? (
+                      <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                        <p className="text-sm font-semibold text-slate-900">连续性摘要</p>
+                        <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                          {displayResult.continuityNotes.slice(0, 3).map((item) => (
+                            <li key={item}>• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                        <p className="text-sm font-semibold text-slate-900">本周重点结论</p>
+                        <ul className="mt-3 space-y-3">
+                          {displayResult.highlights.slice(0, 6).map((item) => (
+                            <li
+                              key={item}
+                              className="rounded-2xl bg-slate-50 px-4 py-3 whitespace-normal break-words text-sm leading-6 text-slate-600"
+                            >
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                        <p className="text-sm font-semibold text-slate-900">本周风险承接</p>
+                        <div className="mt-3 space-y-3">
+                          {displayResult.riskChildren.slice(0, 4).map((item) => (
+                            <div key={item.childId} className="rounded-2xl bg-slate-50 p-4">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  <p className="whitespace-normal break-words text-sm font-medium text-slate-900">
+                                    {item.childName} · {item.className}
+                                  </p>
+                                  <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                                    {item.reason}
+                                  </p>
+                                </div>
+                                <PriorityLevelBadge level={item.priorityLevel} />
+                              </div>
+                            </div>
+                          ))}
+                          {displayResult.riskChildren.length === 0 ? (
+                            <p className="text-sm text-slate-500">本周没有需要行政升级承接的高风险儿童。</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">
+                    等待周报模式返回第一轮结果。
+                  </div>
+                )}
+              </SectionCard>
+
+              <AgentWorkspaceCard
+                title="周报追问"
+                description="只保留围绕本周总结的追问入口，不再混入模式切换按钮。"
+                promptButtons={
+                  <>
+                    {quickQuestions.slice(0, 4).map((question) => (
+                      <Button
+                        key={question}
+                        variant="outline"
+                        className="rounded-full"
+                        onClick={() =>
+                          void runWorkflow("question-follow-up", {
+                            question,
+                            label: question,
+                          })
+                        }
+                        disabled={loading}
+                      >
+                        {question}
+                      </Button>
+                    ))}
+                  </>
+                }
+              >
+                <div className="rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5">
+                  {loading && !displayResult ? (
+                    <div className="flex items-center gap-3 text-sm text-slate-600">
+                      <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
+                      正在生成周报追问结果...
+                    </div>
+                  ) : displayResult ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="info">{displayResult.title}</Badge>
+                      </div>
+                      <p className="whitespace-normal break-words text-base leading-7 text-slate-800">
+                        {displayResult.assistantAnswer}
+                      </p>
+                      <div className="rounded-2xl bg-white p-4">
+                        <p className="text-sm font-semibold text-slate-900">周报摘要回看</p>
+                        <p className="mt-3 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                          {displayResult.summary}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">等待周报追问结果。</p>
+                  )}
+                </div>
+              </AgentWorkspaceCard>
+
+              <SectionCard
+                title="周报落地动作"
+                description="把周报结论直接转成下周动作、责任人和派单入口。notification backend 不可用时只保留只读动作摘要。"
+                actions={
+                  <Badge variant={dispatchAvailable ? "success" : "outline"}>
+                    {safeDispatchStatusMessage}
+                  </Badge>
+                }
+              >
+                {!dispatchAvailable ? (
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    {safeDispatchStatusMessage}
+                  </div>
+                ) : null}
+
+                {displayResult ? (
+                  <div className="space-y-4">
+                    {displayResult.actionItems.map((item) => (
+                      <div key={item.id} className="rounded-3xl border border-slate-100 bg-white p-5">
+                        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="min-w-0 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <PriorityLevelBadge level={item.priorityLevel} />
+                              <EventStatusBadge
+                                status={
+                                  item.status === "completed"
+                                    ? "completed"
+                                    : item.status === "in_progress"
+                                      ? "in_progress"
+                                      : "pending"
+                                }
+                              />
+                            </div>
+                            <p className="whitespace-normal break-words text-base font-semibold text-slate-900">
+                              {item.title}
+                            </p>
+                            <p className="whitespace-normal break-words text-sm leading-6 text-slate-600">
+                              {item.summary}
+                            </p>
+                            <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                              <span>责任人：{item.ownerLabel}</span>
+                              <span>时限：{item.deadline}</span>
+                            </div>
+                          </div>
+                          {dispatchAvailable ? (
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="premium"
+                                onClick={() => void handleCreateDispatch(item)}
+                                disabled={isCreatingNotification(item.id) || Boolean(item.relatedEventId)}
+                              >
+                                {isCreatingNotification(item.id)
+                                  ? "创建中..."
+                                  : item.relatedEventId
+                                    ? "已创建派单"
+                                    : "生成派单"}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">等待周报生成下周动作。</p>
+                )}
+              </SectionCard>
+            </div>
+          }
+          aside={
+            <div className="space-y-6">
+              <SectionCard title="工作区控制" description="周报模式只保留返回日常、重新生成和返回首页这一组控制。">
+                <div className="space-y-3">
+                  <Button
+                    type="button"
+                    variant="premium"
+                    className="w-full"
+                    onClick={rerunCurrentMode}
+                    disabled={loading}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                    重新生成本周周报
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => switchMode("daily")}
+                  >
+                    切回日常模式
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => router.push("/admin")}
+                  >
+                    返回园长首页
+                  </Button>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="派单状态" description="只显示周报动作是否可继续生成派单，不再暴露原始 backend 错误。">
+                <div className="space-y-3 text-sm leading-6 text-slate-600">
+                  <Badge variant={dispatchAvailable ? "success" : "outline"}>
+                    {safeDispatchStatusMessage}
+                  </Badge>
+                  <p>当前周报动作数：{displayResult?.actionItems.length ?? 0}</p>
+                  <p>当前已有通知事件：{notificationEvents.length}</p>
+                  <p>
+                    {dispatchAvailable
+                      ? "notification backend 可用时，周报动作可以继续生成真实派单。"
+                      : "notification backend 不可用时，周报页面只保留动作摘要与责任人，不再显示可点击派单入口。"}
+                  </p>
+                </div>
+              </SectionCard>
+            </div>
+          }
+        />
+      </RolePageShell>
+    );
+  }
 
   return (
     <RolePageShell
@@ -462,8 +796,6 @@ export default function AdminAgentPage() {
                       <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="info">{displayResult.title}</Badge>
-                          <Badge variant="outline">{displayResult.source}</Badge>
-                          {displayResult.model ? <Badge variant="outline">{displayResult.model}</Badge> : null}
                         </div>
                         <p className="mt-4 whitespace-normal break-words text-base leading-8 text-slate-800">
                           {displayResult.summary}
@@ -586,7 +918,8 @@ export default function AdminAgentPage() {
                 sourceBadgeVariant={feedBadge.variant}
                 onCreateConsultationNotification={handleCreateConsultationNotification}
                 isCreatingConsultationNotification={isCreatingNotification}
-                notificationError={notificationError}
+                dispatchAvailable={dispatchAvailable}
+                dispatchStatusMessage={dispatchStatusMessage ?? "通知派单暂不可用"}
                 emptyTitle={
                   feedStatus === "unavailable"
                     ? "高风险会诊 feed 暂时不可用"
@@ -751,8 +1084,6 @@ export default function AdminAgentPage() {
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="info">{displayResult.title}</Badge>
-                      <Badge variant="outline">{displayResult.source}</Badge>
-                      {displayResult.model ? <Badge variant="outline">{displayResult.model}</Badge> : null}
                     </div>
                     <p className="whitespace-normal break-words text-base leading-7 text-slate-800">
                       {displayResult.assistantAnswer}
@@ -788,13 +1119,16 @@ export default function AdminAgentPage() {
                   : "每条建议都带责任人、截止时间和派单入口。"
               }
               actions={
-                notificationError ? (
-                  <Badge variant="outline">{notificationError}</Badge>
-                ) : (
-                  <Badge variant="success">支持派单</Badge>
-                )
+                <Badge variant={dispatchAvailable ? "success" : "outline"}>
+                  {dispatchAvailable ? "支持派单" : safeDispatchStatusMessage}
+                </Badge>
               }
             >
+              {!dispatchAvailable ? (
+                <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {safeDispatchStatusMessage}
+                </div>
+              ) : null}
               {displayResult ? (
                 <div className="space-y-4">
                   {displayResult.actionItems.map((item) => (
@@ -824,25 +1158,23 @@ export default function AdminAgentPage() {
                             <span>时限：{item.deadline}</span>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="premium"
-                            onClick={() => void handleCreateDispatch(item)}
-                            disabled={
-                              Boolean(notificationError) ||
-                              isCreatingNotification(item.id) ||
-                              Boolean(item.relatedEventId)
-                            }
-                          >
-                            {isCreatingNotification(item.id)
-                              ? "创建中…"
-                              : item.relatedEventId
-                                ? "已创建派单"
-                                : "生成派单"}
-                          </Button>
-                        </div>
+                        {dispatchAvailable ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="premium"
+                              onClick={() => void handleCreateDispatch(item)}
+                              disabled={isCreatingNotification(item.id) || Boolean(item.relatedEventId)}
+                            >
+                              {isCreatingNotification(item.id)
+                                ? "创建中…"
+                                : item.relatedEventId
+                                  ? "已创建派单"
+                                  : "生成派单"}
+                            </Button>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -914,13 +1246,22 @@ export default function AdminAgentPage() {
               )}
             </SectionCard>
 
-            <SectionCard title="通知派单" description="这里显示已沉淀的通知事件，并支持更新处理状态。">
-              {notificationError ? (
-                <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <SectionCard
+              title="通知派单"
+              description="这里显示已沉淀的通知事件；当 backend 不可用时保留只读态，不提供状态更新入口。"
+              actions={
+                <Badge variant={dispatchAvailable ? "success" : "outline"}>
+                  {dispatchAvailable ? "支持派单" : safeDispatchStatusMessage}
+                </Badge>
+              }
+            >
+              {!dispatchAvailable ? (
+                <div className="mb-4 flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <p>{notificationError}</p>
+                  <p>{safeDispatchStatusMessage}</p>
                 </div>
-              ) : notificationEvents.length > 0 ? (
+              ) : null}
+              {notificationEvents.length > 0 ? (
                 <div className="space-y-3">
                   {notificationEvents.slice(0, 6).map((event) => (
                     <div key={event.id} className="rounded-3xl border border-slate-100 bg-white p-4">
@@ -933,24 +1274,26 @@ export default function AdminAgentPage() {
                         </div>
                         <EventStatusBadge status={event.status} />
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void handleUpdateEventStatus(event.id, "in_progress")}
-                          disabled={updatingEventId === event.id || event.status === "in_progress"}
-                        >
-                          {updatingEventId === event.id ? "更新中…" : "标记处理中"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => void handleUpdateEventStatus(event.id, "completed")}
-                          disabled={updatingEventId === event.id || event.status === "completed"}
-                        >
-                          标记完成
-                        </Button>
-                      </div>
+                      {dispatchAvailable ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleUpdateEventStatus(event.id, "in_progress")}
+                            disabled={updatingEventId === event.id || event.status === "in_progress"}
+                          >
+                            {updatingEventId === event.id ? "更新中…" : "标记处理中"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => void handleUpdateEventStatus(event.id, "completed")}
+                            disabled={updatingEventId === event.id || event.status === "completed"}
+                          >
+                            标记完成
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>

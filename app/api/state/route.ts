@@ -13,6 +13,10 @@ import {
   normalizeAppStateSnapshot,
   type AppStateSnapshot,
 } from "@/lib/persistence/snapshot";
+import {
+  mergeScopedSnapshotForSessionUser,
+  scopeSnapshotForSessionUser,
+} from "@/lib/persistence/state-scope";
 
 export const runtime = "nodejs";
 
@@ -54,7 +58,8 @@ export async function GET() {
       return NextResponse.json({ ok: false, error: INVALID_REMOTE_SNAPSHOT_ERROR }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, snapshot });
+    const scopedSnapshot = scopeSnapshotForSessionUser(snapshot, user);
+    return NextResponse.json({ ok: true, snapshot: scopedSnapshot });
   } catch (error) {
     if (error instanceof MissingAuthSessionSecretError) {
       return NextResponse.json({ ok: false, error: AUTH_SESSION_SECRET_CONFIG_ERROR_MESSAGE }, { status: 503 });
@@ -92,7 +97,26 @@ export async function PUT(request: Request) {
       return NextResponse.json({ ok: false, error: INVALID_SNAPSHOT_FORMAT_ERROR }, { status: 400 });
     }
 
-    const encodedSnapshot = encodeDatabaseJson(normalizedSnapshot);
+    const { rows } = await dbQuery<{ snapshot: unknown }>(
+      `
+        select snapshot
+        from app_state_snapshots
+        where institution_id = ?
+        limit 1
+      `,
+      [user.institutionId]
+    );
+
+    const currentSnapshot =
+      normalizeAppStateSnapshot(decodeDatabaseJson<AppStateSnapshot>(rows[0]?.snapshot)) ??
+      normalizeAppStateSnapshot(rows[0]?.snapshot) ??
+      normalizedSnapshot;
+    const snapshotToSave = mergeScopedSnapshotForSessionUser({
+      currentSnapshot,
+      incomingSnapshot: normalizedSnapshot,
+      user,
+    });
+    const encodedSnapshot = encodeDatabaseJson(snapshotToSave);
 
     await dbQuery(
       `

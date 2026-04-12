@@ -44,7 +44,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
     name: "陈园长",
     username: "demo-admin",
     role: "机构管理员",
-    avatar: "🧑‍💼",
+    avatar: "👩‍💼",
     institutionId: DEMO_INSTITUTION_ID,
     accountKind: "demo",
     description: "园长端 · 全园汇总、风险看板与管理视角",
@@ -92,7 +92,7 @@ export function normalizeUsername(username: string) {
 
 export function getDefaultAvatarForRole(role: AccountRole) {
   if (role === "教师") return "👩‍🏫";
-  if (role === "机构管理员") return "🧑‍💼";
+  if (role === "机构管理员") return "👩‍💼";
   return "👩";
 }
 
@@ -101,7 +101,7 @@ export function getDefaultLandingPath(role: AccountRole) {
 }
 
 export function getRoleHomePath(role: AccountRole) {
-  if (role === "教师") return "/teacher/home";
+  if (role === "教师") return "/teacher";
   if (role === "家长") return "/parent";
   return "/admin";
 }

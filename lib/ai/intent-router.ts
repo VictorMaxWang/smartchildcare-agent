@@ -39,6 +39,10 @@ const PRIORITY_KEYWORDS = [
   "top 3",
   "top3",
   "p1",
+  "最该先处理",
+  "最该先处理什么",
+  "最需要优先处理",
+  "优先处理的孩子",
   "优先",
   "优先级",
   "最该处理",
@@ -377,6 +381,31 @@ function buildTeacherConsultationRoute(payload: IntentRouterRequest): RouteShape
   };
 }
 
+function buildTeacherPriorityRoute(payload: IntentRouterRequest): RouteShape {
+  const optionalPayload: TeacherAgentRunPayload = {
+    kind: "teacher-agent-run",
+    workflow: "follow-up",
+    message: payload.message,
+    ...(payload.childId ? { childId: payload.childId } : {}),
+  };
+  return {
+    targetWorkflow: "teacher.agent.follow-up",
+    targetPage: "/teacher/agent",
+    deeplink: appendQuery("/teacher/agent", [
+      ["action", "follow-up"],
+      ["childId", payload.childId],
+    ]),
+    previewCard: {
+      title: "查看今日优先处理孩子",
+      summary: "将当前诉求路由到教师今日跟进工作流，优先打开最需要先处理的孩子与后续动作。",
+      ctaLabel: "打开今日跟进",
+      badges: ["teacher", "view_priority"],
+    },
+    optionalPayload,
+    ruleId: "intent-router:teacher:view_priority:v1",
+  };
+}
+
 function buildTeacherWeeklyRoute(payload: IntentRouterRequest): RouteShape {
   const optionalPayload: TeacherAgentRunPayload = {
     kind: "teacher-agent-run",
@@ -532,6 +561,9 @@ function buildRoute(
     }
     if (intent === "start_consultation") {
       return { detectedRole, intent, confidence: "medium", matchedSignals, ...buildTeacherConsultationRoute(payload) };
+    }
+    if (intent === "view_priority") {
+      return { detectedRole, intent, confidence: "medium", matchedSignals, ...buildTeacherPriorityRoute(payload) };
     }
     if (intent === "ask_weekly_report") {
       return { detectedRole, intent, confidence: "medium", matchedSignals, ...buildTeacherWeeklyRoute(payload) };

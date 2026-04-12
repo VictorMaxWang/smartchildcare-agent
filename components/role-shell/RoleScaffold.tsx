@@ -159,11 +159,13 @@ export function InlineLinkButton({
 export function AgentWorkspaceCard({
   title,
   description,
+  badgeLabel = "Agent 入口",
   promptButtons,
   children,
 }: {
   title: string;
   description: string;
+  badgeLabel?: string;
   promptButtons?: ReactNode;
   children: ReactNode;
 }) {
@@ -174,7 +176,7 @@ export function AgentWorkspaceCard({
       actions={
         <Badge variant="secondary" className="gap-1 px-3 py-1">
           <Sparkles className="h-3.5 w-3.5" />
-          Agent 入口
+          {badgeLabel}
         </Badge>
       }
     >

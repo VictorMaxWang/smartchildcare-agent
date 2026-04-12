@@ -259,7 +259,7 @@ export async function POST(request: Request) {
     ).map((childId) =>
       buildMemoryContextForPrompt({
         childId,
-        workflowType: "weekly-report",
+        workflowType: "admin-weekly-ops-report",
         query: payload.question?.trim() || "weekly ops report risk child continuity",
         request,
       })

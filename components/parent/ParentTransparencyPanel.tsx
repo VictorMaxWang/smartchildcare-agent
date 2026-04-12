@@ -19,8 +19,8 @@ export interface ParentTransparencyPanelProps {
 
 function ParentTransparencyPanelContent({
   model,
-  title = "Why This Suggestion",
-  description = "Show the data source, reliability, and closure status behind the current parent-facing suggestion.",
+  title = "这条建议怎么来的",
+  description = "把当前建议的依据、完整度和后续跟进说明清楚。",
   institutionStatusNote,
   careMode = false,
 }: ParentTransparencyPanelProps) {
@@ -29,12 +29,12 @@ function ParentTransparencyPanelContent({
   const speechText = buildParentSpeechScript({
     title,
     sections: [
-      { label: "summary", text: model.summarySentence },
-      { label: "reliability", text: model.reliabilityText },
-      { label: "closure", text: model.closureStatus },
-      { label: "warning", text: model.warnings[0] },
+      { label: "摘要", text: model.summarySentence },
+      { label: "依据", text: model.reliabilityText },
+      { label: "跟进", text: model.closureStatus },
+      { label: "提醒", text: model.warnings[0] },
     ],
-    outro: "Browser TTS only. This is not backend-generated voice.",
+    outro: "仅在当前浏览器朗读，方便家人快速听懂重点。",
   });
 
   return (
@@ -44,7 +44,7 @@ function ParentTransparencyPanelContent({
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={model.warnings.length > 0 ? "warning" : "info"} className="px-3 py-1">
-            {model.warnings.length > 0 ? "Has alerts" : careMode ? "Care mode" : "Transparency"}
+            {model.warnings.length > 0 ? "需要留意" : careMode ? "简洁查看" : "说明面板"}
           </Badge>
           <ParentSpeakButton
             text={speechText}
@@ -57,7 +57,7 @@ function ParentTransparencyPanelContent({
     >
       <div data-testid="parent-transparency-panel" className="space-y-4">
         <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-          <p className="text-xs font-medium tracking-[0.14em] text-slate-400">Summary</p>
+          <p className="text-xs font-medium tracking-[0.14em] text-slate-400">摘要</p>
           <p className={careMode ? "mt-3 text-base leading-8 text-slate-800" : "mt-2 text-sm leading-7 text-slate-700"}>
             {model.summarySentence}
           </p>
@@ -75,14 +75,14 @@ function ParentTransparencyPanelContent({
 
             <div className="grid gap-4 lg:grid-cols-2">
               <InfoBlock
-                title="Reliability"
+                title="依据完整度"
                 body={model.reliabilityText}
                 detail={model.coverageText}
                 icon={<ShieldCheck className="h-4 w-4" />}
                 careMode={careMode}
               />
               <InfoBlock
-                title="Closure status"
+                title="后续跟进"
                 body={model.closureStatus}
                 detail={institutionStatusNote}
                 icon={<Workflow className="h-4 w-4" />}
@@ -97,7 +97,7 @@ function ParentTransparencyPanelContent({
             <div className="flex items-start gap-3">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-amber-900">Points to keep in mind</p>
+                <p className="text-sm font-semibold text-amber-900">需要留意</p>
                 <ul className={careMode ? "mt-3 space-y-3 text-base leading-7 text-amber-900/90" : "mt-2 space-y-2 text-sm leading-6 text-amber-900/90"}>
                   {model.warnings.map((warning) => (
                     <li key={warning}>- {warning}</li>
@@ -112,12 +112,12 @@ function ParentTransparencyPanelContent({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-900">
-                {careMode ? "See more detail?" : "Expand details"}
+                {careMode ? "要不要多看一点？" : "展开更多说明"}
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-500">
                 {careMode
-                  ? "Care mode keeps just one summary layer visible by default."
-                  : "Expand to review evidence bullets and boundary notes."}
+                  ? "关怀模式默认先只看一层摘要，需要时再展开。"
+                  : "展开后可以看到依据摘要和需要留意的边界说明。"}
               </p>
             </div>
             <Button
@@ -126,7 +126,7 @@ function ParentTransparencyPanelContent({
               className="rounded-full"
               onClick={() => setExpanded((current) => !current)}
             >
-              {expanded ? "Hide details" : "Show details"}
+              {expanded ? "收起说明" : "展开说明"}
               {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
           </div>
@@ -136,14 +136,14 @@ function ParentTransparencyPanelContent({
               {careMode ? (
                 <div className="grid gap-4 lg:grid-cols-2">
                   <InfoBlock
-                    title="Reliability"
+                    title="依据完整度"
                     body={model.reliabilityText}
                     detail={model.coverageText}
                     icon={<ShieldCheck className="h-4 w-4" />}
                     careMode={careMode}
                   />
                   <InfoBlock
-                    title="Closure status"
+                    title="后续跟进"
                     body={model.closureStatus}
                     detail={institutionStatusNote}
                     icon={<Workflow className="h-4 w-4" />}
@@ -153,7 +153,7 @@ function ParentTransparencyPanelContent({
               ) : null}
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="rounded-3xl bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-900">Evidence bullets</p>
+                  <p className="text-sm font-semibold text-slate-900">这次主要参考了什么</p>
                   <ul className={careMode ? "mt-3 space-y-3 text-base leading-7 text-slate-600" : "mt-3 space-y-2 text-sm leading-6 text-slate-600"}>
                     {model.evidenceBullets.map((item) => (
                       <li key={item}>- {item}</li>
@@ -161,7 +161,7 @@ function ParentTransparencyPanelContent({
                   </ul>
                 </div>
                 <div className="rounded-3xl bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-900">Boundary notes</p>
+                  <p className="text-sm font-semibold text-slate-900">需要一起记住的边界</p>
                   <ul className={careMode ? "mt-3 space-y-3 text-base leading-7 text-slate-600" : "mt-3 space-y-2 text-sm leading-6 text-slate-600"}>
                     {model.boundaryNotes.map((item) => (
                       <li key={item}>- {item}</li>
@@ -206,8 +206,8 @@ function InfoBlock({
 
 export default function ParentTransparencyPanel({
   model,
-  title = "Why This Suggestion",
-  description = "Show the data source, reliability, and closure status behind the current parent-facing suggestion.",
+  title = "这条建议怎么来的",
+  description = "把当前建议的依据、完整度和后续跟进说明清楚。",
   institutionStatusNote,
   careMode = false,
 }: ParentTransparencyPanelProps) {

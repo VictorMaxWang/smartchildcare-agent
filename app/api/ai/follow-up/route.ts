@@ -5,6 +5,7 @@ import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/inp
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
 import { selectStructuredFeedbackConsumption } from "@/lib/feedback/consumption";
 import { forwardBrainRequest } from "@/lib/server/brain-client";
+import { requireParentChildAccess } from "@/lib/server/parent-route-guard";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 import {
   buildCurrentInterventionCardFromTask,
@@ -91,9 +92,6 @@ function buildTaskContext(payload: AiFollowUpPayload) {
 }
 
 export async function POST(request: Request) {
-  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/parent/follow-up");
-  if (brainForward.response) return brainForward.response;
-
   let payload: AiFollowUpPayload | null = null;
 
   try {
@@ -106,6 +104,18 @@ export async function POST(request: Request) {
   if (!isValidFollowUpPayload(payload)) {
     return NextResponse.json({ error: "Invalid follow-up payload" }, { status: 400 });
   }
+
+  const childId =
+    payload.scope === "institution" || !("child" in payload.snapshot)
+      ? null
+      : payload.snapshot.child.id;
+  const access = await requireParentChildAccess(childId);
+  if (access.response) {
+    return access.response;
+  }
+
+  const brainForward = await forwardBrainRequest(request, "/api/v1/agents/parent/follow-up");
+  if (brainForward.response) return brainForward.response;
 
   const taskContext = buildTaskContext(payload);
   const feedbackConsumption =

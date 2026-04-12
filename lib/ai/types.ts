@@ -1162,7 +1162,7 @@ export interface TeacherReactRunPayload {
 
 export interface TeacherAgentRunPayload {
   kind: "teacher-agent-run";
-  workflow: "communication" | "weekly-summary";
+  workflow: "communication" | "follow-up" | "weekly-summary";
   message: string;
   childId?: string;
 }
