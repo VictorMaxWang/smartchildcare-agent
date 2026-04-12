@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel";
 import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
   AssistantEntryCard,
@@ -16,6 +17,7 @@ import {
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { buildParentAgentChildContext, buildParentAgentSuggestionResult, buildParentChildSuggestionSnapshot, type ParentAgentResult } from "@/lib/agent/parent-agent";
+import { buildParentHomeTransparencyModel } from "@/lib/agent/parent-transparency";
 import { buildParentWeeklyReportSnapshot } from "@/lib/agent/parent-weekly-report";
 import { resolveDefaultParentStoryBookDemoSeedId } from "@/lib/agent/parent-storybook-demo-seeds";
 import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
@@ -93,6 +95,20 @@ export default function ParentHomePage() {
   const weeklyReportKey = useMemo(
     () => (weeklyReportPayload ? JSON.stringify(weeklyReportPayload) : null),
     [weeklyReportPayload]
+  );
+  const homeTransparencyModel = useMemo(
+    () =>
+      feed && previewContext
+        ? buildParentHomeTransparencyModel({
+            context: previewContext,
+            suggestionResult: previewResult,
+            weeklyReport,
+            weeklyReportError,
+            latestConsultation,
+            pendingFeedback: !feed.hasFeedbackToday,
+          })
+        : null,
+    [feed, latestConsultation, previewContext, previewResult, weeklyReport, weeklyReportError]
   );
 
   useEffect(() => {
@@ -282,6 +298,14 @@ export default function ParentHomePage() {
                 <p className="mt-3 text-sm leading-7 text-slate-600">{previewResult?.whyNow ?? viewModel.aiReminder.description}</p>
               </div>
             </SectionCard>
+
+            {homeTransparencyModel ? (
+              <ParentTransparencyPanel
+                model={homeTransparencyModel}
+                title="为什么会看到这条建议"
+                description="把当前建议、周报和跟进状态的来源说明压缩成家长看得懂的一层。"
+              />
+            ) : null}
 
             <SectionCard
               title="今日成长小故事"

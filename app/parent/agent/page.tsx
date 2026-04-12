@@ -5,9 +5,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import { BrainCircuit, CheckCircle2, Clock3, Mic, ScanSearch, Send, Sparkles } from "lucide-react";
+import { BrainCircuit, Clock3, Mic, ScanSearch, Send, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
+import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel";
+import ParentStructuredFeedbackComposer, {
+  type ParentStructuredFeedbackComposerSubmitInput,
+} from "@/components/parent/ParentStructuredFeedbackComposer";
 import ParentTrendQaPanel from "@/components/parent/ParentTrendQaPanel";
 import ParentTrendResponseCard from "@/components/parent/ParentTrendResponseCard";
 import {
@@ -30,6 +34,7 @@ import {
   type ParentAgentChildContext,
   type ParentAgentResult,
 } from "@/lib/agent/parent-agent";
+import { buildParentAgentTransparencyModel } from "@/lib/agent/parent-transparency";
 import {
   buildParentMessageReflexionPayload,
   mergeParentMessageReflexionResult,
@@ -51,12 +56,16 @@ import type {
   ParentTrendQueryResponse,
 } from "@/lib/ai/types";
 import { getLocalToday } from "@/lib/date";
-import type { ParentFeedbackChildReaction } from "@/lib/feedback/types";
 import { getDraftSyncStatusLabel } from "@/lib/mobile/local-draft-cache";
 import { buildReminderItems } from "@/lib/mobile/reminders";
 import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
 import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
+import {
+  buildInterventionTasksFromCard,
+  materializeTasksFromLegacy,
+  pickActiveTask,
+} from "@/lib/tasks/task-model";
 import { formatDisplayDate, getAgeText, useApp } from "@/lib/store";
 
 type HistoryItem = {
@@ -72,73 +81,6 @@ function formatTimelineTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function buildFeedbackContent(input: {
-  executionStatus: "completed" | "partial" | "not_started" | null;
-  childReaction: string;
-  improved: boolean | "unknown";
-  freeNote: string;
-}) {
-  const executionText =
-    input.executionStatus === "completed"
-      ? "今晚家庭任务已完整执行"
-      : input.executionStatus === "partial"
-        ? "今晚家庭任务已部分执行"
-        : input.executionStatus === "not_started"
-          ? "今晚家庭任务尚未执行"
-          : "执行状态待确认";
-  const parts = [
-    executionText,
-    input.childReaction.trim() ? `孩子反应：${input.childReaction.trim()}` : "",
-    input.improved === true ? "观察到改善" : input.improved === false ? "暂未看到改善" : "改善情况待观察",
-    input.freeNote.trim() ? `补充：${input.freeNote.trim()}` : "",
-  ].filter(Boolean);
-
-  return parts.join("；");
-}
-
-function resolveFeedbackChildReaction(input: {
-  text: string;
-  executionStatus: "completed" | "partial" | "not_started" | null;
-  improved: boolean | "unknown";
-}): ParentFeedbackChildReaction {
-  const normalized = input.text.trim().toLowerCase();
-
-  if (
-    normalized.includes("抗拒") ||
-    normalized.includes("拒绝") ||
-    normalized.includes("哭") ||
-    normalized.includes("闹") ||
-    normalized.includes("resist")
-  ) {
-    return "resisted";
-  }
-
-  if (
-    normalized.includes("改善") ||
-    normalized.includes("更好") ||
-    normalized.includes("稳定") ||
-    normalized.includes("主动") ||
-    normalized.includes("顺利") ||
-    normalized.includes("improv")
-  ) {
-    return "improved";
-  }
-
-  if (
-    normalized.includes("配合") ||
-    normalized.includes("接受") ||
-    normalized.includes("愿意") ||
-    normalized.includes("accepted")
-  ) {
-    return "accepted";
-  }
-
-  if (input.improved === true) return "improved";
-  if (input.executionStatus === "not_started") return "resisted";
-
-  return "neutral";
 }
 
 export default function ParentAgentPage() {
@@ -187,10 +129,10 @@ export default function ParentAgentPage() {
   const [reflexionLoading, setReflexionLoading] = useState(false);
   const [parentMessageStatus, setParentMessageStatus] = useState<string | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
-  const [feedbackExecutionStatus, setFeedbackExecutionStatus] = useState<"completed" | "partial" | "not_started" | null>(null);
-  const [feedbackImproved, setFeedbackImproved] = useState<boolean | "unknown">("unknown");
-  const [childReaction, setChildReaction] = useState("");
-  const [freeNote, setFreeNote] = useState("");
+  const [feedbackNotePrefill, setFeedbackNotePrefill] = useState<{
+    value: string;
+    token: number;
+  } | null>(null);
   const reflexionRequestRef = useRef(0);
   const reflexionAbortRef = useRef<AbortController | null>(null);
   const selectedChildIdRef = useRef(selectedChildId);
@@ -261,6 +203,37 @@ export default function ParentAgentPage() {
   );
   const displayInterventionCard = currentResult?.interventionCard ?? latestInterventionCard;
   const displayConsultation = currentResult?.consultation ?? latestConsultation;
+  const structuredFeedbackTaskContext = useMemo(() => {
+    if (!selectedFeed || !displayInterventionCard) return null;
+
+    const childId = selectedFeed.child.id;
+    const seededTasks = buildInterventionTasksFromCard(displayInterventionCard, {
+      legacyWeeklyTaskId: baseContext?.task.id,
+    });
+    const tasks = materializeTasksFromLegacy({
+      existingTasks: seededTasks.tasks,
+      interventionCards: [displayInterventionCard],
+      consultations: displayConsultation ? [displayConsultation] : [],
+      reminders: reminders.filter(
+        (item) => item.childId === childId || item.targetId === childId
+      ),
+      guardianFeedbacks: guardianFeedbacks.filter((item) => item.childId === childId),
+      taskCheckIns: taskCheckInRecords.filter((item) => item.childId === childId),
+    });
+
+    return {
+      tasks,
+      activeTask: pickActiveTask(tasks, childId, "parent"),
+    };
+  }, [
+    baseContext?.task.id,
+    displayConsultation,
+    displayInterventionCard,
+    guardianFeedbacks,
+    reminders,
+    selectedFeed,
+    taskCheckInRecords,
+  ]);
   const displayTonightTopAction = displayInterventionCard?.tonightHomeAction ?? currentResult?.tonightTopAction ?? baseContext?.task.description ?? "";
   const displayWhyNow =
     currentResult?.whyNow ??
@@ -272,6 +245,19 @@ export default function ParentAgentPage() {
     displayInterventionCard?.tomorrowObservationPoint ??
     currentResult?.teacherTomorrowObservation ??
     "明早继续反馈今晚执行结果，方便教师继续观察。";
+  const transparencyModel = useMemo(
+    () =>
+      baseContext && selectedFeed
+        ? buildParentAgentTransparencyModel({
+            context: baseContext,
+            currentResult,
+            consultation: displayConsultation,
+            trendResult: displayedTrendResult,
+            pendingFeedback: !selectedFeed.hasFeedbackToday,
+          })
+        : null,
+    [baseContext, currentResult, displayConsultation, displayedTrendResult, selectedFeed]
+  );
   const hydrationDisplay = selectedFeed ? getHydrationDisplayState(selectedFeed.weeklyTrend.hydrationAvg) : null;
   const familyTaskReminder = useMemo(
     () =>
@@ -330,7 +316,7 @@ export default function ParentAgentPage() {
     setReflexionLoading(false);
     setParentMessageStatus(null);
     setFeedbackStatus(null);
-    setFeedbackExecutionStatus(null);
+    setFeedbackNotePrefill(null);
   }, [selectedChildId]);
 
   useEffect(() => {
@@ -668,59 +654,49 @@ export default function ParentAgentPage() {
     };
   }, [baseContext, enrichParentMessageResult, snapshot]);
 
-  function submitFeedback() {
-    if (!selectedFeed || !displayInterventionCard) return;
-    if (feedbackExecutionStatus === null) {
-      setFeedbackStatus("请先选择今晚是否已执行。");
-      return;
-    }
-    if (!childReaction.trim()) {
-      setFeedbackStatus("请补充孩子反应，再提交反馈。");
+  function submitStructuredFeedback(
+    input: ParentStructuredFeedbackComposerSubmitInput
+  ) {
+    if (!selectedFeed || !displayInterventionCard) {
+      setFeedbackStatus("当前还没有可提交的干预卡，请先生成今晚动作。");
       return;
     }
 
-    const structuredChildReaction = resolveFeedbackChildReaction({
-      text: childReaction,
-      executionStatus: feedbackExecutionStatus,
-      improved: feedbackImproved,
-    });
-
+    setFeedbackStatus(null);
     addGuardianFeedback({
-      childId: selectedFeed.child.id,
-      date: getLocalToday(),
-      status: feedbackExecutionStatus === "not_started" ? "今晚反馈" : "在家已配合",
-      content: buildFeedbackContent({
-        executionStatus: feedbackExecutionStatus,
-        childReaction,
-        improved: feedbackImproved,
-        freeNote,
-      }),
-      interventionCardId: displayInterventionCard.id,
-      sourceWorkflow: "parent-agent",
-      executionStatus: feedbackExecutionStatus,
-      executed: feedbackExecutionStatus !== "not_started",
-      childReaction: structuredChildReaction,
-      improved: feedbackImproved,
-      freeNote: freeNote.trim() || undefined,
+      childId: input.childId,
+      executionStatus: input.executionStatus,
+      executionCount: input.executionCount,
+      executorRole: input.executorRole,
+      childReaction: input.childReaction,
+      improvementStatus: input.improvementStatus,
+      barriers: input.barriers,
+      notes: input.notes,
+      relatedTaskId: input.relatedTaskId,
+      relatedConsultationId: input.relatedConsultationId,
+      interventionCardId: input.interventionCardId ?? displayInterventionCard.id,
+      attachments: input.attachments,
+      sourceChannel: "parent-agent",
     });
 
-    if (feedbackExecutionStatus !== "not_started") {
-      checkInTask(selectedFeed.child.id, activeContext?.task.id ?? displayInterventionCard.id, getLocalToday());
+    if (input.executionStatus !== "not_started") {
+      checkInTask(
+        selectedFeed.child.id,
+        input.relatedTaskId ?? displayInterventionCard.id,
+        getLocalToday()
+      );
     }
 
     parentDrafts
       .filter((draft) => draft.syncStatus === "local_pending")
       .forEach((draft) => markMobileDraftSyncStatus(draft.draftId, "synced"));
 
-    setFeedbackStatus("今晚反馈已提交，下一轮 follow-up 会自动把这条反馈带进上下文。");
     if (familyTaskReminder) {
       updateReminderStatus(familyTaskReminder.reminderId, "acknowledged");
     }
 
-    setFeedbackExecutionStatus(null);
-    setFeedbackImproved("unknown");
-    setChildReaction("");
-    setFreeNote("");
+    setFeedbackStatus("今晚反馈已提交，下一轮 follow-up 会自动带入这条结构化记录。");
+    setFeedbackNotePrefill(null);
   }
 
   function snoozeFamilyReminder() {
@@ -754,7 +730,10 @@ export default function ParentAgentPage() {
       attachmentName: "health-note.jpg",
     });
     saveMobileDraft(draft);
-    setFreeNote(draft.content);
+    setFeedbackNotePrefill({
+      value: draft.content,
+      token: Date.now(),
+    });
   }
 
   if (!selectedFeed || !baseContext || !snapshot) {
@@ -1006,6 +985,14 @@ export default function ParentAgentPage() {
               )}
             </AgentWorkspaceCard>
 
+            {transparencyModel ? (
+              <ParentTransparencyPanel
+                model={transparencyModel}
+                title="这条建议怎么来的"
+                description="把当前建议的数据来源、可信度和老师侧闭环状态说明清楚，再继续追问。"
+              />
+            ) : null}
+
             <SectionCard title="AI 回复区" description="支持普通追问和趋势问答，回答会自动带上当前干预卡、最近反馈和趋势图卡。">
               <div className="space-y-4">
                 <Textarea
@@ -1119,80 +1106,20 @@ export default function ParentAgentPage() {
 
             <div id="feedback">
               <SectionCard title="反馈提交区" description="上一轮建议执行完后，直接在这里把反馈送回下一轮 Agent。">
-                <div className="space-y-4">
-                  <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-3xl border border-slate-100 bg-white p-4">
-                    <p className="text-sm font-semibold text-slate-900">今晚任务执行状态</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button type="button" variant={feedbackExecutionStatus === "completed" ? "premium" : "outline"} onClick={() => setFeedbackExecutionStatus("completed")}>
-                        已执行
-                      </Button>
-                      <Button type="button" variant={feedbackExecutionStatus === "partial" ? "premium" : "outline"} onClick={() => setFeedbackExecutionStatus("partial")}>
-                        部分执行
-                      </Button>
-                      <Button type="button" variant={feedbackExecutionStatus === "not_started" ? "premium" : "outline"} onClick={() => setFeedbackExecutionStatus("not_started")}>
-                        未执行
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-slate-100 bg-white p-4">
-                    <p className="text-sm font-semibold text-slate-900">是否改善</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button type="button" variant={feedbackImproved === true ? "premium" : "outline"} onClick={() => setFeedbackImproved(true)}>
-                        有改善
-                      </Button>
-                      <Button type="button" variant={feedbackImproved === false ? "premium" : "outline"} onClick={() => setFeedbackImproved(false)}>
-                        暂未改善
-                      </Button>
-                      <Button type="button" variant={feedbackImproved === "unknown" ? "premium" : "outline"} onClick={() => setFeedbackImproved("unknown")}>
-                        还需观察
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div>
-                    <p className="mb-2 text-sm font-semibold text-slate-900">孩子反应</p>
-                    <Textarea
-                      value={childReaction}
-                      onChange={(event) => setChildReaction(event.target.value)}
-                      placeholder="例如：一开始抗拒，3 分钟后愿意配合；今晚喝水明显更主动。"
-                      className="min-h-24 bg-white"
-                    />
-                  </div>
-                  <div>
-                    <p className="mb-2 text-sm font-semibold text-slate-900">自由补充</p>
-                    <Textarea
-                      value={freeNote}
-                      onChange={(event) => setFreeNote(event.target.value)}
-                      placeholder="补充执行时段、持续时间、家庭场景或其他异常。"
-                      className="min-h-24 bg-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-100 bg-emerald-50/70 p-4">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{currentResult?.feedbackPrompt ?? "提交反馈后，下一轮 follow-up 会自动带上这条记录。"}</p>
-                    <p className="mt-1 text-sm text-slate-600">这条反馈会挂到当前干预卡上，并进入下一轮 follow-up 上下文。</p>
-                    {familyTaskReminder ? (
-                      <p className="mt-2 text-sm text-slate-600">当前提醒状态：{familyTaskReminder.status}</p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" className="rounded-xl" onClick={snoozeFamilyReminder}>
-                      稍后提醒
-                    </Button>
-                    <Button className="gap-2 rounded-xl" onClick={submitFeedback} disabled={!displayInterventionCard}>
-                      <CheckCircle2 className="h-4 w-4" />
-                      提交今晚反馈
-                    </Button>
-                  </div>
-                </div>
-
-                  {feedbackStatus ? <p className="text-sm text-slate-600">{feedbackStatus}</p> : null}
-                </div>
+                <ParentStructuredFeedbackComposer
+                  key={`${selectedFeed.child.id}-${displayInterventionCard?.id ?? "no-card"}-${feedbackNotePrefill?.token ?? "no-prefill"}`}
+                  childId={selectedFeed.child.id}
+                  interventionCard={displayInterventionCard}
+                  activeTask={structuredFeedbackTaskContext?.activeTask}
+                  consultation={displayConsultation}
+                  feedbackPrompt={currentResult?.feedbackPrompt}
+                  reminderStatus={familyTaskReminder?.status}
+                  latestFeedback={selectedFeed.latestFeedback}
+                  statusMessage={feedbackStatus}
+                  notePrefill={feedbackNotePrefill}
+                  onSubmit={submitStructuredFeedback}
+                  onSnoozeReminder={snoozeFamilyReminder}
+                />
               </SectionCard>
             </div>
 

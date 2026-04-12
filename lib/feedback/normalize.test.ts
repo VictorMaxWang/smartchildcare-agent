@@ -146,3 +146,35 @@ test("toFollowUpFeedbackLite preserves canonical fields needed by follow-up and 
   assert.deepEqual(lite?.barriers, ["Child got distracted"]);
   assert.equal(lite?.notes, "The child accepted the first two steps.");
 });
+
+test("normalizeParentStructuredFeedback accepts UI-originated canonical payload with execution count, barriers, notes, and empty attachments", () => {
+  const normalized = normalizeParentStructuredFeedback({
+    childId: "child-ui-1",
+    executionStatus: "completed",
+    executionCount: 2,
+    executorRole: "parent",
+    childReaction: "accepted",
+    improvementStatus: "clear_improvement",
+    barriers: ["孩子抗拒", "今晚没时间"],
+    notes: "先抗拒，后面愿意配合完成两次。",
+    relatedTaskId: "task-parent-ui-1",
+    relatedConsultationId: "consult-ui-1",
+    attachments: {},
+    sourceChannel: "parent-agent",
+    createdBy: "Parent Chen",
+    createdByRole: "parent",
+  });
+
+  assert.ok(normalized);
+  assert.equal(normalized?.executionStatus, "completed");
+  assert.equal(normalized?.executionCount, 2);
+  assert.equal(normalized?.executorRole, "parent");
+  assert.equal(normalized?.childReaction, "accepted");
+  assert.equal(normalized?.improvementStatus, "clear_improvement");
+  assert.deepEqual(normalized?.barriers, ["孩子抗拒", "今晚没时间"]);
+  assert.equal(normalized?.notes, "先抗拒，后面愿意配合完成两次。");
+  assert.deepEqual(normalized?.attachments, {});
+  assert.equal(normalized?.relatedTaskId, "task-parent-ui-1");
+  assert.equal(normalized?.relatedConsultationId, "consult-ui-1");
+  assert.equal(normalized?.sourceChannel, "parent-agent");
+});

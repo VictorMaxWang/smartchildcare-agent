@@ -148,3 +148,39 @@ test("normalizeAppStateSnapshot rejects feedback records that cannot be normaliz
 
   assert.equal(snapshot, null);
 });
+
+test("normalizeAppStateSnapshot accepts structured feedback records with execution details and empty attachment stubs", () => {
+  const snapshot = normalizeAppStateSnapshot({
+    ...buildBaseSnapshot(),
+    feedback: [
+      {
+        feedbackId: "fb-structured-ui-2",
+        childId: "child-1",
+        sourceRole: "parent",
+        sourceChannel: "parent-agent",
+        relatedTaskId: "task-parent-ui-2",
+        relatedConsultationId: "consult-ui-2",
+        executionStatus: "completed",
+        executionCount: 3,
+        executorRole: "mixed",
+        childReaction: "improved",
+        improvementStatus: "clear_improvement",
+        barriers: ["孩子抗拒"],
+        notes: "家里两位照护人都跟着做，第三次明显更顺。",
+        attachments: {},
+        submittedAt: "2026-04-10T09:30:00.000Z",
+        source: { kind: "structured", workflow: "parent-agent" },
+        fallback: {},
+        createdBy: "Parent Chen",
+        createdByRole: "parent",
+      },
+    ],
+  });
+
+  assert.ok(snapshot);
+  assert.equal(snapshot?.feedback.length, 1);
+  assert.equal(snapshot?.feedback[0]?.executionCount, 3);
+  assert.equal(snapshot?.feedback[0]?.executorRole, "mixed");
+  assert.equal(snapshot?.feedback[0]?.relatedConsultationId, "consult-ui-2");
+  assert.deepEqual(snapshot?.feedback[0]?.attachments, {});
+});
