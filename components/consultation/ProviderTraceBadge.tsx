@@ -17,8 +17,8 @@ function getTraceValue(value: unknown) {
 }
 
 function getModeLabel(trace: ConsultationProviderTrace) {
-  if (trace.realProvider) return "真实链路";
-  if (trace.fallback) return "Fallback 链路";
+  if (trace.realProvider) return "智能生成";
+  if (trace.fallback) return "本地兜底";
   return "";
 }
 
@@ -39,7 +39,7 @@ export default function ProviderTraceBadge({
   const transport =
     getTraceValue(resolvedTrace.transport) ||
     getTraceValue(resolvedTrace.transportSource);
-  const primaryLabel = source || provider;
+  const primaryLabel = compact ? "" : source || provider;
   const modeLabel = getModeLabel(resolvedTrace);
 
   if (!primaryLabel && !provider && !model && !requestId && !transport && !modeLabel) {
@@ -54,8 +54,8 @@ export default function ProviderTraceBadge({
         </Badge>
       ) : null}
       {!compact && provider && provider !== primaryLabel ? <Badge variant="outline">{provider}</Badge> : null}
-      {transport ? <Badge variant="outline">{transport}</Badge> : null}
-      {model ? <Badge variant="outline">{model}</Badge> : null}
+      {!compact && transport ? <Badge variant="outline">{transport}</Badge> : null}
+      {!compact && model ? <Badge variant="outline">{model}</Badge> : null}
       {modeLabel ? <Badge variant={resolvedTrace.realProvider ? "success" : "warning"}>{modeLabel}</Badge> : null}
       {(showRequestId || !compact) && requestId ? <Badge variant="outline">{requestId}</Badge> : null}
     </div>

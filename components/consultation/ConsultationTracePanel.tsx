@@ -42,7 +42,7 @@ export default function ConsultationTracePanel({
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={viewModel.mode === "debug" ? "warning" : "info"}>
-                  {viewModel.mode === "debug" ? "调试态" : "演示态"}
+                  {viewModel.mode === "debug" ? "详细查看" : "常规展示"}
                 </Badge>
                 <Badge variant={getStatusVariant(viewModel.overallStatus)}>{viewModel.overallStatusLabel}</Badge>
                 {viewModel.mode === "debug" && viewModel.traceId ? <Badge variant="outline">{viewModel.traceId}</Badge> : null}
@@ -50,7 +50,7 @@ export default function ConsultationTracePanel({
               <div className="space-y-2">
                 <CardTitle className="flex items-center gap-2 text-xl text-slate-900">
                   <BrainCircuit className="h-5 w-5 text-indigo-500" />
-                  高风险会诊 Trace
+                  高风险会诊过程
                 </CardTitle>
                 <p className="text-sm leading-7 text-slate-600">{viewModel.streamMessage}</p>
               </div>
@@ -76,7 +76,7 @@ export default function ConsultationTracePanel({
 
           {!viewModel.hasContent && viewModel.overallStatus === "idle" ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4 text-sm leading-6 text-slate-600">
-              启动会诊后，这里会按“长期画像 {"->"} 最近会诊 / 快照 {"->"} 当前建议”依次展开，适合演示和联调观察。
+              启动会诊后，这里会按“长期画像 {"->"} 最近会诊 / 快照 {"->"} 当前建议”依次展开，便于老师讲解与查看重点。
             </div>
           ) : null}
         </CardContent>

@@ -108,17 +108,17 @@ function normalizeSpeechRecognitionError(error: string) {
   switch (error) {
     case "not-allowed":
     case "service-not-allowed":
-      return "Microphone permission is required for browser speech recognition.";
+      return "需要先允许麦克风权限，才能使用语音转文字。";
     case "audio-capture":
-      return "The browser could not capture microphone audio.";
+      return "当前浏览器暂时无法采集麦克风声音。";
     case "network":
-      return "Browser speech recognition is temporarily unavailable.";
+      return "语音转文字暂时不可用，请稍后再试。";
     case "no-speech":
-      return "No clear speech was detected. Please try again.";
+      return "没有识别到清晰语音，请再说一次。";
     case "aborted":
-      return "The browser speech session was cancelled.";
+      return "本次语音转文字已取消。";
     default:
-      return "Browser speech recognition did not finish successfully.";
+      return "这次语音转文字没有顺利完成，请稍后重试。";
   }
 }
 

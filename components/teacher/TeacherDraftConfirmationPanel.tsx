@@ -194,12 +194,11 @@ export default function TeacherDraftConfirmationPanel({
       <div className="space-y-4">
         <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/60 p-5">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="warning">Mock Understanding</Badge>
+            <Badge variant="warning">演示理解结果</Badge>
             {childName ? <Badge variant="secondary">{childName}</Badge> : null}
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            当前还没有可确认的 teacher understanding 草稿。可以先用下面的 demo transcript
-            生成一个本地 source draft，用来演示确认、编辑、丢弃和 persist 抽象。
+            当前还没有可确认的教师草稿。可以先用下面的演示话术生成一条本地草稿，用来演示确认、编辑与丢弃流程。
           </p>
         </div>
 
@@ -248,26 +247,22 @@ export default function TeacherDraftConfirmationPanel({
         </div>
 
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.6fr_1fr]">
-          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
-              <FileText className="h-4 w-4" />
-              Transcript
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+                <FileText className="h-4 w-4" />
+                原始内容
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {sourceTranscript ?? seed.transcript}
+              </p>
             </div>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              {sourceTranscript ?? seed.transcript}
-            </p>
-          </div>
 
-          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
-              Persist
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              当前会先回写同一个 mobile draft 的 `structuredPayload.t5State`，
-              然后立即尝试 `/api/state` 快照持久化；成功、仅本地 fallback、
-              失败三种结果都会明确显示。
-            </p>
-          </div>
+            <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">保存方式</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                当前会先写回同一条教师草稿，再尝试同步保存；无论成功、仅本地保留还是保存失败，页面都会明确提示。
+              </p>
+            </div>
         </div>
 
         {seed.warnings.length > 0 ? (

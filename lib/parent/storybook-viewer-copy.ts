@@ -37,16 +37,16 @@ function mapProviderName(kind: "image" | "audio", providerName: string) {
     return "本地动态剧情插画";
   }
   if (normalized === "storybook-demo-art") {
-    return "示例插画兜底";
+    return "演示插画";
   }
   if (normalized === "storybook-svg-fallback") {
-    return "SVG 兜底插画";
+    return "基础插画";
   }
   if (normalized === "storybook-asset") {
     return "预置绘本资产";
   }
   if (normalized === "storybook-mock-preview") {
-    return "字幕预演";
+    return "文字朗读预览";
   }
   if (normalized === "vivo-story-image") {
     return "vivo 真实图片";
@@ -95,13 +95,13 @@ export function formatStoryBookSceneStatus(
 ) {
   if (kind === "image") {
     if (status === "ready") return "已生成插画";
-    if (status === "fallback") return "回退插画";
+    if (status === "fallback") return "备用插画";
     if (status === "mock") return "示例插画";
     return "待补插画";
   }
 
   if (status === "ready") return "已生成音频";
-  if (status === "fallback") return "字幕预演";
+  if (status === "fallback") return "文字朗读预览";
   if (status === "mock") return "示例音轨";
   return "待补音频";
 }
@@ -121,46 +121,45 @@ export function formatStoryBookSceneImageDelivery(
   value?: StoryBookRuntimeImageDelivery | ParentStoryBookMediaStatus | "mixed"
 ) {
   if (value === "real" || value === "ready") return "真实图片";
-  if (value === "mixed") return "混合图片";
+  if (value === "mixed") return "图片逐步补齐";
   if (value === "dynamic-fallback" || value === "fallback") return "动态剧情插画";
-  if (value === "demo-art" || value === "mock") return "示例插画兜底";
-  return "SVG 兜底插画";
+  if (value === "demo-art" || value === "mock") return "演示插画";
+  return "基础插画";
 }
 
 export function formatStoryBookTransport(value?: StoryBookRuntimeTransport | string | null) {
-  if (value === "remote-brain-proxy") return "FastAPI 实时链路";
-  if (value === "next-json-fallback") return "Next 本地 JSON 回退";
-  if (value === "next-stream-fallback") return "Next 本地流式回退";
-  return value ?? "未知链路";
+  if (value === "remote-brain-proxy") return "实时生成链路";
+  if (value === "next-json-fallback" || value === "next-stream-fallback") return "本地整理结果";
+  return value ?? "生成链路待确认";
 }
 
 export function formatStoryBookFallbackReason(value?: string | null) {
   const normalized = value?.trim();
-  if (!normalized) return "未知回退原因";
+  if (!normalized) return "当前使用本地结果";
 
   if (normalized === "brain-status-504") {
-    return "上游 brain 返回 504";
+    return "实时生成暂时超时";
   }
   if (normalized === "brain-proxy-timeout") {
-    return "Next 代理等待 brain 超时";
+    return "实时生成暂时超时";
   }
   if (normalized === "brain-base-url-missing") {
-    return "未配置 BRAIN_API_BASE_URL";
+    return "实时生成服务暂未接通";
   }
   if (normalized === "partial-media-fallback") {
-    return "媒体仍在补齐，当前为混合结果";
+    return "部分图片或朗读仍在补齐";
   }
   if (normalized === "mock-storybook-pipeline") {
-    return "当前命中本地回退绘本链路";
+    return "当前使用演示绘本结果";
   }
   if (normalized === "sparse-parent-context") {
-    return "上下文不足，降级为轻量卡片";
+    return "当前上下文较少，先生成轻量版本";
   }
   if (normalized.startsWith("brain-status-")) {
-    return `上游 brain 返回 ${normalized.slice("brain-status-".length)}`;
+    return "实时生成暂时不可用";
   }
   if (normalized.startsWith("brain-fetch-")) {
-    return `brain 请求失败：${normalized.slice("brain-fetch-".length)}`;
+    return "实时生成请求暂未完成";
   }
 
   return normalized;
@@ -176,7 +175,7 @@ export function formatStoryBookHighlightSource(source: string) {
   if (source === "manualTheme") return "主题主线";
   if (source === "goalKeyword") return "关键词";
   if (source === "childTrait") return "孩子线索";
-  if (source === "rule" || source === "ruleFallback") return "规则兜底";
+  if (source === "rule" || source === "ruleFallback") return "本地整理结果";
   return source;
 }
 
@@ -202,11 +201,11 @@ export function formatStoryBookAudioDelivery(
   value?: "stream-url" | "inline-data-url" | "preview-only" | "real" | "mixed" | "local-speech"
 ) {
   if (value === "real") return "真实逐页朗读";
-  if (value === "mixed") return "混合音频";
+  if (value === "mixed") return "朗读逐步补齐";
   if (value === "local-speech") return "本地补读";
   if (value === "stream-url") return "短链音频";
   if (value === "inline-data-url") return "内联音频";
-  return "字幕预演";
+  return "文字朗读预览";
 }
 
 export function formatStoryBookClientCache(kind: "none" | "hit" | "saved") {

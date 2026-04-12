@@ -213,7 +213,7 @@ function FallbackEvidenceList({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">兼容摘要</Badge>
-        <p className="text-xs text-slate-500">当前 consultation 仍在回退展示旧字段摘要。</p>
+        <p className="text-xs text-slate-500">当前结果暂以兼容摘要方式展示旧字段内容。</p>
       </div>
       <div className="space-y-2">
         {model.fallbackItems.map((item) => (
@@ -310,16 +310,15 @@ export default function ConsultationTraceCard({
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={getProviderBadgeVariant(trace.providerState)}>{trace.providerStateLabel}</Badge>
           <Badge variant={getMemoryBadgeVariant(trace.memoryState)}>{trace.memoryStateLabel}</Badge>
-          {trace.providerLabel ? <Badge variant="outline">{trace.providerLabel}</Badge> : null}
         </div>
 
         <div className="min-w-0">
           <CardTitle className="flex items-center gap-2 text-lg text-slate-900">
             <BrainCircuit className="h-5 w-5 text-indigo-500" />
-            会诊 Trace 摘要
+            会诊决策依据
           </CardTitle>
           <p className="mt-2 whitespace-normal break-words text-sm leading-6 text-slate-600">
-            园长侧只保留可答辩的 explainability、证据链与协作状态，不展示日志式调试信息。
+            这里只保留可用于决策和答辩的依据摘要、证据链与协作状态，不展示调试日志。
           </p>
         </div>
       </CardHeader>
@@ -371,21 +370,21 @@ export default function ConsultationTraceCard({
           <div className="rounded-3xl border border-slate-100 bg-white p-5">
             <SectionHeading
               icon={<GitBranchPlus className="h-4 w-4 text-sky-500" />}
-              title="Explainability"
+              title="判断依据"
               toneClassName="bg-sky-100 text-sky-700"
             />
             <div className="mt-3">
-              <ExplainabilityList items={visibleExplainability} emptyText="当前没有额外 explainability 明细。" />
+              <ExplainabilityList items={visibleExplainability} emptyText="当前没有额外判断依据。" />
             </div>
             {extraExplainability.length > 0 ? (
               <details className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
-                  查看其余 {extraExplainability.length} 条 Explainability
+                  查看其余 {extraExplainability.length} 条判断依据
                 </summary>
                 <div className="mt-3">
                   <ExplainabilityList
                     items={extraExplainability}
-                    emptyText="当前没有额外 explainability 明细。"
+                    emptyText="当前没有额外判断依据。"
                   />
                 </div>
               </details>
@@ -405,10 +404,10 @@ export default function ConsultationTraceCard({
         </div>
 
         <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
-          <p className="text-sm font-semibold text-slate-900">协作上下文</p>
+          <p className="text-sm font-semibold text-slate-900">协作状态</p>
           <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
             <div className="rounded-2xl border border-slate-100 bg-white/90 p-4">
-              <p className="text-sm font-semibold text-slate-900">参与 Agent</p>
+              <p className="text-sm font-semibold text-slate-900">参与环节</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {trace.participants.length > 0 ? (
                   trace.participants.map((participant) => (
@@ -424,18 +423,18 @@ export default function ConsultationTraceCard({
 
             <MetaCard
               icon={<Network className="h-4 w-4 text-sky-500" />}
-              title="Provider"
-              detail={trace.providerLabel ?? trace.providerStateLabel}
+              title="生成方式"
+              detail={trace.providerStateLabel}
             />
             <MetaCard
               icon={<Database className="h-4 w-4 text-emerald-500" />}
-              title="Memory"
+              title="参考范围"
               detail={trace.memoryDetail ?? trace.memoryStateLabel}
             />
           </div>
 
           <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4">
-            <p className="text-sm font-semibold text-emerald-900">Sync 去向</p>
+            <p className="text-sm font-semibold text-emerald-900">同步去向</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {trace.syncTargets.length > 0 ? (
                 trace.syncTargets.map((syncTarget) => (

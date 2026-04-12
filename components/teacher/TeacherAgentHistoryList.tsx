@@ -11,9 +11,15 @@ export interface TeacherAgentHistoryListItem {
   result: TeacherAgentResult;
 }
 
+function getTeacherHistorySourceLabel(source: string) {
+  if (source === "ai" || source === "vivo") return "智能生成";
+  if (source === "mock") return "演示结果";
+  return "本地兜底";
+}
+
 export default function TeacherAgentHistoryList({ items }: { items: TeacherAgentHistoryListItem[] }) {
   if (items.length === 0) {
-    return <p className="text-sm text-slate-500">还没有历史记录，先触发一个工作流。</p>;
+    return <p className="text-sm text-slate-500">还没有历史记录，先生成一次结果。</p>;
   }
 
   return (
@@ -28,7 +34,7 @@ export default function TeacherAgentHistoryList({ items }: { items: TeacherAgent
             </Badge>
             <Badge variant="secondary">对象：{item.targetLabel}</Badge>
             <Badge variant={item.result.source === "ai" ? "success" : item.result.source === "mock" ? "info" : "secondary"}>
-              {item.result.source}
+              {getTeacherHistorySourceLabel(item.result.source)}
             </Badge>
           </div>
           <p className="mt-2 text-xs text-slate-500">时间：{buildTeacherAgentTimeLabel(item.result.generatedAt)}</p>

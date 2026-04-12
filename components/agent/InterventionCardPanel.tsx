@@ -4,6 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getInterventionRiskBadgeLabel, type InterventionCard } from "@/lib/agent/intervention-card";
 
+function getInterventionSourceLabel(source: InterventionCard["source"]) {
+  if (source === "ai" || source === "vivo") return "智能生成";
+  if (source === "mock") return "演示结果";
+  return "本地兜底";
+}
+
 export default function InterventionCardPanel({
   card,
   title,
@@ -15,7 +21,7 @@ export default function InterventionCardPanel({
   footer?: ReactNode;
   audience?: "staff" | "parent";
 }) {
-  const displayTitle = title ?? (audience === "parent" ? "今晚行动卡" : "AI 干预卡");
+  const displayTitle = title ?? (audience === "parent" ? "今晚行动卡" : "干预卡");
   const showTechnicalBadges = audience !== "parent";
   const showParticipants = audience !== "parent";
   const summaryTitle = audience === "parent" ? "协同说明" : "会诊摘要";
@@ -30,7 +36,6 @@ export default function InterventionCardPanel({
           {card.consultationMode && audience !== "parent" ? <Badge variant="warning">会诊模式</Badge> : null}
           {showTechnicalBadges ? (
             <>
-              <Badge variant="secondary">对象：{card.targetChildId}</Badge>
               <Badge
                 variant={
                   card.source === "ai" || card.source === "vivo"
@@ -40,9 +45,8 @@ export default function InterventionCardPanel({
                       : "secondary"
                 }
               >
-                {card.source}
+                生成方式：{getInterventionSourceLabel(card.source)}
               </Badge>
-              {card.model ? <Badge variant="secondary">{card.model}</Badge> : null}
             </>
           ) : null}
         </div>

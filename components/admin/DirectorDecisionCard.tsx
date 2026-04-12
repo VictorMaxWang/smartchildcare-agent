@@ -168,9 +168,7 @@ export default function DirectorDecisionCard({
           </div>
 
           <div className="rounded-2xl border border-amber-100 bg-white/85 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">
-              Why High Priority
-            </p>
+            <p className="text-xs font-semibold tracking-[0.24em] text-amber-700">优先处理原因</p>
             <p className="mt-3 whitespace-normal break-words text-sm leading-7 text-slate-700">
               {decision.whyHighPriority}
             </p>
@@ -262,7 +260,7 @@ export default function DirectorDecisionCard({
         <p className="whitespace-normal break-words text-xs text-slate-500">
           生成时间：{decision.generatedAtLabel}
           {decision.statusSource === "dispatch" ? " | 状态已与派单同步" : ""}
-          {hasChildLevelFallbackNotification ? " | 当前以 child 级绑定" : ""}
+          {hasChildLevelFallbackNotification ? " | 当前按儿童维度关联" : ""}
         </p>
 
         <div className="rounded-2xl border border-slate-100 bg-white/90 p-4">
@@ -270,7 +268,7 @@ export default function DirectorDecisionCard({
             <div className="min-w-0 space-y-1">
               <p className="text-sm font-semibold text-slate-900">会诊派单入口</p>
               <p className="whitespace-normal break-words text-sm leading-6 text-slate-600">
-                当前会诊可沉淀为 consultation-scoped notification，并优先绑定 consultationId。
+                当前会诊可以沉淀为一条独立派单，便于后续持续跟进。
               </p>
             </div>
 

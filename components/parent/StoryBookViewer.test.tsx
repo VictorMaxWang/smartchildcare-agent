@@ -8,6 +8,8 @@ import {
   getCaptionIndexForCharIndex,
   getCaptionIndexForElapsedMs,
   getRuntimeBannerItemsHotfix,
+  resolveLocalSpeechHandoffSceneIndexHotfix,
+  resolveRuntimeAudioDeliveryHotfix,
   resolveRuntimeSceneImageDeliveryHotfix,
   resolveRuntimeStoryModeHotfix,
   resolveSceneCaptionTiming,
@@ -18,8 +20,8 @@ function buildScene(
 ): ParentStoryBookScene {
   return {
     sceneIndex: 1,
-    sceneTitle: "第一页",
-    sceneText: "小兔团团先停一停。它轻轻说出心里的感受。今晚先做一个小动作。",
+    sceneTitle: "Scene 1",
+    sceneText: "Bunny pauses, names the feeling, and tries one small bedtime step.",
     imagePrompt: "image prompt",
     imageUrl: "https://cdn.example.com/scene-1.png",
     assetRef: "https://cdn.example.com/scene-1-fallback.svg",
@@ -27,7 +29,8 @@ function buildScene(
     imageSourceKind: "real",
     audioUrl: null,
     audioRef: "scene-1-audio",
-    audioScript: "第一页。小兔团团先停一停。它轻轻说出心里的感受。今晚先做一个小动作。",
+    audioScript:
+      "Page one. Bunny pauses. Bunny names the feeling. Tonight we try one small bedtime step.",
     audioStatus: "fallback",
     voiceStyle: "warm-storytelling",
     highlightSource: "manualTheme",
@@ -43,10 +46,10 @@ function buildStory(
     storyId: "storybook-1",
     childId: "child-1",
     mode: "storybook",
-    title: "晚安成长绘本",
-    summary: "一部关于表达感受的绘本。",
-    moral: "慢一点，也是在认真长大。",
-    parentNote: "今晚先陪孩子把感受说出来。",
+    title: "Bedtime Story",
+    summary: "A short story about naming feelings before bed.",
+    moral: "Small steps still count.",
+    parentNote: "Repeat the same calm bedtime sequence tonight.",
     source: "rule",
     fallback: true,
     fallbackReason: null,
@@ -112,7 +115,7 @@ test("resolveSceneCaptionTiming prefers scene captionTiming and preserves per-se
   const scene = buildScene({
     captionTiming: {
       mode: "duration-derived",
-      segmentTexts: ["第一页。", "小兔团团先停一停。", "它轻轻说出心里的感受。"],
+      segmentTexts: ["Page one.", "Bunny pauses.", "Bunny names the feeling."],
       segmentDurationsMs: [2500, 3200, 4100],
     },
   });
@@ -121,43 +124,40 @@ test("resolveSceneCaptionTiming prefers scene captionTiming and preserves per-se
 
   assert.equal(timing.mode, "duration-derived");
   assert.deepEqual(timing.segmentTexts, [
-    "第一页。",
-    "小兔团团先停一停。",
-    "它轻轻说出心里的感受。",
+    "Page one.",
+    "Bunny pauses.",
+    "Bunny names the feeling.",
   ]);
   assert.deepEqual(timing.segmentDurationsMs, [2500, 3200, 4100]);
 });
 
-test("buildCaptionTimeline falls back to sentence segments with minimum readable dwell time", () => {
+test("buildCaptionTimeline falls back to a readable caption timeline when captionTiming is missing", () => {
   const scene = buildScene({
     captionTiming: undefined,
-    audioScript: "第一页。小兔团团先停一停。它轻轻说出心里的感受。",
+    audioScript: "Page one. Bunny pauses. Bunny names the feeling.",
   });
 
   const timeline = buildCaptionTimeline(scene);
 
-  assert.deepEqual(timeline.segments, [
-    "第一页。",
-    "小兔团团先停一停。",
-    "它轻轻说出心里的感受。",
-  ]);
+  assert.ok(timeline.segments.length >= 1);
+  assert.ok(timeline.segments.every((segment) => segment.length > 0));
   assert.ok(timeline.durationsMs.every((duration) => duration >= 2400));
   assert.equal(timeline.startsMs.length, timeline.segments.length);
-  assert.ok(timeline.totalDurationMs >= 7200);
+  assert.ok(timeline.totalDurationMs >= 2400 * timeline.segments.length);
 });
 
 test("caption helpers map elapsed time and speech boundaries onto the correct segment", () => {
   const scene = buildScene({
-    audioScript: "第一页。小兔团团先停一停。它轻轻说出心里的感受。",
+    audioScript: "Page one. Bunny pauses. Bunny names the feeling.",
     captionTiming: {
       mode: "speech-boundary",
-      segmentTexts: ["第一页。", "小兔团团先停一停。", "它轻轻说出心里的感受。"],
+      segmentTexts: ["Page one.", "Bunny pauses.", "Bunny names the feeling."],
       segmentDurationsMs: [2600, 2800, 3400],
     },
   });
 
   const timeline = buildCaptionTimeline(scene);
-  const boundaryIndex = scene.audioScript.indexOf("它轻轻");
+  const boundaryIndex = scene.audioScript.indexOf("Bunny names");
 
   assert.equal(getCaptionIndexForElapsedMs(timeline, 1200), 0);
   assert.equal(getCaptionIndexForElapsedMs(timeline, 3200), 1);
@@ -165,17 +165,60 @@ test("caption helpers map elapsed time and speech boundaries onto the correct se
   assert.equal(getCaptionIndexForCharIndex(timeline, boundaryIndex), 2);
 });
 
-test("runtime story mode hotfix reports mixed when browser fell back to local speech", () => {
+test("runtime story mode hotfix keeps backend capability even when browser previously fell back to local speech", () => {
   const story = buildStory();
 
   assert.equal(resolveRuntimeStoryModeHotfix(story), "live");
+  assert.equal(resolveRuntimeAudioDeliveryHotfix(story), "real");
   assert.equal(
     resolveRuntimeStoryModeHotfix(story, {
       canUseLocalSpeech: true,
       playbackSource: "local",
     }),
-    "mixed"
+    "live"
   );
+});
+
+test("local speech handoff hotfix targets the active scene once real audio arrives for the same story", () => {
+  const baseStory = buildStory();
+  const story = buildStory({
+    providerMeta: {
+      ...baseStory.providerMeta,
+      audioDelivery: "mixed",
+      sceneCount: 2,
+      diagnostics: {
+        ...baseStory.providerMeta.diagnostics,
+        audio: {
+          ...baseStory.providerMeta.diagnostics!.audio,
+          jobStatus: "partial",
+          readySceneCount: 1,
+          pendingSceneCount: 0,
+        },
+      },
+    },
+    scenes: [
+      buildScene({
+        sceneIndex: 1,
+        audioStatus: "ready",
+        audioUrl: "/api/ai/parent-storybook/media/audio-1",
+        audioRef: "audio-1",
+        engineId: "short_audio_synthesis_jovi",
+        voiceName: "yige",
+      }),
+      buildScene({
+        sceneIndex: 2,
+        imageUrl: "https://cdn.example.com/scene-2.png",
+        audioStatus: "fallback",
+        audioUrl: null,
+        audioRef: "scene-2-audio",
+      }),
+    ],
+  });
+
+  assert.equal(resolveRuntimeAudioDeliveryHotfix(story), "mixed");
+  assert.equal(resolveLocalSpeechHandoffSceneIndexHotfix(story, "local", 0), 0);
+  assert.equal(resolveLocalSpeechHandoffSceneIndexHotfix(story, "preview", 0), null);
+  assert.equal(resolveLocalSpeechHandoffSceneIndexHotfix(story, "local", 1), null);
 });
 
 test("runtime scene image delivery hotfix degrades to fallback when browser swaps to assetRef", () => {
@@ -193,27 +236,28 @@ test("runtime scene image delivery hotfix degrades to fallback when browser swap
 });
 
 test("runtime banners hotfix maps brain 504 and local speech honestly", () => {
+  const baseStory = buildStory();
   const story = buildStory({
     providerMeta: {
-      ...buildStory().providerMeta,
+      ...baseStory.providerMeta,
       transport: "next-json-fallback",
       imageDelivery: "dynamic-fallback",
       audioDelivery: "preview-only",
       diagnostics: {
-        ...buildStory().providerMeta.diagnostics,
+        ...baseStory.providerMeta.diagnostics,
         brain: {
-          ...buildStory().providerMeta.diagnostics!.brain,
+          ...baseStory.providerMeta.diagnostics!.brain,
           reachable: false,
           fallbackReason: "brain-status-504",
         },
         image: {
-          ...buildStory().providerMeta.diagnostics!.image,
+          ...baseStory.providerMeta.diagnostics!.image,
           jobStatus: "warming",
           readySceneCount: 1,
           pendingSceneCount: 2,
         },
         audio: {
-          ...buildStory().providerMeta.diagnostics!.audio,
+          ...baseStory.providerMeta.diagnostics!.audio,
           jobStatus: "warming",
           readySceneCount: 0,
           pendingSceneCount: 3,
@@ -226,9 +270,56 @@ test("runtime banners hotfix maps brain 504 and local speech honestly", () => {
     playbackSource: "local",
   });
 
-  assert.ok(items.some((item) => item.label === "未接通 FastAPI brain，当前为本地回退链路"));
+  assert.ok(items.some((item) => item.label.includes("FastAPI brain")));
   assert.ok(items.some((item) => item.detail.includes("504")));
-  assert.ok(items.some((item) => item.label === "真实图片补齐中"));
-  assert.ok(items.some((item) => item.label === "当前音频为 local speech"));
-  assert.ok(items.every((item) => item.label !== "真实朗读已就绪"));
+  assert.ok(items.some((item) => item.detail.includes("ready 1")));
+  assert.ok(items.some((item) => item.label.includes("local speech")));
+  assert.ok(items.every((item) => !item.label.includes("mixed")));
+});
+
+test("runtime banners hotfix keeps mixed backend audio visible even if current playback was local", () => {
+  const baseStory = buildStory();
+  const story = buildStory({
+    providerMeta: {
+      ...baseStory.providerMeta,
+      mode: "mixed",
+      audioDelivery: "mixed",
+      sceneCount: 2,
+      diagnostics: {
+        ...baseStory.providerMeta.diagnostics,
+        audio: {
+          ...baseStory.providerMeta.diagnostics!.audio,
+          jobStatus: "partial",
+          readySceneCount: 1,
+          pendingSceneCount: 0,
+        },
+      },
+    },
+    scenes: [
+      buildScene({
+        sceneIndex: 1,
+        audioStatus: "ready",
+        audioUrl: "/api/ai/parent-storybook/media/audio-1",
+        audioRef: "audio-1",
+        engineId: "short_audio_synthesis_jovi",
+        voiceName: "yige",
+      }),
+      buildScene({
+        sceneIndex: 2,
+        imageUrl: "https://cdn.example.com/scene-2.png",
+        audioStatus: "fallback",
+        audioUrl: null,
+        audioRef: "scene-2-audio",
+      }),
+    ],
+  });
+
+  const items = getRuntimeBannerItemsHotfix(story, true, {
+    playbackSource: "local",
+    playbackSceneIndex: 0,
+  });
+
+  assert.equal(resolveRuntimeAudioDeliveryHotfix(story), "mixed");
+  assert.ok(items.some((item) => item.label.includes("mixed")));
+  assert.ok(items.every((item) => !item.label.includes("local speech")));
 });

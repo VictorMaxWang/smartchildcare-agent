@@ -34,8 +34,8 @@ function PanelActions({
   return (
     <div className="flex flex-wrap gap-2 sm:justify-end">
       <Badge variant="info">{windowDays} 日窗口</Badge>
-      <Badge variant="outline">主源 {formatAdminQualitySource(source)}</Badge>
-      {fallback ? <Badge variant="warning">Fallback</Badge> : null}
+      <Badge variant="outline">主数据源 {formatAdminQualitySource(source)}</Badge>
+      {fallback ? <Badge variant="warning">本地兜底</Badge> : null}
       {warningCount > 0 ? <Badge variant="outline">{warningCount} 条说明</Badge> : null}
     </div>
   );
@@ -71,8 +71,8 @@ function MetricCard({ metric }: { metric: AdminQualityMetric }) {
 
         {metric.fallback || metric.source.demoOnly || metric.warnings.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {metric.fallback ? <Badge variant="warning">Fallback</Badge> : null}
-            {metric.source.demoOnly ? <Badge variant="outline">Demo only</Badge> : null}
+            {metric.fallback ? <Badge variant="warning">本地兜底</Badge> : null}
+            {metric.source.demoOnly ? <Badge variant="outline">演示数据</Badge> : null}
             {metric.warnings.length > 0 ? (
               <Badge variant="outline">{metric.warnings.length} 条说明</Badge>
             ) : null}
@@ -161,7 +161,7 @@ function ErrorState({ error }: { error: string | null }) {
         <div className="space-y-2 text-sm leading-6">
           <p className="font-semibold text-slate-900">质量指标暂不可用</p>
           <p className="text-slate-600">
-            当前不会影响上方风险优先区和园长首页主流程；待 backend 指标接口恢复后，这里会继续展示治理第二视角。
+            当前不会影响上方风险优先区和园长首页主流程；待数据接口恢复后，这里会继续展示治理第二视角。
           </p>
           {error ? <p className="text-slate-500">原因：{error}</p> : null}
         </div>

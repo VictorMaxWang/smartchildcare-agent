@@ -86,21 +86,21 @@ function buildStatusHint(params: {
     case "uploading":
       return {
         label: "上传中",
-        hint: "正在把音频发送到教师端语音上传接口。",
+        hint: "正在上传语音并整理为可继续处理的草稿。",
       };
     case "processing":
       return {
         label: "识别中",
         hint:
           params.fallbackHint ??
-          "正在把转写结果接到 T4 结构化理解链路，生成 draft items 和 warnings。",
+          "正在整理语音内容，生成可确认的草稿项和提醒。",
       };
     case "success":
       return {
-        label: params.fallbackHint ? "已进入演示回退" : "上传完成",
+        label: params.fallbackHint ? "已生成演示结果" : "上传完成",
         hint:
           params.fallbackHint ??
-          "可以把这条语音保存为教师草稿，或继续前往下一条工作流。",
+          "可以把这条语音保存为教师草稿，或继续进入下一步处理。",
       };
     case "error":
       if (
@@ -177,13 +177,13 @@ function buildFallbackNotice(params: {
   understandingFallback: boolean;
 }) {
   if (params.uploadSource === "mock" && params.understandingFallback) {
-    return "当前上传与结构化理解都已降级为 best effort fallback，适合比赛演示与草稿，不代表 live upstream 已验收。";
+    return "当前上传与理解均采用演示兜底结果，适合演示和草稿整理，请以正式数据为准。";
   }
   if (params.uploadSource === "mock") {
-    return "当前上传链路已降级为本地 best effort fallback，适合比赛演示与草稿。";
+    return "当前上传采用本地演示结果，适合演示和草稿整理。";
   }
   if (params.understandingFallback) {
-    return "当前结构化理解已降级为本地 rule fallback，结果适合比赛演示与草稿。";
+    return "当前理解结果采用本地兜底整理，适合演示和草稿整理。";
   }
   return null;
 }

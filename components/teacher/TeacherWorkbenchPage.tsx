@@ -211,7 +211,7 @@ export default function TeacherWorkbenchPage() {
 
             <AssistantEntryCard
               title="高风险儿童一键会诊"
-              description="适合比赛 demo 的主路径：自动带入晨检异常、待复查、近 7 天观察和家长反馈，直接输出园内动作、家庭任务和园长决策卡。"
+              description="适合录屏展示的主路径：自动带入晨检异常、待复查、近 7 天观察和家长反馈，直接输出园内动作、家庭任务和园长决策卡。"
               href="/teacher/high-risk-consultation"
               buttonLabel="发起高风险会诊"
             >

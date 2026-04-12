@@ -11,6 +11,12 @@ import {
 } from "@/lib/teacher-copilot/normalize";
 import type { TeacherCopilotSectionId } from "@/lib/teacher-copilot/types";
 
+function getTeacherResultSourceLabel(source: string) {
+  if (source === "ai" || source === "vivo") return "智能生成";
+  if (source === "mock") return "演示结果";
+  return "本地兜底";
+}
+
 export default function TeacherAgentResultCard({ result }: { result: TeacherAgentResult }) {
   const copilotPayload = normalizeTeacherCopilotFromResult(result);
   let defaultOpenSection: TeacherCopilotSectionId | null = null;
@@ -44,9 +50,8 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
         {result.consultationMode ? <Badge variant="warning">会诊模式</Badge> : null}
         <Badge variant="secondary">对象：{result.targetLabel}</Badge>
         <Badge variant={result.source === "ai" ? "success" : result.source === "mock" ? "info" : "secondary"}>
-          来源：{result.source}
+          生成方式：{getTeacherResultSourceLabel(result.source)}
         </Badge>
-        {result.model ? <Badge variant="secondary">{result.model}</Badge> : null}
       </div>
 
       <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
@@ -58,7 +63,7 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
 
       {result.consultation ? (
         <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-4">
-          <p className="text-sm font-semibold text-slate-900">高风险多 Agent 会诊</p>
+          <p className="text-sm font-semibold text-slate-900">高风险会诊结论</p>
           <p className="mt-2 text-sm leading-6 text-slate-700">{result.consultation.summary}</p>
           <p className="mt-2 text-sm leading-6 text-slate-600">{result.consultation.coordinatorSummary.finalConclusion}</p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -189,7 +194,7 @@ export default function TeacherAgentResultCard({ result }: { result: TeacherAgen
       {result.interventionCard ? (
         <InterventionCardPanel
           card={result.interventionCard}
-          title="共享 AI 干预卡"
+          title="干预卡预览"
           footer={
             <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
               <p className="text-sm font-semibold text-slate-900">教师后续跟进草稿</p>

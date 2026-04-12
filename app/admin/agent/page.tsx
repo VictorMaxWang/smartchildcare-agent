@@ -62,6 +62,13 @@ function EventStatusBadge({ status }: { status: AdminDispatchEvent["status"] }) 
   return <Badge variant="outline">待派发</Badge>;
 }
 
+function getResultSourceLabel(source: string) {
+  if (source === "ai" || source === "vivo") return "智能生成";
+  if (source === "mock") return "演示结果";
+  if (source === "fallback") return "本地兜底";
+  return "已整理结果";
+}
+
 function buildHistoryMessages(history: HistoryEntry[]) {
   const messages: AiFollowUpMessage[] = [];
 
@@ -119,14 +126,14 @@ export default function AdminAgentPage() {
     ? {
         workflow: "weekly-ops-report" as const,
         label: "本周运营周报",
-        title: "园长周报 Agent 工作区",
+        title: "园长周报工作区",
         description: "先收口本周结论，再安排下周动作、责任人和回到日常优先级的承接路径。",
       }
     : {
         workflow: "daily-priority" as const,
         label: "今日机构优先事项",
         title: "从识别问题，到生成动作，再到派单闭环",
-        description: "园长 Agent 会基于全园近 7 天数据判断优先级、给出责任人和时限，并把动作沉淀成可持续追踪的通知事件。",
+        description: "园长 AI 助手会基于全园近 7 天数据判断优先级、给出责任人和时限，并把动作沉淀成可持续追踪的通知事件。",
       };
   const {
     currentUser,
@@ -238,7 +245,7 @@ export default function AdminAgentPage() {
 
       if (!response.ok) {
         const errorMessage =
-          isRecord(data) && typeof data.error === "string" ? data.error : "园长 Agent 请求失败";
+          isRecord(data) && typeof data.error === "string" ? data.error : "园长 AI 助手请求失败";
         setRequestError(errorMessage);
         setResult(null);
         return;
@@ -249,7 +256,7 @@ export default function AdminAgentPage() {
         setRequestError(
           workflow === "weekly-ops-report"
             ? "周报模式返回结构不完整，请重试或切回日常模式。"
-            : "园长 Agent 返回结构异常，请稍后重试。"
+            : "园长 AI 助手返回结构异常，请稍后重试。"
         );
         return;
       }
@@ -274,7 +281,7 @@ export default function AdminAgentPage() {
       ]);
     } catch (error) {
       console.error("[ADMIN_AGENT] Failed to run workflow", error);
-      setRequestError("园长 Agent 请求失败");
+      setRequestError("园长 AI 助手请求失败");
     } finally {
       setLoading(false);
     }
@@ -375,7 +382,7 @@ export default function AdminAgentPage() {
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <EmptyState
           icon={<BrainCircuit className="h-6 w-6" />}
-          title="当前没有可用于园长 Agent 的机构数据"
+          title="当前没有可用于园长 AI 助手的机构数据"
           description="请先从园长首页确认机构数据是否已经加载。"
         />
       </div>
@@ -393,8 +400,8 @@ export default function AdminAgentPage() {
   if (isWeeklyMode) {
     return (
       <RolePageShell
-        badge={`机构运营 AI 助手 · ${INSTITUTION_NAME}`}
-        title="园长周报 Agent 工作区"
+        badge={`园长 AI 助手 · ${INSTITUTION_NAME}`}
+        title="园长周报工作区"
         description="只保留本周总结、周报追问和周报落地动作，不再混入日常优先级、历史记录和通知侧栏。"
         actions={<InlineLinkButton href="/admin" label="返回园长首页" />}
       >
@@ -415,7 +422,7 @@ export default function AdminAgentPage() {
                     <div className="min-w-0">
                       <p className="text-lg font-semibold text-slate-900">本周运营周报</p>
                       <p className="mt-2 max-w-3xl whitespace-normal break-words text-sm leading-6 text-slate-600">
-                        当前页面只保留周报总结、周报追问、下周动作和必要的返回日常入口。机构上下文、重点会诊板、历史记录、通知列表和 raw/mock/dev 元信息都不会同屏暴露。
+                        当前页面只保留周报总结、周报追问、下周动作和必要的返回日常入口，方便园长直接讲清本周闭环与下周承接。
                       </p>
                     </div>
                     {requestError ? (
@@ -454,7 +461,7 @@ export default function AdminAgentPage() {
 
               <SectionCard
                 title="本周运营周报"
-                description="周报模式下只保留 summary、continuity、highlights 与风险承接，不显示 source、model、fallback 或 disclaimer。"
+                description="周报模式下只保留本周结论、延续提醒、重点摘要与风险承接，不再展示技术元信息。"
                 actions={<Badge variant="info">单一周报工作区</Badge>}
               >
                 {loading && !displayResult ? (
@@ -584,7 +591,7 @@ export default function AdminAgentPage() {
 
               <SectionCard
                 title="周报落地动作"
-                description="把周报结论直接转成下周动作、责任人和派单入口。notification backend 不可用时只保留只读动作摘要。"
+                description="把周报结论直接转成下周动作、责任人和派单入口；如派单暂不可用，则先展示只读动作摘要。"
                 actions={
                   <Badge variant={dispatchAvailable ? "success" : "outline"}>
                     {safeDispatchStatusMessage}
@@ -686,7 +693,7 @@ export default function AdminAgentPage() {
                 </div>
               </SectionCard>
 
-              <SectionCard title="派单状态" description="只显示周报动作是否可继续生成派单，不再暴露原始 backend 错误。">
+              <SectionCard title="派单状态" description="这里只显示周报动作是否还能继续派单，不展示底层错误细节。">
                 <div className="space-y-3 text-sm leading-6 text-slate-600">
                   <Badge variant={dispatchAvailable ? "success" : "outline"}>
                     {safeDispatchStatusMessage}
@@ -695,8 +702,8 @@ export default function AdminAgentPage() {
                   <p>当前已有通知事件：{notificationEvents.length}</p>
                   <p>
                     {dispatchAvailable
-                      ? "notification backend 可用时，周报动作可以继续生成真实派单。"
-                      : "notification backend 不可用时，周报页面只保留动作摘要与责任人，不再显示可点击派单入口。"}
+                      ? "当前可以继续把周报动作生成正式派单。"
+                      : "当前暂不支持继续派单，周报页面会先保留动作摘要与责任人。"}
                   </p>
                 </div>
               </SectionCard>
@@ -709,7 +716,7 @@ export default function AdminAgentPage() {
 
   return (
     <RolePageShell
-      badge={`机构运营 AI 助手 · ${INSTITUTION_NAME}`}
+      badge={`园长 AI 助手 · ${INSTITUTION_NAME}`}
       title={modeConfig.title}
       description={modeConfig.description}
       actions={
@@ -734,9 +741,7 @@ export default function AdminAgentPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="info">周报模式</Badge>
                       <Badge variant="outline">{INSTITUTION_NAME}</Badge>
-                      <Badge variant="outline" className="whitespace-normal text-left leading-5">
-                        入口稳定地址：/admin/agent?action=weekly-report
-                      </Badge>
+                      <Badge variant="outline">周报承接入口</Badge>
                     </div>
                     <div className="min-w-0">
                       <p className="text-lg font-semibold text-slate-900">本周运营周报工作区</p>
@@ -781,7 +786,7 @@ export default function AdminAgentPage() {
 
             {isWeeklyMode ? (
               <SectionCard
-                title="周报 Agent 工作区"
+                title="周报工作区"
                 description="周报模式下，先聚焦本周总结、下周动作和风险承接，再决定是否继续追问。"
                 actions={<Badge variant="info">最小稳定承接</Badge>}
               >
@@ -876,7 +881,7 @@ export default function AdminAgentPage() {
 
             <SectionCard
               title="机构上下文"
-              description="这里固定展示 Agent 判断优先级时使用的机构级上下文。"
+              description="这里固定展示智能判断优先级时使用的机构级上下文。"
             >
               {scope ? (
                 <div className="grid gap-4 xl:grid-cols-2">
@@ -907,8 +912,8 @@ export default function AdminAgentPage() {
 
             <SectionCard
               title="今日重点会诊 / 高风险优先事项"
-              description="把高风险会诊直接抬到园长 Agent 顶部，先看谁最值得今天推进，再继续追问和派单。"
-              actions={<Badge variant="warning">会诊驱动</Badge>}
+              description="把高风险会诊直接抬到园长 AI 助手顶部，先看谁最值得今天推进，再继续追问和派单。"
+              actions={<Badge variant="warning">重点会诊</Badge>}
             >
               <RiskPriorityBoard
                 items={consultationPriorityItems}
@@ -922,16 +927,16 @@ export default function AdminAgentPage() {
                 dispatchStatusMessage={dispatchStatusMessage ?? "通知派单暂不可用"}
                 emptyTitle={
                   feedStatus === "unavailable"
-                    ? "高风险会诊 feed 暂时不可用"
+                    ? "重点会诊数据暂时不可用"
                     : feedStatus === "ready"
-                      ? "当前 backend feed 暂无升级到园长侧的重点会诊"
+                      ? "当前还没有升级到园长侧的重点会诊"
                       : undefined
                 }
                 emptyDescription={
                   feedStatus === "unavailable"
-                    ? "页面会在 transport 失败时回退到本地 consultation；如果这里仍为空，说明本地也没有可展示的高风险会诊。"
+                    ? "系统会先展示本地已有结论；如果这里仍为空，说明当前没有可展示的重点会诊。"
                     : feedStatus === "ready"
-                      ? "backend feed 已接管园长 Agent 顶部会诊区；当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
+                      ? "当教师端产生新的高风险会诊后，这里会持续显示风险等级、决策卡和关键依据。"
                       : undefined
                 }
               />
@@ -1032,7 +1037,7 @@ export default function AdminAgentPage() {
               description={
                 isWeeklyMode
                   ? "周报模式下支持继续追问，也保留回到日常优先级的稳定入口。"
-                  : "用园长常见问题直接驱动 follow-up，输出仍保持结构化结果。"
+                  : "用园长常见问题直接继续追问，结果仍保持结构化呈现。"
               }
               promptButtons={
                 <>
@@ -1106,7 +1111,7 @@ export default function AdminAgentPage() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500">等待 Agent 返回结构化结果。</p>
+                  <p className="text-sm text-slate-500">等待 AI 助手返回结构化结果。</p>
                 )}
               </div>
             </AgentWorkspaceCard>
@@ -1180,11 +1185,11 @@ export default function AdminAgentPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">等待 Agent 生成行动建议。</p>
+                <p className="text-sm text-slate-500">等待 AI 助手生成行动建议。</p>
               )}
             </SectionCard>
 
-            <SectionCard title="历史记录" description="保留本次演示过程中已经生成过的机构级回答。">
+            <SectionCard title="历史记录" description="保留本次会话中已经生成过的机构级回答。">
               <div className="space-y-3">
                 {history.length > 0 ? (
                   history.map((entry) => (
@@ -1196,7 +1201,7 @@ export default function AdminAgentPage() {
                             {entry.result.summary}
                           </p>
                         </div>
-                        <Badge variant="outline">{entry.result.source}</Badge>
+                        <Badge variant="outline">{getResultSourceLabel(entry.result.source)}</Badge>
                       </div>
                     </div>
                   ))
@@ -1209,7 +1214,7 @@ export default function AdminAgentPage() {
         }
         aside={
           <div className={isWeeklyMode ? "grid gap-6 xl:grid-cols-2" : "space-y-6"}>
-            <SectionCard title="当前状态" description="园长 Agent 当前聚焦的机构级结果摘要。">
+            <SectionCard title="当前状态" description="园长 AI 助手当前聚焦的机构级结果摘要。">
               {displayResult ? (
                 <div className="space-y-3 text-sm text-slate-600">
                   <p>当前标题：{displayResult.title}</p>
@@ -1248,7 +1253,7 @@ export default function AdminAgentPage() {
 
             <SectionCard
               title="通知派单"
-              description="这里显示已沉淀的通知事件；当 backend 不可用时保留只读态，不提供状态更新入口。"
+              description="这里显示已沉淀的通知事件；当派单暂不可用时保留只读态，不提供状态更新入口。"
               actions={
                 <Badge variant={dispatchAvailable ? "success" : "outline"}>
                   {dispatchAvailable ? "支持派单" : safeDispatchStatusMessage}

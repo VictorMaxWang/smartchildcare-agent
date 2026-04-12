@@ -457,8 +457,8 @@ export default function TeacherAgentPage() {
           selectedStructuredDraftSource.payload.transcript ||
           selectedStructuredDraftSource.payload.t5Seed.transcript,
         childName: selectedStructuredDraftSource.childName,
-        sourceDraftLabel: `${selectedStructuredDraftSource.draft.draftType.toUpperCase()} 草稿`,
-        sourceModeLabel: "已结构化 Seed",
+        sourceDraftLabel: `${selectedStructuredDraftSource.draft.draftType === "ocr" ? "图片" : "语音"}草稿`,
+        sourceModeLabel: "已完成结构化整理",
         sourceSyncStatusLabel: getDraftSyncStatusLabel(
           selectedStructuredDraftSource.draft.syncStatus
         ),
@@ -478,8 +478,8 @@ export default function TeacherAgentPage() {
         childName:
           visibleChildren.find((child) => child.id === fallbackTeacherSourceDraft.childId)?.name ??
           activeChildContext?.child.name,
-        sourceDraftLabel: `${fallbackTeacherSourceDraft.draftType.toUpperCase()} 草稿`,
-        sourceModeLabel: "本地 Fallback Understanding",
+        sourceDraftLabel: `${fallbackTeacherSourceDraft.draftType === "ocr" ? "图片" : "语音"}草稿`,
+        sourceModeLabel: "本地兜底整理结果",
         sourceSyncStatusLabel: getDraftSyncStatusLabel(
           fallbackTeacherSourceDraft.syncStatus
         ),
@@ -506,19 +506,19 @@ export default function TeacherAgentPage() {
       {
         id: "health-observation",
         label: "健康观察",
-        hint: "HEALTH + DIET",
+        hint: "健康 + 饮食",
         transcript: `${childName} 今天午睡前体温 37.6 度，精神一般，喝水偏少，老师先记成重点观察，离园前再复查一次。`,
       },
       {
         id: "emotion-soothing",
         label: "情绪安抚",
-        hint: "EMOTION + SLEEP",
+        hint: "情绪 + 睡眠",
         transcript: `${childName} 今天入园后一直哭闹，老师安抚后好一些，但午睡前还需要陪伴，先整理成情绪观察草稿。`,
       },
       {
         id: "leave-follow-up",
         label: "离园请假",
-        hint: "LEAVE + HEALTH",
+        hint: "离园 + 健康",
         transcript: `${childName} 下午因为咳嗽提前离园，家长表示今晚会在家观察，明早再反馈是否返园。`,
       },
     ];
@@ -616,7 +616,7 @@ export default function TeacherAgentPage() {
         : undefined;
 
     if (nextScope === "child" && !targetChildId) {
-      setError("当前没有可用于教师 Agent 的幼儿数据。");
+      setError("当前没有可用于教师 AI 助手的幼儿数据。");
       return;
     }
 
@@ -652,7 +652,7 @@ export default function TeacherAgentPage() {
 
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "教师 Agent 工作流生成失败。");
+        throw new Error(body?.error ?? "教师 AI 助手生成结果失败。");
       }
 
       const result = (await response.json()) as TeacherAgentResult;
@@ -690,7 +690,7 @@ export default function TeacherAgentPage() {
         ]);
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "教师 Agent 工作流生成失败。");
+      setError(requestError instanceof Error ? requestError.message : "教师 AI 助手生成结果失败。");
     } finally {
       setIsLoading(false);
     }
@@ -782,8 +782,8 @@ export default function TeacherAgentPage() {
   return (
     <RolePageShell
       badge={`教师 AI 助手 · ${currentUser.className ?? "当前班级"}`}
-      title="把班级数据转成可执行的教师工作流，而不是静态演示回复"
-      description="这一轮教师 Agent 直接围绕班级上下文、单个儿童上下文和三个核心工作流展开：家长沟通建议、今日跟进行动、本周观察总结。"
+      title="把班级数据转成可执行的教师处理建议"
+      description="这一页会围绕班级上下文、单个儿童上下文和三个核心任务展开：家长沟通建议、今日跟进行动、本周观察总结。"
       actions={
         <>
           <InlineLinkButton href="/teacher" label="返回教师工作台" />
@@ -956,7 +956,7 @@ export default function TeacherAgentPage() {
 
             <SectionCard
               title="草稿确认流"
-              description="先把 understanding 产出的 draft_items 变成逐条确认卡片，再通过 persist adapter 回写到同一个 mobile draft。"
+              description="先把识别出的草稿项整理成逐条确认卡片，再统一写回同一条教师草稿。"
             >
               {teacherVoiceSourceDrafts.length > 0 ? (
                 <div className="mb-4 space-y-3">
@@ -1062,11 +1062,11 @@ export default function TeacherAgentPage() {
                   <TeacherAgentResultCard result={currentResult} />
                 ) : (
                   <p className="text-sm text-slate-500">
-                    点击上方任一快捷操作，教师 Agent 会基于当前班级或儿童上下文生成结构化结果。
+                    点击上方任一快捷操作，教师 AI 助手会基于当前班级或儿童上下文生成结构化结果。
                   </p>
                 )}
 
-                {isLoading ? <p className="mt-4 text-sm text-slate-500">教师 Agent 正在编排工作流，请稍候…</p> : null}
+                {isLoading ? <p className="mt-4 text-sm text-slate-500">教师 AI 助手正在整理结果，请稍候…</p> : null}
               </div>
             </AgentWorkspaceCard>
 
@@ -1113,7 +1113,7 @@ export default function TeacherAgentPage() {
               </div>
             </SectionCard>
 
-            <SectionCard title="推荐演示顺序" description="比赛 demo 可以直接沿这条顺序演示。">
+            <SectionCard title="推荐展示顺序" description="录屏时可以直接沿这条顺序展示。">
               <ol className="space-y-3 text-sm text-slate-600">
                 <li className="flex items-center gap-3">
                   <Sparkles className="h-4 w-4 text-amber-500" />

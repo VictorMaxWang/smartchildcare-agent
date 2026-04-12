@@ -34,7 +34,7 @@ function getStatusCopy(status: BrowserTtsStatus) {
 
 export default function ParentSpeakButton({
   text,
-  label = "\u6d4f\u89c8\u5668\u64ad\u62a5",
+  label = "读给我听",
   careMode = false,
   className,
   variant = "outline",

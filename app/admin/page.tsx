@@ -197,7 +197,7 @@ export default function AdminHomePage() {
       description="首页保留今日优先级、重点风险、待处理事项和周报预览，帮助园长快速进入决策和派单闭环。"
       actions={
         <>
-          <InlineLinkButton href="/admin/agent" label="进入园长 Agent" variant="premium" />
+          <InlineLinkButton href="/admin/agent" label="进入园长 AI 助手" variant="premium" />
           <InlineLinkButton href="/admin/agent?action=weekly-report" label="生成本周运营周报" />
         </>
       }
@@ -243,16 +243,16 @@ export default function AdminHomePage() {
                 dispatchStatusMessage={dispatchStatusMessage}
                 emptyTitle={
                   feedStatus === "unavailable"
-                    ? "高风险会诊 feed 暂时不可用"
+                    ? "重点会诊数据暂时不可用"
                     : feedStatus === "ready"
-                      ? "当前 backend feed 暂无升级到园长侧的重点会诊"
+                      ? "当前还没有需要升级到园长侧的重点会诊"
                       : undefined
                 }
                 emptyDescription={
                   feedStatus === "unavailable"
-                    ? "页面会在 transport 失败时回退到本地 consultation 视图。"
+                    ? "系统会先展示本地已有结论，待机构数据恢复后自动更新。"
                     : feedStatus === "ready"
-                      ? "backend feed 已接管园长会诊区，当教师端产生新的高风险会诊后，这里会稳定显示风险等级、决策卡和 explainability 摘要。"
+                      ? "当教师端产生新的重点会诊后，这里会持续展示风险等级、决策结论和关键依据。"
                       : undefined
                 }
               />
@@ -338,7 +338,7 @@ export default function AdminHomePage() {
 
             <SectionCard
               title="待处理事项与派单"
-              description="整改建议与通知派单汇总在一起，方便后续直接进入 Agent 推动作业闭环。"
+              description="整改建议与通知派单汇总在一起，方便后续直接进入 AI 助手推动作业闭环。"
               actions={<Badge variant={dispatchAvailable ? "success" : "outline"}>{dispatchStatusMessage}</Badge>}
             >
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -384,7 +384,7 @@ export default function AdminHomePage() {
         aside={
           <div className="space-y-6">
             <AssistantEntryCard
-              title="进入园长 Agent"
+              title="进入园长 AI 助手"
               description="把机构上下文、优先级排序、快捷追问和派单动作合并到一个操作入口。"
               href="/admin/agent"
               buttonLabel="进入机构运营 AI 助手"
@@ -422,7 +422,7 @@ export default function AdminHomePage() {
                 </li>
                 <li className="flex items-center gap-3">
                   <Workflow className="h-4 w-4 text-indigo-500" />
-                  最后进入 Agent 生成动作建议并沉淀派单。
+                  最后进入 AI 助手生成动作建议并沉淀派单。
                 </li>
               </ol>
             </SectionCard>

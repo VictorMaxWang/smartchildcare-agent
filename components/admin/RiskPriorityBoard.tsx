@@ -45,7 +45,7 @@ export default function RiskPriorityBoard({
   const effectiveDispatchAvailable = notificationError ? false : dispatchAvailable;
   const effectiveDispatchStatusMessage =
     dispatchStatusMessage ??
-    (notificationError ? "Dispatch unavailable" : effectiveDispatchAvailable ? "Dispatch available" : "Dispatch unavailable");
+    (notificationError ? "派单暂不可用" : effectiveDispatchAvailable ? "可继续派单" : "派单暂不可用");
 
   if (items.length === 0) {
     return (
@@ -60,16 +60,16 @@ export default function RiskPriorityBoard({
             <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
             <div className="space-y-2">
               <p className="font-semibold text-slate-900">
-                {isLoading ? "Loading consultation feed" : emptyTitle ?? "No priority consultation yet"}
+                {isLoading ? "正在读取重点会诊" : emptyTitle ?? "当前还没有需要优先处理的会诊"}
               </p>
               <p className="leading-6">
                 {isLoading
-                  ? "Reading backend feed. If transport is unavailable, the page falls back to local consultation summary."
-                  : emptyDescription ?? "Once teachers create high-priority consultations, they will appear here automatically."}
+                  ? "系统正在同步重点会诊；如机构数据暂不可用，这里会先展示本地已有结论。"
+                  : emptyDescription ?? "当教师端产生新的重点会诊后，这里会自动更新。"}
               </p>
               {!effectiveDispatchAvailable ? (
                 <p className="text-sm leading-6 text-slate-500">
-                  {effectiveDispatchStatusMessage}, read-only mode only.
+                  {effectiveDispatchStatusMessage}，当前先展示只读建议。
                 </p>
               ) : null}
             </div>
@@ -78,7 +78,7 @@ export default function RiskPriorityBoard({
           {effectiveDispatchAvailable ? (
             <Button asChild variant="outline" className="min-h-11 rounded-xl md:self-start">
               <Link href={emptyHref} className="gap-2">
-                Go to consultation entry
+                前往会诊入口
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
@@ -91,10 +91,10 @@ export default function RiskPriorityBoard({
   return (
     <div className={cn("space-y-4", className)}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="warning">Admin priority board</Badge>
+        <Badge variant="warning">重点会诊决策区</Badge>
         {sourceBadgeLabel ? <Badge variant={sourceBadgeVariant}>{sourceBadgeLabel}</Badge> : null}
-        <Badge variant="outline">Showing {items.length} consultations</Badge>
-        <Badge variant="info">Sorted by risk, status, and time</Badge>
+        <Badge variant="outline">共 {items.length} 条会诊</Badge>
+        <Badge variant="info">按风险、状态与时间排序</Badge>
         <Badge variant={effectiveDispatchAvailable ? "success" : "outline"}>{effectiveDispatchStatusMessage}</Badge>
       </div>
 

@@ -109,7 +109,7 @@ function getPrimaryStatusBadge(item: TeacherDraftUiItem) {
   }
 
   if (item.status === "confirmed" && item.persistStatus === "local_only") {
-    return { label: "已确认（仅本地 fallback）", variant: "warning" as const };
+    return { label: "已确认（暂存本地）", variant: "warning" as const };
   }
 
   return {

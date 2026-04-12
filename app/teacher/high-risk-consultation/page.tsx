@@ -116,7 +116,7 @@ function ConsultationInputCard({
   }, [className, draftId, imageAttachmentName, imageNote, saveMobileDraft, selectedChildName, teacherNote, voiceAttachmentName, voiceNote]);
 
   return (
-    <SectionCard title="2. 录入教师补充" description="会诊流会直接把这些内容与权威 memory context 合并。">
+    <SectionCard title="2. 录入教师补充" description="会诊流程会直接结合这些补充信息与已有儿童资料一起判断。">
       <div className="space-y-4">
         <Textarea value={teacherNote} onChange={(event) => setTeacherNote(event.target.value)} placeholder="例如：午睡前反复抓耳，离园前情绪仍不稳定，希望生成园内动作、今夜家庭任务和 48 小时复查点。" className="min-h-28 rounded-3xl bg-white" />
         <div className="grid gap-4 lg:grid-cols-2">
@@ -197,7 +197,7 @@ export default function TeacherHighRiskConsultationPage() {
   const [streamMessage, setStreamMessage] = useState<string>(() =>
     routeIntent === "start_consultation"
       ? "已从统一入口定位到高风险会诊，可直接补充说明后开始。"
-      : "点击右侧按钮启动流式会诊"
+      : "点击右侧按钮开始会诊"
   );
   const [streamError, setStreamError] = useState<string | null>(null);
   const [stageStatuses, setStageStatuses] = useState<Partial<Record<ConsultationStageKey, ConsultationStageStatusEvent>>>({});
@@ -438,7 +438,7 @@ export default function TeacherHighRiskConsultationPage() {
           if (!isRenderableConsultationApiResult(rawResult)) {
             const reason = describeConsultationResultIssues(rawResult);
             setInvalidResultReason(reason);
-            setStreamMessage(reason || "会诊已结束，但 done.result 缺少关键字段");
+            setStreamMessage(reason || "会诊已结束，但返回结果还不完整。");
             return;
           }
 
@@ -470,8 +470,8 @@ export default function TeacherHighRiskConsultationPage() {
         setStreamEndedUnexpectedly(true);
         setStreamMessage(
           receivedAnyEventRef.current
-            ? "SSE 提前结束，已保留当前阶段内容，便于继续联调排查。"
-            : "会诊流已结束，但没有返回可用事件。"
+            ? "会诊过程提前结束，当前阶段内容已保留，方便继续查看。"
+            : "会诊已结束，但没有返回可展示内容。"
         );
       }
     } catch (error) {
@@ -481,7 +481,7 @@ export default function TeacherHighRiskConsultationPage() {
       const message = error instanceof Error ? error.message : "会诊流请求失败";
       if (receivedAnyEventRef.current && !receivedDoneRef.current) {
         setStreamEndedUnexpectedly(true);
-        setStreamMessage(`SSE interrupted after partial trace. Kept received steps for debugging. ${message}`);
+        setStreamMessage(`会诊中途结束，已保留当前阶段内容。${message}`);
         return;
       }
 
@@ -494,10 +494,10 @@ export default function TeacherHighRiskConsultationPage() {
   const traceHeaderActions = (
     <div className="grid grid-cols-2 gap-2 sm:flex">
       <Button asChild variant={traceMode === "demo" ? "premium" : "outline"} size="sm" className="rounded-full">
-        <Link href="/teacher/high-risk-consultation">演示态</Link>
+        <Link href="/teacher/high-risk-consultation">常规展示</Link>
       </Button>
       <Button asChild variant={traceMode === "debug" ? "premium" : "outline"} size="sm" className="rounded-full">
-        <Link href="/teacher/high-risk-consultation?trace=debug">调试态</Link>
+        <Link href="/teacher/high-risk-consultation?trace=debug">详细查看</Link>
       </Button>
     </div>
   );
@@ -603,7 +603,7 @@ export default function TeacherHighRiskConsultationPage() {
 
             <SectionCard
               title="3. 流式会诊展示"
-              description="这里是比赛录屏最关键的一段。"
+              description="这里会按阶段展示会诊过程，适合老师讲解与录屏。"
               actions={activeStage ? <Badge variant="info">{getConsultationStageLabel(activeStage)}</Badge> : <Badge variant="outline">待启动</Badge>}
             >
               <div className="space-y-4">
@@ -614,14 +614,12 @@ export default function TeacherHighRiskConsultationPage() {
 
             {result ? (
               <>
-                <SectionCard title="4. 最终会诊结论" description="最终仍保留原有结果结构，方便现有状态仓库复用。">
+                <SectionCard title="4. 最终会诊结论" description="汇总本次会诊结论，方便老师直接确认并继续跟进。">
                   <div className="space-y-4">
                     <div className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-5">
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant="warning">CoordinatorAgent</Badge>
-                        <Badge variant="secondary">{result.source}</Badge>
+                        <Badge variant="warning">会诊结论</Badge>
                         <Badge variant="secondary">{buildConsultationResultBadge(result)}</Badge>
-                        {result.model ? <Badge variant="secondary">{result.model}</Badge> : null}
                       </div>
                       <p className="mt-3 text-lg font-semibold text-slate-900">{result.summary}</p>
                       <p className="mt-3 text-sm leading-7 text-slate-600">{result.coordinatorSummary.finalConclusion}</p>
@@ -695,17 +693,17 @@ export default function TeacherHighRiskConsultationPage() {
                 <li className="flex items-center gap-3"><CheckCircle2 className="h-4 w-4 text-emerald-500" />最后落到园内、家庭和 48 小时复查卡</li>
               </ol>
             </SectionCard>
-            <SectionCard title="本页预埋能力" description="演示态优先，线上可继续接真实能力。">
+            <SectionCard title="本页说明" description="优先展示老师看得懂、讲得清的会诊过程。">
               <div className="space-y-3 text-sm text-slate-600">
-                <div className="rounded-2xl border border-slate-100 bg-white p-4">LLM Provider：由后端根据环境变量切换 real / mock。</div>
-                <div className="rounded-2xl border border-slate-100 bg-white p-4">memory：会诊流会展示 backend、usedSources、matchedSnapshotIds 和 matchedTraceIds。</div>
-                <div className="rounded-2xl border border-slate-100 bg-white p-4">SSE：前端消费 status、text、ui、error、done 五类事件。</div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">会诊过程会持续展示长期画像、近期情况和当前建议三段内容。</div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">如当前数据暂不完整，页面会优先保留已经整理出的阶段内容。</div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">会诊结束后，会自动生成园内动作、家庭任务和 48 小时复查卡。</div>
               </div>
             </SectionCard>
-            <SectionCard title="展示模式" description="模式切换已经前移到 trace 区头部，这里只说明两种视角的边界。">
+            <SectionCard title="展示视角" description="页面支持常规展示与详细查看两种视角。">
               <div className="space-y-3 text-sm text-slate-600">
-                <div className="rounded-2xl border border-slate-100 bg-white p-4">演示态默认收敛为三阶段故事线、同步去向和必要异常提示，适合评委录屏与教师讲解。</div>
-                <div className="rounded-2xl border border-slate-100 bg-white p-4">调试态会额外展开 providerTrace、memoryTrace、trace meta 和本地 traceCase 演练入口，适合 staging 联调。</div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">常规展示会优先保留三阶段故事线、同步去向和必要异常提示，适合评委录屏与教师讲解。</div>
+                <div className="rounded-2xl border border-slate-100 bg-white p-4">详细查看会额外展开更细的过程信息，便于需要时核对发生在哪个阶段。</div>
               </div>
             </SectionCard>
             {result ? (

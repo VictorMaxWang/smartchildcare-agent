@@ -70,7 +70,7 @@ function ResultBody({
             </Badge>
           ))
         ) : (
-          <Badge variant="outline">single-route</Badge>
+          <Badge variant="outline">推荐入口</Badge>
         )}
       </div>
 
@@ -78,17 +78,13 @@ function ResultBody({
       <p className="mt-3 text-sm leading-7 text-slate-600">{model.summary}</p>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <MetaPill icon={<Workflow className="h-3.5 w-3.5" />} label="Workflow" value={model.workflowLabel} />
-        <MetaPill icon={<Compass className="h-3.5 w-3.5" />} label="Page" value={model.pageLabel} />
-        <MetaPill icon={<Route className="h-3.5 w-3.5" />} label="Deeplink" value={model.deeplinkLabel} />
+        <MetaPill icon={<Workflow className="h-3.5 w-3.5" />} label="推荐方式" value={model.workflowLabel} />
+        <MetaPill icon={<Compass className="h-3.5 w-3.5" />} label="目标页面" value={model.pageLabel} />
+        <MetaPill icon={<Route className="h-3.5 w-3.5" />} label="跳转入口" value={model.deeplinkLabel} />
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs leading-5 text-slate-500">
-          {
-            "\u8fd9\u662f\u5355\u6b21\u8def\u7531\u7ed3\u679c\uff0c\u4e0d\u4fdd\u7559\u957f\u5bf9\u8bdd\u5386\u53f2\u3002"
-          }
-        </p>
+        <p className="text-xs leading-5 text-slate-500">这是一次入口推荐，不保留长对话历史。</p>
         {cta}
       </div>
     </div>
@@ -106,9 +102,7 @@ export default function IntentResultPreviewCard({
       <div className="rounded-[26px] border border-indigo-100 bg-white/85 p-5 shadow-sm">
         <div className="flex items-center gap-2 text-sm text-slate-600">
           <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-          {
-            "\u52a9\u624b\u6b63\u5728\u5339\u914d\u6700\u5408\u9002\u7684 workflow \u548c deeplink\u2026"
-          }
+          正在为你匹配最合适的入口…
         </div>
       </div>
     );
@@ -136,9 +130,7 @@ export default function IntentResultPreviewCard({
           }
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-500">
-          {
-            "\u8fd4\u56de\u7ed3\u679c\u4f1a\u5305\u542b\u63a8\u8350\u5361\u7247\u3001\u76ee\u6807 workflow\u3001\u76ee\u6807\u9875\u9762\u548c\u53ef\u70b9\u51fb deeplink\u3002"
-          }
+          返回结果会包含推荐卡片、目标页面和可直接进入的入口。
         </p>
       </div>
     );

@@ -194,7 +194,7 @@ export default function VoiceAssistantFAB({
           <p className="mt-2 text-xs leading-5 text-slate-500">{statusHint}</p>
           {degradedHint ? (
             <div className="mt-2">
-              <Badge variant="warning">Best-effort fallback</Badge>
+              <Badge variant="warning">演示兜底结果</Badge>
             </div>
           ) : null}
         </div>
@@ -273,7 +273,7 @@ export default function VoiceAssistantFAB({
                 <DialogHeader>
                   <DialogTitle className="text-xl text-slate-950">语音采集已完成</DialogTitle>
                   <DialogDescription className="mt-2 text-sm leading-6 text-slate-600">
-                    当前已打通“采集 + 上传 + 结构化理解 + 草稿入口”，后续可直接衔接教师 Agent 或高风险会诊流。
+                    当前已完成采集、上传和草稿整理，后续可直接衔接教师 AI 助手或高风险会诊。
                   </DialogDescription>
                 </DialogHeader>
               </div>
@@ -281,7 +281,7 @@ export default function VoiceAssistantFAB({
               <div className="space-y-5 px-6 pt-5">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={result.upload.source === "mock" ? "warning" : "success"}>
-                    {result.upload.source === "mock" ? "Mock Fallback" : "Upload API"}
+                    {result.upload.source === "mock" ? "演示上传" : "正式上传"}
                   </Badge>
                   <Badge
                     variant={
@@ -292,14 +292,11 @@ export default function VoiceAssistantFAB({
                           : "success"
                     }
                   >
-                    状态：{result.upload.status}
+                    状态：{result.upload.status === "processing" ? "处理中" : result.upload.status === "failed" ? "失败" : "已完成"}
                   </Badge>
-                  {result.upload.provider ? (
-                    <Badge variant="secondary">Provider：{result.upload.provider}</Badge>
-                  ) : null}
                   {understanding ? (
                     <Badge variant={understanding.trace.fallback ? "warning" : "success"}>
-                      {understanding.trace.fallback ? "T4 Fallback" : "T4 Structured"}
+                      {understanding.trace.fallback ? "本地兜底整理" : "结构化整理完成"}
                     </Badge>
                   ) : null}
                 </div>
@@ -333,13 +330,13 @@ export default function VoiceAssistantFAB({
 
                 {result.upload.source === "mock" || understanding?.trace.fallback ? (
                   <div className="rounded-[24px] border border-amber-200 bg-amber-50/80 p-4">
-                    <p className="text-sm font-semibold text-amber-900">Fallback 提示</p>
+                    <p className="text-sm font-semibold text-amber-900">结果说明</p>
                     <p className="mt-2 text-sm leading-6 text-amber-800">
                       {result.upload.source === "mock" && understanding?.trace.fallback
-                        ? "当前上传与结构化理解都已进入 best-effort fallback，更适合比赛演示与草稿，不代表 live upstream 已完成验收。"
+                        ? "当前上传与理解均采用演示兜底结果，更适合录屏演示与草稿整理，请以正式数据为准。"
                         : result.upload.source === "mock"
-                          ? "当前上传链路已进入本地 best-effort fallback，结果适合比赛演示与草稿。"
-                          : "当前结构化理解已进入本地 rule fallback，结果适合比赛演示与草稿。"}
+                          ? "当前上传采用本地演示结果，适合录屏演示与草稿整理。"
+                          : "当前理解结果采用本地兜底整理，适合录屏演示与草稿整理。"}
                     </p>
                   </div>
                 ) : null}

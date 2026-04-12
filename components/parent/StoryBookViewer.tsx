@@ -120,6 +120,7 @@ type StoryBookResolvedRuntimeState = {
   audioDelivery: StoryBookRuntimeAudioDelivery;
   mode: "live" | "mixed" | "fallback";
 };
+type ScenePlaybackOptions = { continueBook?: boolean };
 type StoryBookSceneRuntimeState = {
   storyId: string | null;
   playbackSource: PlaybackSource;
@@ -542,22 +543,22 @@ export function getRuntimeBannerItems(
   if (transport === "remote-brain-proxy") {
     items.push({
       tone: "success",
-      label: "FastAPI brain 已接通",
-      detail: brainTimingParts.join(" · ") || "当前绘本来自远端 brain 链路。",
+      label: "绘本主链路已接通",
+      detail: brainTimingParts.join(" · ") || "当前绘本内容来自实时生成链路。",
     });
   } else if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
     items.push({
       tone: "warning",
-      label: "未接通 FastAPI brain，当前为本地回退链路",
+      label: "实时生成暂不可用，当前使用本地结果",
       detail: diagnostics?.brain?.fallbackReason
-        ? `回退原因：${diagnostics.brain.fallbackReason}${brainTimingParts.length ? ` · ${brainTimingParts.join(" · ")}` : ""}`
-        : brainTimingParts.join(" · ") || "当前结果来自本地回退链路。",
+        ? `当前说明：${diagnostics.brain.fallbackReason}${brainTimingParts.length ? ` · ${brainTimingParts.join(" · ")}` : ""}`
+        : brainTimingParts.join(" · ") || "当前内容暂以本地结果展示。",
     });
   } else {
     items.push({
       tone: "info",
-      label: "brain 状态待确认",
-      detail: brainTimingParts.join(" · ") || "当前未收到完整的 transport 诊断。",
+      label: "生成状态待确认",
+      detail: brainTimingParts.join(" · ") || "当前还没有收到完整的状态信息。",
     });
   }
 
@@ -576,8 +577,8 @@ export function getRuntimeBannerItems(
   } else if (imageDelivery === "mixed") {
     items.push({
       tone: "info",
-      label: "真实插画部分命中，其余页使用动态剧情插画",
-      detail: "当前链路会保留 live 命中的真实图，并用 scene blueprint 驱动剩余页。",
+      label: "部分页面已更新插画，其余页面先用动态插画补齐",
+      detail: "当前会优先展示已生成的图片，并补齐仍在等待的页面。",
     });
   } else if (imageDelivery === "dynamic-fallback") {
     items.push({
@@ -585,19 +586,19 @@ export function getRuntimeBannerItems(
       label: "真实图片暂未命中，当前使用动态剧情插画",
       detail: diagnostics?.image?.lastErrorReason
         ? `${formatWarmProgressDetail(diagnostics.image)}`
-        : "当前页先展示由 scene blueprint 驱动的剧情插画，不再默认落回示例图。",
+        : "当前页面先展示动态剧情插画，方便继续预览绘本内容。",
     });
   } else if (imageDelivery === "demo-art") {
     items.push({
       tone: "info",
-      label: "当前命中 legacy 演示插画兜底",
-      detail: "只有动态剧情插画也不可用时，才会退回这一层示例资源。",
+      label: "当前使用演示插画",
+      detail: "仅在其他插画暂未就绪时，才会使用这一层演示资源。",
     });
   } else {
     items.push({
       tone: "warning",
-      label: "图片 provider 未就绪，当前使用极端兜底插画",
-      detail: "当前页落到最后一层 SVG 兜底图，仅用于保住完整演示。",
+      label: "插画暂未就绪，当前使用基础插画",
+      detail: "当前页面先保留基础插画，方便继续预览内容。",
     });
   }
 
@@ -798,18 +799,48 @@ function resolveRuntimeImageDeliveryHotfix(
   return uniqueDeliveries.includes("real") ? "mixed" : uniqueDeliveries[0];
 }
 
-function resolveRuntimeAudioDeliveryHotfix(
-  story: StoryBookRuntimeResponse,
-  options?: StoryBookRuntimeOverrides
-): StoryBookRuntimeAudioDelivery {
-  if (options?.playbackSource === "local") {
-    return "local-speech";
+function sceneHasReadyAudioHotfix(
+  scene: Pick<ParentStoryBookScene, "audioStatus" | "audioUrl"> | null | undefined
+) {
+  return Boolean(scene?.audioStatus === "ready" && scene.audioUrl);
+}
+
+function normalizeRuntimeAudioDeliveryHotfix(
+  audioDelivery?: StoryBookAudioDelivery
+): Exclude<StoryBookRuntimeAudioDelivery, "local-speech"> {
+  if (
+    audioDelivery === "real" ||
+    audioDelivery === "stream-url" ||
+    audioDelivery === "inline-data-url"
+  ) {
+    return "real";
   }
-  const audioDelivery = story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery;
-  if (audioDelivery === "real" || audioDelivery === "mixed") {
-    return audioDelivery;
+  if (audioDelivery === "mixed") {
+    return "mixed";
   }
-  return options?.canUseLocalSpeech ? "local-speech" : "preview-only";
+  return "preview-only";
+}
+
+export function resolveRuntimeAudioDeliveryHotfix(
+  story: StoryBookRuntimeResponse | null | undefined
+): Exclude<StoryBookRuntimeAudioDelivery, "local-speech"> {
+  if (!story) return "preview-only";
+  return normalizeRuntimeAudioDeliveryHotfix(
+    story.providerMeta.audioDelivery ?? story.cacheMeta?.audioDelivery
+  );
+}
+
+export function resolveLocalSpeechHandoffSceneIndexHotfix(
+  story: StoryBookRuntimeResponse | null | undefined,
+  playbackSource: PlaybackSource,
+  playbackSceneIndex: number | null
+) {
+  if (!story || playbackSource !== "local" || playbackSceneIndex === null) {
+    return null;
+  }
+  return sceneHasReadyAudioHotfix(story.scenes[playbackSceneIndex])
+    ? playbackSceneIndex
+    : null;
 }
 
 export function resolveRuntimeStoryStateHotfix(
@@ -819,13 +850,13 @@ export function resolveRuntimeStoryStateHotfix(
   if (!story) {
     return {
       imageDelivery: "svg-fallback",
-      audioDelivery: options?.canUseLocalSpeech ? "local-speech" : "preview-only",
+      audioDelivery: "preview-only",
       mode: "fallback",
     };
   }
 
   const imageDelivery = resolveRuntimeImageDeliveryHotfix(story, options?.imageFallbackMap);
-  const audioDelivery = resolveRuntimeAudioDeliveryHotfix(story, options);
+  const audioDelivery = resolveRuntimeAudioDeliveryHotfix(story);
   if (imageDelivery === "real" && audioDelivery === "real") {
     return { imageDelivery, audioDelivery, mode: "live" };
   }
@@ -875,7 +906,8 @@ export function getRuntimeBannerItemsHotfix(
     canUseLocalSpeech,
   });
   const imageDelivery = runtimeState.imageDelivery;
-  const audioDelivery = runtimeState.audioDelivery;
+  const audioDelivery = resolveRuntimeAudioDeliveryHotfix(story);
+  const isPlayingLocalFallback = runtimeOverrides?.playbackSource === "local";
   const brainTimingParts = [
     diagnostics?.brain?.upstreamHost ? `upstream ${diagnostics.brain.upstreamHost}` : null,
     typeof diagnostics?.brain?.elapsedMs === "number" ? `elapsed ${diagnostics.brain.elapsedMs}ms` : null,
@@ -885,24 +917,24 @@ export function getRuntimeBannerItemsHotfix(
   if (transport === "remote-brain-proxy") {
     items.push({
       tone: "success",
-      label: "FastAPI brain 已接通",
-      detail: brainTimingParts.join(" 路 ") || "当前绘本来自远端 brain 主链路。",
+      label: "绘本主链路已接通",
+      detail: brainTimingParts.join(" 路 ") || "当前绘本内容来自实时生成链路。",
     });
   } else if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
     items.push({
       tone: "warning",
-      label: "未接通 FastAPI brain，当前为本地回退链路",
+      label: "实时生成暂不可用，当前使用本地结果",
       detail: diagnostics?.brain?.fallbackReason
-        ? `回退原因：${formatStoryBookFallbackReason(diagnostics.brain.fallbackReason)}${
+        ? `当前说明：${formatStoryBookFallbackReason(diagnostics.brain.fallbackReason)}${
             brainTimingParts.length ? ` 路 ${brainTimingParts.join(" 路 ")}` : ""
           }`
-        : brainTimingParts.join(" 路 ") || "当前结果来自本地回退链路。",
+        : brainTimingParts.join(" 路 ") || "当前内容暂以本地结果展示。",
     });
   } else {
     items.push({
       tone: "info",
-      label: "brain 状态待确认",
-      detail: brainTimingParts.join(" 路 ") || "当前还没有完整的 transport 诊断信息。",
+      label: "生成状态待确认",
+      detail: brainTimingParts.join(" 路 ") || "当前还没有收到完整的状态信息。",
     });
   }
 
@@ -923,13 +955,13 @@ export function getRuntimeBannerItemsHotfix(
   } else if (imageDelivery === "mixed") {
     items.push({
       tone: "info",
-      label: "图片为 mixed",
-      detail: "部分页面命中真实图片，其余页面仍在使用回退插画。",
+      label: "图片正在逐步补齐",
+      detail: "部分页面已经更新图片，其余页面先保留补齐结果。",
     });
   } else if (imageDelivery === "dynamic-fallback") {
     items.push({
       tone: "info",
-      label: "当前图片为 dynamic-fallback",
+      label: "当前图片为动态插画",
       detail:
         diagnostics?.image?.lastErrorReason ??
         "当前展示的是动态剧情插画，不宣称真实图片已命中。",
@@ -937,12 +969,12 @@ export function getRuntimeBannerItemsHotfix(
   } else {
     items.push({
       tone: "warning",
-      label: "当前图片为 svg-fallback",
-      detail: "图片链路尚未就绪，当前只保留 SVG 兜底插画。",
+      label: "当前图片为基础插画",
+      detail: "图片链路尚未就绪，当前先保留基础插画。",
     });
   }
 
-  if (diagnostics?.audio?.jobStatus === "warming" && audioDelivery !== "local-speech") {
+  if (diagnostics?.audio?.jobStatus === "warming") {
     items.push({
       tone: "info",
       label: "真实朗读补齐中",
@@ -964,7 +996,7 @@ export function getRuntimeBannerItemsHotfix(
         ? "部分页面命中真实朗读，其余页面会降级到本地补读。"
         : "部分页面命中真实朗读，其余页面仍是字幕预演。",
     });
-  } else if (audioDelivery === "local-speech") {
+  } else if (isPlayingLocalFallback) {
     items.push({
       tone: "warning",
       label: "当前音频为 local speech",
@@ -1004,7 +1036,7 @@ function resolveRuntimeSceneAudioDeliveryHotfix(
 ): StoryBookRuntimeAudioDelivery {
   if (isSceneActive && playbackSource === "real") return "real";
   if (isSceneActive && playbackSource === "local") return "local-speech";
-  if (scene.audioStatus === "ready" && scene.audioUrl) return "real";
+  if (sceneHasReadyAudioHotfix(scene)) return "real";
   return canUseLocalSpeech ? "local-speech" : "preview-only";
 }
 
@@ -1529,6 +1561,14 @@ function StoryBookSceneStream({
   const queueRef = useRef<number[]>([]);
   const sceneRefs = useRef<Record<number, HTMLElement | null>>({});
   const tokenRef = useRef(0);
+  const scenesRef = useRef<ParentStoryBookScene[]>([]);
+  const autoHandoffAttemptRef = useRef<string | null>(null);
+  const startAudioRef = useRef<
+    (scene: ParentStoryBookScene, index: number, options?: ScenePlaybackOptions) => void
+  >(() => {});
+  const startScenePlaybackRef = useRef<
+    (scene: ParentStoryBookScene, index: number, options?: ScenePlaybackOptions) => void
+  >(() => {});
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
@@ -1546,6 +1586,10 @@ function StoryBookSceneStream({
     typeof window.speechSynthesis?.speak === "function";
 
   const scenes = useMemo(() => story.scenes ?? [], [story.scenes]);
+
+  useEffect(() => {
+    scenesRef.current = scenes;
+  }, [scenes]);
 
   useEffect(() => {
     onRuntimeStateChange?.({
@@ -1594,6 +1638,7 @@ function StoryBookSceneStream({
   function stopPlayback() {
     invalidate();
     queueRef.current = [];
+    autoHandoffAttemptRef.current = null;
     clearPreview();
     clearSpeech();
     clearAudio();
@@ -1657,12 +1702,12 @@ function StoryBookSceneStream({
       stopPlayback();
       return;
     }
-    const nextScene = scenes[nextIndex];
+    const nextScene = scenesRef.current[nextIndex];
     if (!nextScene) {
       stopPlayback();
       return;
     }
-    startScenePlayback(nextScene, nextIndex, { continueBook: true });
+    startScenePlaybackRef.current(nextScene, nextIndex, { continueBook: true });
   }
 
   function startCaptionTimelineLoop(
@@ -1761,7 +1806,7 @@ function StoryBookSceneStream({
   function startLocalSpeech(
     scene: ParentStoryBookScene,
     index: number,
-    options?: { continueBook?: boolean }
+    options?: ScenePlaybackOptions
   ) {
     if (!canUseLocalSpeech || typeof window === "undefined" || !window.speechSynthesis) {
       startPreview(scene, index, options);
@@ -1842,7 +1887,7 @@ function StoryBookSceneStream({
   function startAudio(
     scene: ParentStoryBookScene,
     index: number,
-    options?: { continueBook?: boolean }
+    options?: ScenePlaybackOptions
   ) {
     if (!scene.audioUrl) {
       startPreview(scene, index, options);
@@ -1926,12 +1971,47 @@ function StoryBookSceneStream({
     });
   }
 
+  useEffect(() => {
+    startAudioRef.current = startAudio;
+  }, [startAudio]);
+
+  useEffect(() => {
+    const handoffSceneIndex = resolveLocalSpeechHandoffSceneIndexHotfix(
+      story as StoryBookRuntimeResponse,
+      playbackSource,
+      playbackSceneIndex
+    );
+    if (handoffSceneIndex === null) {
+      autoHandoffAttemptRef.current = null;
+      return;
+    }
+
+    const handoffScene = scenes[handoffSceneIndex];
+    if (!handoffScene || !sceneHasReadyAudioHotfix(handoffScene)) {
+      autoHandoffAttemptRef.current = null;
+      return;
+    }
+
+    const handoffKey = `${story.storyId}:${handoffSceneIndex}:${handoffScene.audioUrl}`;
+    if (autoHandoffAttemptRef.current === handoffKey) {
+      return;
+    }
+
+    autoHandoffAttemptRef.current = handoffKey;
+    const continueBook = isBookPlaying || queueRef.current.length > 0;
+    startAudioRef.current(
+      handoffScene,
+      handoffSceneIndex,
+      continueBook ? { continueBook: true } : undefined
+    );
+  }, [isBookPlaying, playbackSceneIndex, playbackSource, scenes, story, story.storyId]);
+
   function startScenePlayback(
     scene: ParentStoryBookScene,
     index: number,
-    options?: { continueBook?: boolean }
+    options?: ScenePlaybackOptions
   ) {
-    if (scene.audioStatus === "ready" && scene.audioUrl) {
+    if (sceneHasReadyAudioHotfix(scene)) {
       startAudio(scene, index, options);
       return;
     }
@@ -1941,6 +2021,10 @@ function StoryBookSceneStream({
     }
     startPreview(scene, index, options);
   }
+
+  useEffect(() => {
+    startScenePlaybackRef.current = startScenePlayback;
+  }, [startScenePlayback]);
 
   function handlePlayScene(scene: ParentStoryBookScene, index: number) {
     if (playbackSceneIndex === index) {
@@ -2021,7 +2105,7 @@ function StoryBookSceneStream({
         </Button>
         <p className="text-xs text-slate-500">
           {getStoryAudioRuntimeLabelHotfix(
-            playbackSource === "local" ? "local-speech" : story.providerMeta.audioDelivery,
+            resolveRuntimeAudioDeliveryHotfix(story as StoryBookRuntimeResponse),
             canUseLocalSpeech
           )}
         </p>

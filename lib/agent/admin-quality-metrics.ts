@@ -254,7 +254,15 @@ export function buildAdminQualityMetricGroups(
 }
 
 export function formatAdminQualitySource(value: string) {
-  return value.replace(/[_-]+/g, " ").trim() || "unknown";
+  const normalized = value
+    .replace(/backend/gi, "系统")
+    .replace(/fallback/gi, "本地兜底")
+    .replace(/demo/gi, "演示")
+    .replace(/unknown/gi, "未说明")
+    .replace(/[_-]+/g, " ")
+    .trim();
+
+  return normalized || "未说明";
 }
 
 export function formatMetricSourceMode(mode: AdminQualityMetricSourceMode) {
@@ -264,7 +272,7 @@ export function formatMetricSourceMode(mode: AdminQualityMetricSourceMode) {
     case "derived":
       return "推导";
     case "fallback":
-      return "回退";
+      return "本地兜底";
     case "demo_only":
       return "演示";
     default:

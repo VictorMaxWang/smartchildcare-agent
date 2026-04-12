@@ -10,15 +10,15 @@ type WeeklyReportBadgeVariant = "info" | "warning" | "secondary";
 
 const WEEKLY_REPORT_SOURCE_META = {
   ai: {
-    label: "AI 生成",
+    label: "智能生成",
     variant: "info",
   },
   fallback: {
-    label: "Fallback 兜底",
+    label: "本地兜底",
     variant: "warning",
   },
   mock: {
-    label: "Mock 规则",
+    label: "演示结果",
     variant: "secondary",
   },
 } as const satisfies Record<

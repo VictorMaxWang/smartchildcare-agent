@@ -354,16 +354,16 @@ function getStatusLabel(status: AdminConsultationDecisionViewModel["status"]) {
 }
 
 function getProviderStateLabel(state: ConsultationTraceProviderState) {
-  if (state === "real") return "真实 Provider";
-  if (state === "fallback") return "Fallback";
-  return "Provider 未知";
+  if (state === "real") return "已接入智能判断";
+  if (state === "fallback") return "本地兜底";
+  return "来源未说明";
 }
 
 function getMemoryStateLabel(state: ConsultationTraceMemoryState) {
-  if (state === "ready") return "记忆已命中";
-  if (state === "empty") return "空记忆";
-  if (state === "degraded") return "记忆降级";
-  return "记忆未知";
+  if (state === "ready") return "已命中参考资料";
+  if (state === "empty") return "暂无参考资料";
+  if (state === "degraded") return "参考资料降级";
+  return "参考状态未说明";
 }
 
 function getOwnerFallbackLabel(role?: AdminOwnerRole) {
@@ -380,9 +380,9 @@ function buildEscalationOwnerLabel(
     return getOwnerFallbackLabel(fallbackRole);
   }
 
-  if (escalation.ownerRole === "admin") return "Director Attention";
-  if (escalation.ownerRole === "parent") return "Guardian Follow-up";
-  return "Teacher Review";
+  if (escalation.ownerRole === "admin") return "园长跟进";
+  if (escalation.ownerRole === "parent") return "家长跟进";
+  return "教师复核";
 }
 
 function buildProviderLabel(providerTrace: ConsultationProviderTrace | null) {
@@ -407,11 +407,11 @@ function buildMemoryDetailFromConsultation(consultation: ConsultationResult) {
     : [];
 
   if (usedSources.length > 0) {
-    return `命中 ${usedSources.length} 个 memory source`;
+    return `参考了 ${usedSources.length} 份历史资料`;
   }
 
   if (matchedSnapshots.length > 0) {
-    return `命中 ${matchedSnapshots.length} 个 snapshot`;
+    return `关联了 ${matchedSnapshots.length} 条历史快照`;
   }
 
   return null;
@@ -421,7 +421,7 @@ function buildLocalTraceViewModel(consultation: ConsultationResult): AdminConsul
   const traceViewModel = buildConsultationResultTraceViewModel({
     result: consultation,
     mode: "demo",
-    streamMessage: "Consultation completed. Admin trace summary.",
+    streamMessage: "会诊已完成，以下为园长侧决策依据摘要。",
   });
   const providerLabel = buildProviderLabel(traceViewModel.providerTrace);
   const evidenceHighlights =
@@ -731,7 +731,7 @@ function buildExplainabilityItemsFromFeed(
 
   if (summary.agentParticipants.length > 0) {
     items.push({
-      label: "Agent 参与",
+      label: "参与环节",
       detail: summary.agentParticipants.join(" / "),
     });
   }
@@ -805,13 +805,13 @@ function buildMemoryDetailFromSummary(
 ) {
   if (!summary) return null;
   if (summary.usedSources.length > 0) {
-    return `命中 ${summary.usedSources.length} 个 memory source`;
+    return `参考了 ${summary.usedSources.length} 份历史资料`;
   }
   if (summary.matchedSnapshotIds.length > 0) {
-    return `命中 ${summary.matchedSnapshotIds.length} 个 snapshot`;
+    return `关联了 ${summary.matchedSnapshotIds.length} 条历史快照`;
   }
   if (summary.matchedTraceIds.length > 0) {
-    return `命中 ${summary.matchedTraceIds.length} 个 trace`;
+    return `关联了 ${summary.matchedTraceIds.length} 条历史记录`;
   }
   if (summary.backend && summary.backend !== "unknown") {
     return summary.backend;

@@ -38,19 +38,37 @@ const UNSPECIFIED_FILE_KIND_VALUE = "__unspecified__";
 const REQUEST_SOURCE = "teacher-health-file-bridge-page";
 
 const FILE_KIND_OPTIONS = [
-  { value: UNSPECIFIED_FILE_KIND_VALUE, label: "Unspecified" },
-  { value: "health-note", label: "Health note" },
-  { value: "lab-report", label: "Lab report" },
-  { value: "prescription", label: "Prescription / checklist" },
-  { value: "discharge-note", label: "Recheck / discharge note" },
-  { value: "other", label: "Other" },
+  { value: UNSPECIFIED_FILE_KIND_VALUE, label: "未指定" },
+  { value: "health-note", label: "健康说明" },
+  { value: "lab-report", label: "化验报告" },
+  { value: "prescription", label: "医嘱 / 清单" },
+  { value: "discharge-note", label: "复查 / 出院说明" },
+  { value: "other", label: "其他材料" },
 ];
 
 function formatBytes(value?: number) {
-  if (!value || value <= 0) return "unknown size";
+  if (!value || value <= 0) return "大小未知";
   if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   if (value >= 1024) return `${Math.round(value / 1024)} KB`;
   return `${value} B`;
+}
+
+function getFileKindLabel(value?: string) {
+  return FILE_KIND_OPTIONS.find((option) => option.value === value)?.label ?? "未指定";
+}
+
+function getSourceRoleLabel(value: HealthFileBridgeSourceRole) {
+  return value === "parent" ? "家长补充" : "教师补充";
+}
+
+function getRiskSeverityLabel(level: HealthFileBridgeRiskItem["severity"]) {
+  if (level === "high") return "高关注";
+  if (level === "medium") return "需留意";
+  return "一般提醒";
+}
+
+function formatResultBadge(label: string, active: boolean) {
+  return <Badge variant={active ? "warning" : "secondary"}>{`${label}：${active ? "是" : "否"}`}</Badge>;
 }
 
 function toUploadMeta(file: File, index: number, previewText: string): HealthFileBridgeFile {
@@ -72,10 +90,6 @@ function toUploadMeta(file: File, index: number, previewText: string): HealthFil
   };
 }
 
-function renderBooleanBadge(label: string, active: boolean) {
-  return <Badge variant={active ? "warning" : "secondary"}>{`${label}: ${active ? "true" : "false"}`}</Badge>;
-}
-
 function riskVariant(level: HealthFileBridgeRiskItem["severity"]) {
   if (level === "high") return "destructive";
   if (level === "medium") return "warning";
@@ -85,10 +99,7 @@ function riskVariant(level: HealthFileBridgeRiskItem["severity"]) {
 function FactCard({ fact }: { fact: HealthFileBridgeFact }) {
   return (
     <div className="rounded-3xl border border-slate-100 bg-white p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-semibold text-slate-900">{fact.label}</p>
-        <Badge variant="secondary">{fact.source}</Badge>
-      </div>
+      <p className="text-sm font-semibold text-slate-900">{fact.label}</p>
       <p className="mt-2 text-sm leading-6 text-slate-600">{fact.detail}</p>
     </div>
   );
@@ -99,8 +110,7 @@ function RiskCard({ risk }: { risk: HealthFileBridgeRiskItem }) {
     <div className="rounded-3xl border border-rose-100 bg-rose-50/50 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm font-semibold text-slate-900">{risk.title}</p>
-        <Badge variant={riskVariant(risk.severity)}>{risk.severity}</Badge>
-        <Badge variant="secondary">{risk.source}</Badge>
+        <Badge variant={riskVariant(risk.severity)}>{getRiskSeverityLabel(risk.severity)}</Badge>
       </div>
       <p className="mt-2 text-sm leading-6 text-slate-600">{risk.detail}</p>
     </div>
@@ -110,14 +120,10 @@ function RiskCard({ risk }: { risk: HealthFileBridgeRiskItem }) {
 function DetailCard({
   title,
   detail,
-  source,
-}: HealthFileBridgeContraindication | HealthFileBridgeFollowUpHint) {
+}: Pick<HealthFileBridgeContraindication, "title" | "detail"> | Pick<HealthFileBridgeFollowUpHint, "title" | "detail">) {
   return (
     <div className="rounded-3xl border border-slate-100 bg-white p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
-        <Badge variant="secondary">{source}</Badge>
-      </div>
+      <p className="text-sm font-semibold text-slate-900">{title}</p>
       <p className="mt-2 text-sm leading-6 text-slate-600">{detail}</p>
     </div>
   );
@@ -152,8 +158,8 @@ export default function TeacherHealthFileBridgePage() {
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <EmptyState
           icon={<Stethoscope className="h-6 w-6" />}
-          title="No visible child is available"
-          description="The health-file bridge needs at least one visible child profile for a bound extraction request."
+          title="当前暂无可用幼儿"
+          description="请先进入教师工作台确认当前账号已关联可见幼儿，再进行健康文件解析。"
         />
       </div>
     );
@@ -172,7 +178,7 @@ export default function TeacherHealthFileBridgePage() {
     setResult(null);
 
     if (files.length === 0) {
-      setError("Select at least one image or PDF.");
+      setError("请至少选择一份图片或 PDF 材料。");
       return;
     }
 
@@ -206,14 +212,14 @@ export default function TeacherHealthFileBridgePage() {
         const message =
           (body && "error" in body && body.error) ||
           (body && "detail" in body && body.detail) ||
-          "Health file extraction failed.";
+          "健康文件解析失败，请稍后重试。";
         throw new Error(message);
       }
 
       setResult(body as HealthFileBridgeResponse);
     } catch (submissionError) {
       setError(
-        submissionError instanceof Error ? submissionError.message : "Health file extraction failed."
+        submissionError instanceof Error ? submissionError.message : "健康文件解析失败，请稍后重试。"
       );
     } finally {
       setIsSubmitting(false);
@@ -222,18 +228,18 @@ export default function TeacherHealthFileBridgePage() {
 
   return (
     <RolePageShell
-      badge={`Teacher entry · T8 extraction · ${currentUser.className ?? "current class"}`}
-      title="External Health File Bridge"
-      description="T8 upgrades the upload skeleton into a structured extraction flow. This page now returns facts, risks, contraindications, and follow-up hints only. Daycare action mapping remains intentionally out of scope."
+      badge={`健康文件解析 · ${currentUser.className ?? "当前班级"}`}
+      title="把外部健康材料整理成可复核的关键信息"
+      description="上传材料后，系统会先提取事实、风险提示和后续提醒，方便老师快速核对并继续处理。"
       actions={
         <>
           <Button asChild variant="outline" className="min-h-11 rounded-xl">
             <Link href="/teacher/home" className="gap-2">
               <ArrowLeft className="h-4 w-4" />
-              Back to teacher home
+              返回教师工作台
             </Link>
           </Button>
-          <InlineLinkButton href="/teacher/agent" label="Teacher AI assistant" variant="premium" />
+          <InlineLinkButton href="/teacher/agent" label="进入教师 AI 助手" variant="premium" />
         </>
       }
     >
@@ -241,19 +247,19 @@ export default function TeacherHealthFileBridgePage() {
         main={
           <div className="space-y-6">
             <SectionCard
-              title="Extraction Request"
-              description="Upload file metadata, add OCR preview text if available, and keep any manual notes narrowly factual."
+              title="发起解析"
+              description="上传材料后，可补充 OCR 文字或老师已确认的事实，帮助系统更快整理关键信息。"
             >
               <form className="space-y-5" onSubmit={handleSubmit}>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">Child binding</p>
+                    <p className="text-sm font-semibold text-slate-900">关联幼儿</p>
                     <Select value={childId} onValueChange={setChildId}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select child" />
+                        <SelectValue placeholder="请选择幼儿" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={NONE_CHILD_VALUE}>No specific child</SelectItem>
+                        <SelectItem value={NONE_CHILD_VALUE}>暂不关联具体幼儿</SelectItem>
                         {visibleChildren.map((child) => (
                           <SelectItem key={child.id} value={child.id}>
                             {child.name} · {child.className}
@@ -264,17 +270,17 @@ export default function TeacherHealthFileBridgePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">Source role</p>
+                    <p className="text-sm font-semibold text-slate-900">补充来源</p>
                     <Select
                       value={sourceRole}
                       onValueChange={(value) => setSourceRole(value as HealthFileBridgeSourceRole)}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select role" />
+                        <SelectValue placeholder="请选择来源" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="teacher">teacher</SelectItem>
-                        <SelectItem value="parent">parent</SelectItem>
+                        <SelectItem value="teacher">教师补充</SelectItem>
+                        <SelectItem value="parent">家长补充</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -282,10 +288,10 @@ export default function TeacherHealthFileBridgePage() {
 
                 <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">File kind</p>
+                    <p className="text-sm font-semibold text-slate-900">材料类型</p>
                     <Select value={fileKind} onValueChange={setFileKind}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select file kind" />
+                        <SelectValue placeholder="请选择材料类型" />
                       </SelectTrigger>
                       <SelectContent>
                         {FILE_KIND_OPTIONS.map((option) => (
@@ -298,37 +304,36 @@ export default function TeacherHealthFileBridgePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">Upload image / PDF</p>
+                    <p className="text-sm font-semibold text-slate-900">上传图片 / PDF</p>
                     <Input type="file" accept="image/*,.pdf" multiple onChange={handleFileChange} />
                     <p className="text-xs leading-5 text-slate-500">
-                      The current teacher page still sends file metadata plus optional text hints. Verified
-                      binary OCR is not claimed here.
+                      当前会先结合文件信息与补充文字整理重点内容，最终仍建议老师结合原始材料复核。
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-900">OCR preview / extracted text</p>
+                  <p className="text-sm font-semibold text-slate-900">OCR 预览 / 已提取文字</p>
                   <Textarea
                     value={previewText}
                     onChange={(event) => setPreviewText(event.target.value)}
-                    placeholder="Example: Fever 38.1, recheck tomorrow morning, continue nebulizer."
+                    placeholder="例如：体温 38.1℃，建议明早复查，今晚继续雾化。"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-900">Additional factual notes</p>
+                  <p className="text-sm font-semibold text-slate-900">补充说明</p>
                   <Textarea
                     value={optionalNotes}
                     onChange={(event) => setOptionalNotes(event.target.value)}
-                    placeholder="Add only extra facts that should help extraction, not daycare actions."
+                    placeholder="只补充有助于理解材料的事实信息，例如时间、复查要求或医生提示。"
                   />
                 </div>
 
                 <div className="rounded-3xl border border-slate-100 bg-slate-50/80 p-4">
                   <div className="flex items-center gap-2">
                     <Upload className="h-4 w-4 text-indigo-500" />
-                    <p className="text-sm font-semibold text-slate-900">Selected file metadata</p>
+                    <p className="text-sm font-semibold text-slate-900">已选材料</p>
                   </div>
                   <div className="mt-3 space-y-3">
                     {files.length > 0 ? (
@@ -336,12 +341,12 @@ export default function TeacherHealthFileBridgePage() {
                         <div key={file.fileId ?? file.name} className="rounded-2xl bg-white p-3">
                           <p className="text-sm font-medium text-slate-900">{file.name}</p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {file.mimeType || "unknown mime"} · {formatBytes(file.sizeBytes)}
+                            {(file.mimeType || "文件类型未识别")} · {formatBytes(file.sizeBytes)}
                           </p>
                         </div>
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No file selected yet.</p>
+                      <p className="text-sm text-slate-500">暂未选择材料。</p>
                     )}
                   </div>
                 </div>
@@ -350,7 +355,7 @@ export default function TeacherHealthFileBridgePage() {
 
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" variant="premium" className="min-h-11 rounded-xl" disabled={isSubmitting}>
-                    {isSubmitting ? "Extracting..." : "Run structured extraction"}
+                    {isSubmitting ? "解析中…" : "开始结构化解析"}
                   </Button>
                   <Button
                     type="button"
@@ -365,67 +370,81 @@ export default function TeacherHealthFileBridgePage() {
                     }}
                     disabled={isSubmitting}
                   >
-                    Reset
+                    清空重填
                   </Button>
                 </div>
               </form>
             </SectionCard>
 
             <SectionCard
-              title="Extracted Facts"
-              description="These are structured facts only. They are not medical conclusions."
+              title="提取到的关键信息"
+              description="这里先展示从材料中整理出的事实信息，便于老师快速核对。"
             >
               <div className="space-y-3">
                 {result ? (
-                  result.extractedFacts.map((fact) => <FactCard key={fact.label} fact={fact} />)
+                  result.extractedFacts.length > 0 ? (
+                    result.extractedFacts.map((fact) => <FactCard key={`${fact.label}-${fact.detail}`} fact={fact} />)
+                  ) : (
+                    <p className="text-sm text-slate-500">当前材料里还没有提取到明确事实信息。</p>
+                  )
                 ) : (
-                  <p className="text-sm text-slate-500">Submit a request to see `extractedFacts`.</p>
+                  <p className="text-sm text-slate-500">发起解析后，这里会显示整理出的关键信息。</p>
                 )}
               </div>
             </SectionCard>
 
             <SectionCard
-              title="Risk Items"
-              description="Risks stay conservative and should be verified against the original document."
+              title="需重点留意"
+              description="系统会先标出值得进一步核对的风险提醒，方便老师结合原始材料复查。"
             >
               <div className="space-y-3">
                 {result ? (
-                  result.riskItems.map((risk) => <RiskCard key={risk.title} risk={risk} />)
+                  result.riskItems.length > 0 ? (
+                    result.riskItems.map((risk) => <RiskCard key={`${risk.title}-${risk.detail}`} risk={risk} />)
+                  ) : (
+                    <p className="text-sm text-slate-500">当前材料里没有提取到明确的风险提醒。</p>
+                  )
                 ) : (
-                  <p className="text-sm text-slate-500">Submit a request to see `riskItems`.</p>
+                  <p className="text-sm text-slate-500">发起解析后，这里会显示需重点留意的内容。</p>
                 )}
               </div>
             </SectionCard>
 
             <div className="grid gap-6 xl:grid-cols-2">
               <SectionCard
-                title="Contraindications"
-                description="These are extraction-time caution items, not executed actions."
+                title="谨慎事项"
+                description="这里整理材料中提到的谨慎事项，方便老师后续处理时一并核对。"
               >
                 <div className="space-y-3">
                   {result ? (
                     result.contraindications.length > 0 ? (
                       result.contraindications.map((item) => (
-                        <DetailCard key={item.title} {...item} />
+                        <DetailCard key={`${item.title}-${item.detail}`} title={item.title} detail={item.detail} />
                       ))
                     ) : (
-                      <p className="text-sm text-slate-500">No contraindication hint was extracted.</p>
+                      <p className="text-sm text-slate-500">当前材料里没有提取到明确的谨慎事项。</p>
                     )
                   ) : (
-                    <p className="text-sm text-slate-500">Submit a request to see `contraindications`.</p>
+                    <p className="text-sm text-slate-500">发起解析后，这里会显示谨慎事项。</p>
                   )}
                 </div>
               </SectionCard>
 
               <SectionCard
-                title="Follow-up Hints"
-                description="Follow-up timing stays as extracted context for later mapping work."
+                title="后续提醒"
+                description="这里展示材料里提到的复查或后续跟进提示，便于老师继续安排。"
               >
                 <div className="space-y-3">
                   {result ? (
-                    result.followUpHints.map((item) => <DetailCard key={item.title} {...item} />)
+                    result.followUpHints.length > 0 ? (
+                      result.followUpHints.map((item) => (
+                        <DetailCard key={`${item.title}-${item.detail}`} title={item.title} detail={item.detail} />
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">当前材料里没有提取到明确的后续提醒。</p>
+                    )
                   ) : (
-                    <p className="text-sm text-slate-500">Submit a request to see `followUpHints`.</p>
+                    <p className="text-sm text-slate-500">发起解析后，这里会显示后续提醒。</p>
                   )}
                 </div>
               </SectionCard>
@@ -435,90 +454,92 @@ export default function TeacherHealthFileBridgePage() {
         aside={
           <div className="space-y-6">
             <SectionCard
-              title="Current boundary"
-              description="This page is intentionally extraction-only in T8."
+              title="使用说明"
+              description="这一步先帮助老师把材料内容整理清楚，后续处置仍需结合原始材料判断。"
             >
               <ul className="space-y-3 text-sm leading-6 text-slate-600">
-                <li>No verified binary OCR or PDF parsing is claimed on the teacher page yet.</li>
-                <li>No daycare action mapping is generated in T8.</li>
-                <li>No writeback or escalation dispatch is triggered.</li>
-                <li>`source`, `fallback`, and `liveReadyButNotVerified` are shown as-is for honesty.</li>
+                <li>当前先返回结构化整理结果，方便老师快速核对重点。</li>
+                <li>如材料信息较复杂，请优先以原始文件内容为准。</li>
+                <li>解析结果可作为后续沟通和处理的参考，但不替代老师判断。</li>
+                <li>如需进一步处置，建议结合班级情况继续跟进。</li>
               </ul>
             </SectionCard>
 
             <SectionCard
-              title="Request context"
-              description="Useful context for validating the extraction request shape."
+              title="本次解析信息"
+              description="方便老师确认当前提交的是哪位幼儿、哪类材料与多少份文件。"
             >
               <div className="space-y-3 text-sm text-slate-600">
                 <div className="rounded-2xl bg-white p-4">
-                  <p className="font-semibold text-slate-900">Child</p>
+                  <p className="font-semibold text-slate-900">关联幼儿</p>
                   <p className="mt-1">
-                    {selectedChild ? `${selectedChild.name} · ${selectedChild.className}` : "No specific child"}
+                    {selectedChild ? `${selectedChild.name} · ${selectedChild.className}` : "暂不关联具体幼儿"}
                   </p>
                 </div>
                 <div className="rounded-2xl bg-white p-4">
-                  <p className="font-semibold text-slate-900">requestSource</p>
-                  <p className="mt-1">{REQUEST_SOURCE}</p>
+                  <p className="font-semibold text-slate-900">补充来源</p>
+                  <p className="mt-1">{getSourceRoleLabel(sourceRole)}</p>
                 </div>
                 <div className="rounded-2xl bg-white p-4">
-                  <p className="font-semibold text-slate-900">Selected files</p>
-                  <p className="mt-1">{files.length}</p>
+                  <p className="font-semibold text-slate-900">材料类型</p>
+                  <p className="mt-1">{getFileKindLabel(fileKind)}</p>
+                </div>
+                <div className="rounded-2xl bg-white p-4">
+                  <p className="font-semibold text-slate-900">材料数量</p>
+                  <p className="mt-1">{files.length} 份</p>
                 </div>
               </div>
             </SectionCard>
 
             <SectionCard
-              title="Extraction status"
-              description="The result flags stay explicit and conservative."
+              title="解析结果摘要"
+              description="这里先汇总本次结果的完整度与老师需要继续复核的部分。"
             >
               {result ? (
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant="info">{`source: ${result.source}`}</Badge>
-                    <Badge variant="secondary">{`fileType: ${result.fileType}`}</Badge>
-                    <Badge variant="outline">{`confidence: ${Math.round(result.confidence * 100)}%`}</Badge>
-                    {renderBooleanBadge("fallback", result.fallback)}
-                    {renderBooleanBadge("mock", result.mock)}
-                    {renderBooleanBadge("liveReadyButNotVerified", result.liveReadyButNotVerified)}
+                    <Badge variant="info">{`识别置信度 ${Math.round(result.confidence * 100)}%`}</Badge>
+                    <Badge variant="secondary">{`材料类型 ${getFileKindLabel(result.fileType)}`}</Badge>
+                    {result.fallback || result.mock ? (
+                      <Badge variant="warning">当前使用本地兜底结果</Badge>
+                    ) : null}
+                    {result.liveReadyButNotVerified ? formatResultBadge("建议继续复核原件", true) : null}
                   </div>
                   <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-4">
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-indigo-600" />
-                      <p className="text-sm font-semibold text-slate-900">Summary</p>
+                      <p className="text-sm font-semibold text-slate-900">结果摘要</p>
                     </div>
                     <p className="mt-2 text-sm leading-6 text-slate-600">{result.summary}</p>
                     <p className="mt-3 text-xs leading-5 text-slate-500">{result.disclaimer}</p>
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">Submit a request to see bridge status flags.</p>
+                <p className="text-sm text-slate-500">发起解析后，这里会汇总结果摘要与复核提醒。</p>
               )}
             </SectionCard>
 
             <SectionCard
-              title="Why this is conservative"
-              description="This is the core honesty model for T8."
+              title="老师处理建议"
+              description="先用解析结果缩短阅读时间，再结合原始材料做最后确认。"
             >
               <div className="space-y-3">
                 <div className="rounded-3xl border border-amber-100 bg-amber-50/60 p-4">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
-                    <p className="text-sm font-semibold text-slate-900">Text-only fallback today</p>
+                    <p className="text-sm font-semibold text-slate-900">先看重点，再核对原件</p>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    The current page forwards file metadata and optional text hints. If you need a real OCR
-                    walkthrough later, T9/T10 can consume a stronger binary/file-url contract.
+                    当前结果更适合作为老师快速读材料的第一步，遇到关键结论时仍建议回看原始图片或 PDF。
                   </p>
                 </div>
                 <div className="rounded-3xl border border-slate-100 bg-white p-4">
                   <div className="flex items-center gap-2">
                     <ShieldAlert className="h-4 w-4 text-slate-700" />
-                    <p className="text-sm font-semibold text-slate-900">No premature action mapping</p>
+                    <p className="text-sm font-semibold text-slate-900">先完成解析，再决定后续动作</p>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    T8 stops at facts, risks, contraindications, and follow-up hints, so downstream contracts can
-                    evolve separately.
+                    这一步会先整理事实、风险提示和后续提醒，后续处置建议仍需要老师结合班级情况继续判断。
                   </p>
                 </div>
               </div>

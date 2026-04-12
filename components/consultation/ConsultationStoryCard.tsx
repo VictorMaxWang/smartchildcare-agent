@@ -33,7 +33,7 @@ export default function ConsultationStoryCard({
       buildConsultationResultTraceViewModel({
         result,
         mode: "demo",
-        streamMessage: "以下三阶段摘要适合作为园长端联调和答辩展示入口。",
+        streamMessage: "以下三阶段摘要适合作为园长端会诊回顾入口。",
       }),
     [result]
   );
@@ -45,7 +45,7 @@ export default function ConsultationStoryCard({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="info">三阶段故事</Badge>
             <Badge variant={viewModel.providerState === "fallback" ? "warning" : viewModel.providerState === "real" ? "success" : "outline"}>
-              {viewModel.providerState === "fallback" ? "Fallback" : viewModel.providerState === "real" ? "真实 Provider" : "Provider 未知"}
+              {viewModel.providerState === "fallback" ? "本地兜底" : viewModel.providerState === "real" ? "智能生成" : "来源未说明"}
             </Badge>
             <Badge variant={viewModel.memoryState === "degraded" ? "warning" : viewModel.memoryState === "ready" ? "success" : "outline"}>
               {getMemoryStateLabel(viewModel.memoryState)}
