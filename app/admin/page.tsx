@@ -5,6 +5,7 @@ import { AlertCircle, ClipboardCheck, ShieldAlert, TrendingUp, Workflow } from "
 import AdminQualityMetricsPanel from "@/components/admin/AdminQualityMetricsPanel";
 import RiskPriorityBoard from "@/components/admin/RiskPriorityBoard";
 import EmptyState from "@/components/EmptyState";
+import UnifiedIntentEntryCard from "@/components/intent/UnifiedIntentEntryCard";
 import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
   AssistantEntryCard,
@@ -209,6 +210,19 @@ export default function AdminHomePage() {
         stacked
         main={
           <div className="space-y-6">
+            <UnifiedIntentEntryCard
+              roleHint="admin"
+              sourcePage="/admin"
+              title="一句话直达机构优先级、周报或 AI 入口"
+              placeholder="例如：帮我看今天机构最该先处理什么，或生成本周周报"
+              examples={[
+                "帮我看今天机构最该先处理什么",
+                "生成本周周报",
+                "开始一次会诊",
+              ]}
+              institutionId={currentUser.institutionId}
+            />
+
             <MetricGrid
               items={displayHome.heroStats.map((item, index) => ({
                 ...item,

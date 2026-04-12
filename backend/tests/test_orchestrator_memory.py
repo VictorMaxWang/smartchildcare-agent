@@ -355,6 +355,98 @@ def test_parent_message_reflexion_writes_trace_and_snapshot_and_uses_memory(tmp_
     )
 
 
+def test_parent_follow_up_snapshot_keeps_structured_feedback_binding(tmp_path, monkeypatch):
+    sqlite_path = tmp_path / "parent-follow-up-feedback.db"
+    configure_memory_backend(monkeypatch, backend="sqlite", sqlite_path=str(sqlite_path))
+
+    orchestrator = build_orchestrator()
+    result = asyncio.run(
+        orchestrator.parent_follow_up(
+            {
+                "snapshot": {
+                    "child": {
+                        "id": "child-1",
+                        "name": "Anan",
+                    },
+                    "summary": {
+                        "health": {
+                            "abnormalCount": 0,
+                            "handMouthEyeAbnormalCount": 0,
+                            "moodKeywords": [],
+                        },
+                        "meals": {
+                            "recordCount": 1,
+                            "hydrationAvg": 220,
+                            "balancedRate": 80,
+                            "monotonyDays": 0,
+                            "allergyRiskCount": 0,
+                        },
+                        "growth": {
+                            "recordCount": 1,
+                            "attentionCount": 1,
+                            "pendingReviewCount": 1,
+                            "topCategories": [],
+                        },
+                        "feedback": {
+                            "count": 1,
+                            "statusCounts": {"unable_to_execute": 1},
+                            "keywords": ["sleep"],
+                        },
+                    },
+                    "recentDetails": {
+                        "health": [],
+                        "meals": [],
+                        "growth": [],
+                        "feedback": [],
+                    },
+                    "ruleFallback": [],
+                },
+                "suggestionTitle": "Sleep support",
+                "question": "What should the parent do tonight?",
+                "latestFeedback": {
+                    "feedbackId": "fb-structured-1",
+                    "childId": "child-1",
+                    "sourceRole": "parent",
+                    "sourceChannel": "manual",
+                    "relatedTaskId": "task-parent-1",
+                    "relatedConsultationId": "consult-parent-1",
+                    "executionStatus": "unable_to_execute",
+                    "executorRole": "parent",
+                    "childReaction": "resisted",
+                    "improvementStatus": "worse",
+                    "barriers": ["Child had a fever"],
+                    "notes": "The family could not execute the task tonight.",
+                    "attachments": {},
+                    "submittedAt": "2026-04-11T08:00:00Z",
+                    "source": {"kind": "structured", "workflow": "manual"},
+                    "fallback": {"rawInterventionCardId": "card-1"},
+                },
+                "currentInterventionCard": {
+                    "id": "card-1",
+                    "consultationId": "consult-parent-1",
+                    "title": "Sleep support",
+                    "tonightHomeAction": "Keep the same bedtime routine tonight.",
+                    "observationPoints": ["Watch bedtime resistance."],
+                    "tomorrowObservationPoint": "Check morning arrival mood.",
+                    "reviewIn48h": "Review bedtime stability in 48 hours.",
+                },
+            }
+        )
+    )
+
+    snapshots = asyncio.run(orchestrator.repositories.list_recent_snapshots(limit=10, child_id="child-1"))
+    follow_up_snapshot = next(item for item in snapshots if item.snapshot_type == "parent-follow-up-result")
+
+    assert result["source"] == "mock"
+    assert follow_up_snapshot.session_id == "consult-parent-1"
+    assert follow_up_snapshot.snapshot_json["latestFeedback"]["relatedTaskId"] == "task-parent-1"
+    assert follow_up_snapshot.snapshot_json["latestFeedback"]["relatedConsultationId"] == "consult-parent-1"
+    assert (
+        follow_up_snapshot.snapshot_json["recentDetails"]["feedback"][0]["executionStatus"]
+        == "unable_to_execute"
+    )
+
+
 def test_memory_service_remember_persists_session_message(monkeypatch):
     configure_memory_backend(monkeypatch, backend="memory")
 

@@ -256,6 +256,7 @@ def test_parent_follow_up_memory_context_extracts_structured_feedback_signals(tm
                         "sourceRole": "parent",
                         "sourceChannel": "manual",
                         "relatedTaskId": "task-parent-1",
+                        "relatedConsultationId": "consult-structured-1",
                         "executionStatus": "unable_to_execute",
                         "executorRole": "parent",
                         "childReaction": "resisted",
@@ -274,6 +275,8 @@ def test_parent_follow_up_memory_context_extracts_structured_feedback_signals(tm
                                 "childId": "child-feedback-1",
                                 "sourceRole": "parent",
                                 "sourceChannel": "manual",
+                                "relatedTaskId": "task-parent-1",
+                                "relatedConsultationId": "consult-structured-1",
                                 "executionStatus": "unable_to_execute",
                                 "executorRole": "parent",
                                 "childReaction": "resisted",
@@ -308,6 +311,14 @@ def test_parent_follow_up_memory_context_extracts_structured_feedback_signals(tm
         for item in body["prompt_context"]["recent_continuity_signals"]
     )
     assert any(
+        "task-parent-1" in item or "consult-structured-1" in item
+        for item in body["prompt_context"]["recent_continuity_signals"]
+    )
+    assert any(
         "could not execute the task tonight" in item.lower()
+        for item in body["prompt_context"]["open_loops"]
+    )
+    assert any(
+        "Child had a fever" in item
         for item in body["prompt_context"]["open_loops"]
     )

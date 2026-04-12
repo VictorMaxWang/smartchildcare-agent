@@ -21,6 +21,7 @@ export interface FollowUpCardContext {
   childId: string;
   currentInterventionCard: {
     id?: string;
+    consultationId?: string;
     title: string;
     tonightHomeAction: string;
     observationPoints: string[];
@@ -261,13 +262,21 @@ function buildTaskBase(params: {
 export function buildInterventionTasksFromCard(
   card: Pick<
     InterventionCard,
-    "id" | "title" | "targetChildId" | "tonightHomeAction" | "reviewIn48h" | "createdAt" | "updatedAt"
+    | "id"
+    | "title"
+    | "targetChildId"
+    | "tonightHomeAction"
+    | "reviewIn48h"
+    | "consultationId"
+    | "createdAt"
+    | "updatedAt"
   >,
-  options?: { legacyWeeklyTaskId?: string }
+  options?: { legacyWeeklyTaskId?: string; consultationId?: string }
 ) {
   const createdAt = safeIso(card.createdAt ?? card.updatedAt);
   const updatedAt = safeIso(card.updatedAt ?? card.createdAt ?? createdAt);
   const sourceId = card.id;
+  const consultationId = options?.consultationId ?? card.consultationId;
 
   const parentTask = buildTaskBase({
     childId: card.targetChildId,
@@ -285,6 +294,7 @@ export function buildInterventionTasksFromCard(
     legacyRefs: {
       interventionCardId: card.id,
       legacyWeeklyTaskId: options?.legacyWeeklyTaskId,
+      consultationId,
     },
   });
 
@@ -304,6 +314,7 @@ export function buildInterventionTasksFromCard(
     legacyRefs: {
       interventionCardId: card.id,
       legacyWeeklyTaskId: options?.legacyWeeklyTaskId,
+      consultationId,
     },
   });
 
@@ -408,6 +419,10 @@ function findMatchingFeedback(task: CanonicalTask, feedback: GuardianFeedback) {
   if (task.ownerRole !== "parent") return false;
   if (feedback.relatedTaskId) {
     return feedback.relatedTaskId === task.taskId;
+  }
+  const consultationId = task.legacyRefs?.consultationId;
+  if (feedback.relatedConsultationId && consultationId) {
+    return feedback.relatedConsultationId === consultationId;
   }
   const interventionCardId = task.legacyRefs?.interventionCardId ?? task.sourceId;
   if (feedback.interventionCardId) {
@@ -611,6 +626,7 @@ export function buildTasksFromFollowUpCardContext(input: FollowUpCardContext) {
   const sourceId = input.currentInterventionCard.id ?? `follow-up-card-${input.childId}`;
   const baseCard = {
     id: sourceId,
+    consultationId: input.currentInterventionCard.consultationId,
     title: input.currentInterventionCard.title,
     targetChildId: input.childId,
     tonightHomeAction: input.currentInterventionCard.tonightHomeAction,
@@ -618,7 +634,10 @@ export function buildTasksFromFollowUpCardContext(input: FollowUpCardContext) {
     createdAt,
     updatedAt: input.updatedAt ?? createdAt,
   };
-  return buildInterventionTasksFromCard(baseCard, { legacyWeeklyTaskId: input.legacyWeeklyTaskId });
+  return buildInterventionTasksFromCard(baseCard, {
+    legacyWeeklyTaskId: input.legacyWeeklyTaskId,
+    consultationId: input.currentInterventionCard.consultationId,
+  });
 }
 
 export function buildCurrentInterventionCardFromTask(params: {
@@ -641,6 +660,10 @@ export function buildCurrentInterventionCardFromTask(params: {
 
   return {
     id: parentTask?.legacyRefs?.interventionCardId ?? followUpTask?.legacyRefs?.interventionCardId ?? params.activeTask.sourceId,
+    consultationId:
+      parentTask?.legacyRefs?.consultationId ??
+      followUpTask?.legacyRefs?.consultationId ??
+      params.activeTask.legacyRefs?.consultationId,
     title,
     tonightHomeAction,
     observationPoints: [] as string[],

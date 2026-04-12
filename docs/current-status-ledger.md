@@ -122,10 +122,10 @@
 | `T11` | 关怀模式 / 祖辈模式：大字卡片 + 简化交互 | `Planned` | 关怀模式 / 祖辈模式 | - | 高 | walkthrough / 录屏 | `TR+A` |
 | `T12` | 关怀模式：一键播报 + 一键语音反馈 | `Planned` | 关怀模式 / 祖辈模式 | `T11` | 中 | 真机 / 录屏 | `TR+A` |
 | `T13` | 统一意图入口：后端路由器 | `Planned` | 统一意图入口 | - | 高 | contract smoke | `TR+A` |
-| `T14` | 统一意图入口：前端超级入口 + deeplink 卡 | `Planned` | 统一意图入口 | `T13` | 中 | walkthrough / 录屏 | `TR+L+A` |
-| `T15` | 家长反馈结构化回流：schema / store / normalize | `Planned` | 家长反馈闭环 | - | 中 | schema / store smoke | `TR+A` |
-| `T16` | Parent 结构化反馈填写器 | `Planned` | 家长反馈闭环 | `T15` | 中 | walkthrough / 真机 | `TR+A` |
-| `T17` | 家长反馈写回 memory / trend / weekly report / consultation | `Planned` | 家长反馈闭环 | `T15`、`T16` | 中 | walkthrough / trace 检查 | `TR+L+A` |
+| `T14` | 统一意图入口：前端超级入口 + deeplink 卡 | `Done-code-only` | 统一意图入口 | `T13` | 中 | walkthrough / 录屏 | `TR+L+A` |
+| `T15` | 家长反馈结构化回流：schema / store / normalize | `Done-code-only` | 家长反馈闭环 | - | 中 | schema / store smoke | `TR+A` |
+| `T16` | Parent 结构化反馈填写器 | `Done-code-only` | 家长反馈闭环 | `T15` | 中 | walkthrough / 真机 | `TR+A` |
+| `T17` | 家长反馈写回 memory / trend / weekly report / consultation | `Done-code-only` | 家长反馈闭环 | `T15`、`T16` | 中 | walkthrough / trace 检查 | `TR+L+A` |
 | `T18` | 会诊证据链 contract | `Done-code-only` | 会诊可解释性增强 | - | 中 | contract smoke | `TR+A` |
 | `T19` | 会诊证据链 UI | `Done-code-only` | 会诊可解释性增强 | `T18` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T20` | 48 小时干预任务实体与生命周期 | `Planned` | 干预执行与升级 | - | 中 | workflow smoke | `TR+A` |

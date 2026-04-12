@@ -104,9 +104,30 @@ export default function TeacherAgentPage() {
   const [selectedSourceDraftId, setSelectedSourceDraftId] = useState<string | null>(
     null
   );
+  const routeIntent = searchParams.get("intent");
   const preloadAction = searchParams.get("action");
   const queryDraftId = searchParams.get("draftId");
   const queryChildId = searchParams.get("childId");
+  const effectiveQueryChildId = useMemo(
+    () =>
+      queryChildId && visibleChildren.some((child) => child.id === queryChildId)
+        ? queryChildId
+        : "",
+    [queryChildId, visibleChildren]
+  );
+  const effectivePreloadAction = useMemo(() => {
+    if (isWorkflow(preloadAction)) {
+      return preloadAction;
+    }
+    if (routeIntent === "record_observation" && effectiveQueryChildId) {
+      return "follow-up";
+    }
+    return null;
+  }, [effectiveQueryChildId, preloadAction, routeIntent]);
+  const intentEntryHint =
+    routeIntent === "record_observation"
+      ? "已从统一入口定位到观察记录入口，可先确认草稿，或直接生成今日跟进行动。"
+      : null;
 
   const classContext = useMemo(
     () =>
@@ -522,7 +543,10 @@ export default function TeacherAgentPage() {
 
   const runWorkflow = useCallback(async (workflow: TeacherAgentWorkflowType) => {
     const nextScope: TeacherAgentMode = workflow === "weekly-summary" ? "class" : "child";
-    const targetChildId = nextScope === "child" ? selectedChildId || defaultChildId : undefined;
+    const targetChildId =
+      nextScope === "child"
+        ? effectiveQueryChildId || selectedChildId || defaultChildId
+        : undefined;
 
     if (nextScope === "child" && !targetChildId) {
       setError("当前没有可用于教师 Agent 的幼儿数据。");
@@ -614,15 +638,16 @@ export default function TeacherAgentPage() {
     visibleChildren,
     markMobileDraftSyncStatus,
     upsertReminder,
+    effectiveQueryChildId,
   ]);
 
   useEffect(() => {
-    if (!isWorkflow(preloadAction) || visibleChildren.length === 0) return;
-    if (preloadHandledRef.current === preloadAction) return;
+    if (!isWorkflow(effectivePreloadAction) || visibleChildren.length === 0) return;
+    if (preloadHandledRef.current === effectivePreloadAction) return;
 
-    preloadHandledRef.current = preloadAction;
-    void runWorkflow(preloadAction);
-  }, [preloadAction, runWorkflow, visibleChildren.length]);
+    preloadHandledRef.current = effectivePreloadAction;
+    void runWorkflow(effectivePreloadAction);
+  }, [effectivePreloadAction, runWorkflow, visibleChildren.length]);
 
   useEffect(() => {
     if (visibleChildren.length === 0) return;
@@ -957,6 +982,11 @@ export default function TeacherAgentPage() {
             >
               <div className="rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5">
                 {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
+                {intentEntryHint ? (
+                  <div className="mb-4 rounded-2xl border border-sky-100 bg-white/80 p-4 text-sm leading-6 text-slate-600">
+                    {intentEntryHint}
+                  </div>
+                ) : null}
 
                 {latestResult ? (
                   <TeacherAgentResultCard result={latestResult} />

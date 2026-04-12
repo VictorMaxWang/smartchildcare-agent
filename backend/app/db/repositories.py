@@ -122,6 +122,8 @@ def _extract_session_id(value: dict[str, Any]) -> str | None:
         or _coerce_string(value.get("sessionId"))
         or _coerce_string(value.get("consultationId"))
         or _coerce_string(value.get("consultation_id"))
+        or _coerce_string(value.get("relatedConsultationId"))
+        or _coerce_string(value.get("related_consultation_id"))
         or _coerce_string(value.get("trace_id"))
         or _coerce_string(value.get("traceId"))
     )

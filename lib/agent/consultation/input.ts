@@ -8,7 +8,7 @@ import type {
   MemoryContextMeta,
   PromptMemoryContext,
 } from "@/lib/ai/types";
-import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
+import { selectStructuredFeedbackConsumption } from "@/lib/feedback/consumption";
 import { buildContinuityNotes } from "@/lib/memory/prompt-context";
 
 export interface ConsultationPriorityHint {
@@ -44,6 +44,7 @@ export interface ConsultationInputFromSnapshotParams {
   snapshot: ChildSuggestionSnapshot;
   latestFeedback?: AiFollowUpPayload["latestFeedback"];
   currentInterventionCard?: AiFollowUpPayload["currentInterventionCard"];
+  activeTaskId?: string;
   focusReasons?: string[];
   question?: string;
   suggestion?: AiSuggestionResponse;
@@ -73,22 +74,38 @@ export function buildConsultationInputFromSnapshot(
 ): ConsultationInput {
   const generatedAt = new Date().toISOString();
   const promptMemoryContext = params.memoryContext?.promptContext ?? params.snapshot.memoryContext;
-  const continuityNotes =
-    params.snapshot.continuityNotes ??
-    buildContinuityNotes(params.snapshot.child.name, promptMemoryContext);
-  const recentFeedback = params.snapshot.recentDetails?.feedback?.[0];
-  const latestFeedback =
-    params.latestFeedback ??
-    (recentFeedback ? (toFollowUpFeedbackLite(recentFeedback) ?? undefined) : undefined);
-  const focusReasons = takeUnique([
-    ...(params.focusReasons ?? []),
-    ...continuityNotes,
-    ...(promptMemoryContext?.openLoops ?? []),
-    ...(promptMemoryContext?.recentContinuitySignals ?? []),
-    params.suggestion?.summary,
-    ...params.suggestion?.concerns ?? [],
-    ...params.snapshot.ruleFallback.map((item) => item.title),
-  ]);
+  const feedbackConsumption = selectStructuredFeedbackConsumption(
+    [params.latestFeedback, params.snapshot.recentDetails?.feedback],
+    {
+      childId: params.snapshot.child.id,
+      relatedTaskId: params.activeTaskId ?? params.latestFeedback?.relatedTaskId,
+      relatedConsultationId:
+        params.latestFeedback?.relatedConsultationId ?? params.currentInterventionCard?.consultationId,
+      interventionCardId: params.currentInterventionCard?.id,
+    }
+  );
+  const continuityNotes = takeUnique(
+    [
+      ...(params.snapshot.continuityNotes ?? buildContinuityNotes(params.snapshot.child.name, promptMemoryContext)),
+      feedbackConsumption.summary,
+      ...feedbackConsumption.continuitySignals,
+      ...feedbackConsumption.openLoops,
+    ],
+    8
+  );
+  const focusReasons = takeUnique(
+    [
+      ...(params.focusReasons ?? []),
+      ...continuityNotes,
+      ...(promptMemoryContext?.openLoops ?? []),
+      ...(promptMemoryContext?.recentContinuitySignals ?? []),
+      feedbackConsumption.primaryActionSupport,
+      params.suggestion?.summary,
+      ...(params.suggestion?.concerns ?? []),
+      ...params.snapshot.ruleFallback.map((item) => item.title),
+    ],
+    8
+  );
   const responseSource = params.followUp?.source ?? params.suggestion?.source ?? "fallback";
 
   return {
@@ -101,7 +118,7 @@ export function buildConsultationInputFromSnapshot(
     summary: params.snapshot.summary,
     recentDetails: params.snapshot.recentDetails,
     focusReasons,
-    latestFeedback,
+    latestFeedback: feedbackConsumption.feedback,
     currentInterventionCard: params.currentInterventionCard,
     suggestionSummary: params.suggestion?.summary,
     followUpAnswer: params.followUp?.answer,

@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, BrainCircuit, CalendarDays, CheckCircle2, MessageCircleMore, MoonStar, TrendingUp } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import UnifiedIntentEntryCard from "@/components/intent/UnifiedIntentEntryCard";
 import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel";
 import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
-  AssistantEntryCard,
   InlineLinkButton,
   MetricGrid,
   RolePageShell,
@@ -483,18 +483,19 @@ export default function ParentHomePage() {
         }
         aside={
           <div className="space-y-6">
-            <AssistantEntryCard
-              title="进入 AI 助手 / 继续追问"
-              description="当你想知道今晚怎么陪伴、为什么最近状态有变化、做完后怎么反馈，直接从这里进入。"
-              href={agentHref}
-              buttonLabel={primaryAgentLabel}
-            >
-              <ul className="space-y-3 text-sm leading-6 text-slate-600">
-                <li>当前服务对象：{viewModel.child.name}</li>
-                <li>当前任务：今晚家庭动作 + 明早反馈</li>
-                <li>推荐路径：先看干预卡，再继续追问</li>
-              </ul>
-            </AssistantEntryCard>
+            <UnifiedIntentEntryCard
+              roleHint="parent"
+              sourcePage="/parent"
+              title="一句话让家长助手直接给出今晚入口"
+              placeholder="例如：我今晚该做什么，或我想看孩子最近趋势"
+              examples={[
+                "我今晚该做什么",
+                "我想看孩子最近趋势",
+                "打开今晚的微绘本",
+              ]}
+              childId={feed.child.id}
+              compact
+            />
 
             <SectionCard
               title="最近一张 AI 干预卡预览"

@@ -387,6 +387,43 @@ test("evaluateTaskEscalations matches negative feedback by relatedTaskId before 
   assert.equal(suggestion?.ownerRole, "admin");
 });
 
+test("evaluateTaskEscalations can bind negative feedback through relatedConsultationId", () => {
+  const { parentTask, followUpTask } = buildInterventionTasksFromCard({
+    id: "card-consult-link",
+    consultationId: "consult-shared-1",
+    title: "Task card-consult-link",
+    targetChildId: "child-1",
+    tonightHomeAction: "Home action for card-consult-link",
+    reviewIn48h: "Review action for card-consult-link",
+    createdAt: "2026-04-10T08:00:00.000Z",
+    updatedAt: "2026-04-10T08:00:00.000Z",
+  });
+
+  const suggestions = evaluateTaskEscalations({
+    tasks: [parentTask, { ...followUpTask, status: "completed", completedAt: "2026-04-10T11:00:00.000Z" }],
+    guardianFeedbacks: [
+      {
+        childId: parentTask.childId,
+        date: "2026-04-10T10:30:00.000Z",
+        submittedAt: "2026-04-10T10:30:00.000Z",
+        relatedConsultationId: "consult-shared-1",
+        interventionCardId: "different-card",
+        executionStatus: "unable_to_execute",
+        improvementStatus: "worse",
+        executed: false,
+        improved: false,
+        notes: "The parent could not execute the intervention tonight.",
+        barriers: ["Child had a fever"],
+      },
+    ],
+    now: "2026-04-10T12:00:00.000Z",
+  });
+
+  const suggestion = byTaskId(suggestions, parentTask.taskId);
+  assert.equal(suggestion?.escalationLevel, "reconsult_required");
+  assert.ok(suggestion?.triggeredRules.includes("guardian_feedback_negative_no_improvement"));
+});
+
 test("evaluateTaskEscalations treats no_change improvement as negative structured feedback", () => {
   const { parentTask, followUpTask } = buildTaskPair({
     id: "card-no-change",

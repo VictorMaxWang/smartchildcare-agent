@@ -317,7 +317,11 @@
 - 是否适合并行：中
 - 最小验收方式：三端至少一端出现统一意图入口，并能落到可点击 deeplink 结果卡
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-12 更新：已新增 `components/intent/UnifiedIntentEntryCard.tsx`、`components/intent/IntentResultPreviewCard.tsx`、`lib/ai/intent-router-client.ts`，统一走同源 `POST /api/ai/intent-router`，并在 `/teacher`、`/teacher/home`、`/admin`、`/parent` 落地轻量单次路由入口。
+- 2026-04-12 边界：本轮只做单次问句 -> 单次路由 -> deeplink 结果卡，不引入长对话工作区，不改 `RoleScaffold` 主结构，不碰 Storybook 与 Admin Agent 主页面。
+- 2026-04-12 补桥接：`/teacher/agent` 读取 `intent=record_observation` 并落到现有教师 workflow 入口，`/teacher/high-risk-consultation` 支持 `childId` 预选，`/parent/agent` 读取 `intent=query_trend` 时自动触发一次现有趋势查询。
+- 2026-04-12 验证目标：`npm run lint`、`npm run build`、`npx --yes tsx --test lib/ai/intent-router.test.ts`，并对 `/teacher`、`/admin`、`/parent` 做页面 smoke。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ---
@@ -369,7 +373,8 @@
 - 是否适合并行：中
 - 最小验收方式：反馈写回后能在 trend / consultation / weekly report 中至少一处被真实引用
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏再验
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only`
+- 2026-04-12 更新：新增统一 feedback consumption adapter，按 `relatedTaskId -> relatedConsultationId -> interventionCardId -> submittedAt` 选取反馈，并把 canonical feedback 真实接入 `memory`、`follow-up/consultation`、`parent trend explanation`、`parent weekly report` 四条主链；`executionStatus / childReaction / improvementStatus / barriers / notes` 现已进入 continuity/open-loop/highlight/risk/supporting-signal 文案，`relatedTaskId` 与 `relatedConsultationId` 也会随 snapshot / task / escalation 一起保留。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T18｜会诊证据链 contract

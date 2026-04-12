@@ -445,6 +445,7 @@ export interface AiFollowUpPayload {
   latestFeedback?: ParentStructuredFeedbackLite;
   currentInterventionCard?: {
     id?: string;
+    consultationId?: string;
     title: string;
     tonightHomeAction: string;
     observationPoints: string[];

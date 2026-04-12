@@ -274,8 +274,31 @@ def _extract_feedback_candidates(snapshot_json: dict[str, Any] | None) -> list[d
     return deduped
 
 
+def _feedback_binding(candidate: dict[str, Any]) -> str | None:
+    parts = [
+        f"task {_coerce_string(candidate.get('relatedTaskId'))}"
+        if _coerce_string(candidate.get("relatedTaskId"))
+        else None,
+        f"consultation {_coerce_string(candidate.get('relatedConsultationId'))}"
+        if _coerce_string(candidate.get("relatedConsultationId"))
+        else None,
+    ]
+    rendered = " / ".join(part for part in parts if part)
+    return rendered or None
+
+
 def _format_feedback_signal(candidate: dict[str, Any]) -> str | None:
-    parts = [f"Execution={candidate.get('executionStatus') or 'unknown'}"]
+    parts = []
+
+    binding = _feedback_binding(candidate)
+    if binding:
+        parts.append(f"Binding={binding}")
+
+    status = _coerce_string(candidate.get("status"))
+    if status:
+        parts.append(f"Status={status}")
+
+    parts.append(f"Execution={candidate.get('executionStatus') or 'unknown'}")
 
     improvement_status = _coerce_string(candidate.get("improvementStatus"))
     if improvement_status and improvement_status != "unknown":
@@ -293,7 +316,7 @@ def _format_feedback_signal(candidate: dict[str, Any]) -> str | None:
     if barriers:
         parts.append(f"Barriers={'; '.join(barriers[:2])}")
 
-    notes = _coerce_string(candidate.get("notes"))
+    notes = _coerce_string(candidate.get("notes")) or _coerce_string(candidate.get("content"))
     if notes:
         parts.append(notes)
 
@@ -306,29 +329,32 @@ def _feedback_open_loop_hints(snapshot_json: dict[str, Any] | None, limit: int =
     for candidate in _extract_feedback_candidates(snapshot_json):
         execution_status = _coerce_string(candidate.get("executionStatus")) or "unknown"
         improvement_status = _coerce_string(candidate.get("improvementStatus")) or "unknown"
-        notes = _coerce_string(candidate.get("notes"))
+        notes = _coerce_string(candidate.get("notes")) or _coerce_string(candidate.get("content"))
         barriers = [
             text
             for text in (_coerce_string(item) for item in _ensure_list(candidate.get("barriers")))
             if text
         ]
+        binding = _feedback_binding(candidate) or "current family action"
 
         if execution_status in {"not_started", "partial", "unable_to_execute"}:
             if notes:
-                hints.append(f"Parent feedback needs follow-up: {notes}")
+                barrier_suffix = f" Barrier: {barriers[0]}" if barriers else ""
+                hints.append(f"Follow up {binding}: {notes}{barrier_suffix}")
             elif barriers:
-                hints.append(f"Parent feedback execution barrier: {barriers[0]}")
+                hints.append(f"Follow up {binding}: execution barrier is {barriers[0]}")
             else:
-                hints.append(f"Parent feedback remains {execution_status}.")
+                hints.append(f"Follow up {binding}: execution remains {execution_status}.")
 
         if improvement_status in {"no_change", "worse"}:
             if notes:
-                hints.append(f"Parent feedback indicates no clear improvement: {notes}")
+                barrier_suffix = f" Barrier: {barriers[0]}" if barriers else ""
+                hints.append(f"Follow up {binding}: improvement is still {improvement_status}. {notes}{barrier_suffix}")
             else:
-                hints.append(f"Parent feedback indicates {improvement_status}.")
+                hints.append(f"Follow up {binding}: improvement is still {improvement_status}.")
 
         if barriers:
-            hints.append(f"Parent feedback barrier: {barriers[0]}")
+            hints.append(f"Follow up {binding}: parent reported barrier {barriers[0]}")
 
     return _take_unique(hints, limit=limit)
 
@@ -350,6 +376,19 @@ def _snapshot_summary(record: AgentStateSnapshotRecord) -> str | None:
             if suggestion_title:
                 return suggestion_title
 
+    feedback_signals = [
+        signal
+        for signal in (
+            _format_feedback_signal(candidate)
+            for candidate in _extract_feedback_candidates(
+                record.snapshot_json if isinstance(record.snapshot_json, dict) else None
+            )
+        )
+        if signal
+    ]
+    if feedback_signals:
+        return feedback_signals[0]
+
     result = record.snapshot_json.get("result") if isinstance(record.snapshot_json, dict) else None
     if isinstance(result, dict):
         summary = (
@@ -365,19 +404,6 @@ def _snapshot_summary(record: AgentStateSnapshotRecord) -> str | None:
             final_conclusion = _coerce_string(coordinator.get("finalConclusion"))
             if final_conclusion:
                 return final_conclusion
-
-    feedback_signals = [
-        signal
-        for signal in (
-            _format_feedback_signal(candidate)
-            for candidate in _extract_feedback_candidates(
-                record.snapshot_json if isinstance(record.snapshot_json, dict) else None
-            )
-        )
-        if signal
-    ]
-    if feedback_signals:
-        return feedback_signals[0]
 
     return _coerce_string(record.input_summary) or _safe_json_text(record.snapshot_json)
 

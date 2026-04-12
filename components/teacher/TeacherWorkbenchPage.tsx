@@ -13,6 +13,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import UnifiedIntentEntryCard from "@/components/intent/UnifiedIntentEntryCard";
 import {
   AssistantEntryCard,
   InlineLinkButton,
@@ -193,6 +194,19 @@ export default function TeacherWorkbenchPage() {
         }
         aside={
           <div className="space-y-6">
+            <UnifiedIntentEntryCard
+              roleHint="teacher"
+              sourcePage="/teacher/home"
+              title="一句话让老师助手帮你找对入口"
+              placeholder="例如：帮我看看今天最需要优先处理的孩子，或生成本周周报"
+              examples={[
+                "帮我看看今天最需要优先处理的孩子",
+                "生成本周周报",
+                "开始一次会诊",
+              ]}
+              compact
+            />
+
             <AssistantEntryCard
               title="高风险儿童一键会诊"
               description="适合比赛 demo 的主路径：自动带入晨检异常、待复查、近 7 天观察和家长反馈，直接输出园内动作、家庭任务和园长决策卡。"

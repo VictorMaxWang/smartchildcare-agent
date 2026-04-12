@@ -35,6 +35,36 @@ function countAbnormalDays(input: ConsultationInput) {
   ).size;
 }
 
+function isStaleStructuredFeedback(input: ConsultationInput) {
+  const feedback = input.latestFeedback;
+  if (!input.currentInterventionCard || !feedback) return false;
+
+  return (
+    feedback.improved === false ||
+    feedback.executionStatus === "not_started" ||
+    feedback.executionStatus === "partial" ||
+    feedback.executionStatus === "unable_to_execute" ||
+    feedback.improvementStatus === "no_change" ||
+    feedback.improvementStatus === "worse" ||
+    feedback.barriers.length > 0 ||
+    feedback.childReaction === "resisted"
+  );
+}
+
+function hasPositiveStructuredFeedback(input: ConsultationInput) {
+  const feedback = input.latestFeedback;
+  if (!feedback) return false;
+
+  return (
+    feedback.improved === true ||
+    feedback.improvementStatus === "slight_improvement" ||
+    feedback.improvementStatus === "clear_improvement" ||
+    feedback.childReaction === "accepted" ||
+    feedback.childReaction === "improved" ||
+    (feedback.content ? hasPositiveFeedback(feedback.content) : false)
+  );
+}
+
 export function detectConsultationTrigger(input: ConsultationInput): ConsultationTriggerResult {
   const triggers: ConsultationTrigger[] = [];
   const healthRisk = input.summary.health.abnormalCount > 0 || input.summary.health.handMouthEyeAbnormalCount > 0;
@@ -43,6 +73,7 @@ export function detectConsultationTrigger(input: ConsultationInput): Consultatio
   const growthRisk = input.summary.growth.attentionCount >= 2;
   const abnormalDays = countAbnormalDays(input);
   const hydrationDisplay = getHydrationDisplayState(input.summary.meals.hydrationAvg);
+  const latestFeedback = input.latestFeedback;
 
   if ([healthRisk, dietRisk, reviewRisk || growthRisk].filter(Boolean).length >= 2) {
     triggers.push({
@@ -71,30 +102,31 @@ export function detectConsultationTrigger(input: ConsultationInput): Consultatio
     });
   }
 
-  if (input.currentInterventionCard && input.latestFeedback?.improved === false) {
+  if (isStaleStructuredFeedback(input)) {
     triggers.push({
       triggerType: "stale-intervention",
-      reason: "已生成干预卡但家长反馈显示改善不明显",
+      reason: "已生成干预卡，但家长反馈显示执行或改善仍未闭环",
       score: 92,
       evidence: takeUnique([
-        `当前干预卡：${input.currentInterventionCard.title}`,
-        input.latestFeedback.content,
-        input.latestFeedback.childReaction,
+        input.currentInterventionCard ? `当前干预卡：${input.currentInterventionCard.title}` : undefined,
+        latestFeedback?.executionStatus ? `执行状态：${latestFeedback.executionStatus}` : undefined,
+        latestFeedback?.improvementStatus ? `改善判断：${latestFeedback.improvementStatus}` : undefined,
+        latestFeedback?.childReaction ? `孩子反应：${latestFeedback.childReaction}` : undefined,
+        latestFeedback?.barriers[0] ? `执行阻碍：${latestFeedback.barriers[0]}` : undefined,
+        latestFeedback?.notes,
       ]),
     });
   }
 
-  if (
-    input.latestFeedback?.content &&
-    hasPositiveFeedback(input.latestFeedback.content) &&
-    (healthRisk || reviewRisk || growthRisk)
-  ) {
+  if (hasPositiveStructuredFeedback(input) && (healthRisk || reviewRisk || growthRisk)) {
     triggers.push({
       triggerType: "feedback-conflict",
       reason: "家长反馈与园内观察存在明显冲突，需要联合校准",
       score: 82,
       evidence: takeUnique([
-        `家长反馈：${input.latestFeedback.content}`,
+        latestFeedback?.content ? `家长反馈：${latestFeedback.content}` : undefined,
+        latestFeedback?.improvementStatus ? `家长判断：${latestFeedback.improvementStatus}` : undefined,
+        latestFeedback?.childReaction ? `孩子反应：${latestFeedback.childReaction}` : undefined,
         healthRisk ? "园内仍存在晨检异常" : undefined,
         reviewRisk ? "园内仍存在待复查任务" : undefined,
         growthRisk ? "园内仍存在连续关注记录" : undefined,

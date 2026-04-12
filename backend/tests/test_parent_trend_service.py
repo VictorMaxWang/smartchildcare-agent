@@ -230,6 +230,38 @@ def build_sparse_growth_snapshot() -> dict:
     return snapshot
 
 
+def build_feedback_signal_snapshot(
+    *,
+    execution_status: str,
+    improvement_status: str,
+    child_reaction: str,
+    barriers: list[str] | None = None,
+    notes: str = "",
+) -> dict:
+    snapshot = build_sparse_growth_snapshot()
+    snapshot["feedback"].append(
+        {
+            "feedbackId": f"feedback-{execution_status}-{improvement_status}",
+            "childId": "child-1",
+            "sourceRole": "parent",
+            "sourceChannel": "manual",
+            "relatedTaskId": "task-parent-1",
+            "relatedConsultationId": "consult-1",
+            "executionStatus": execution_status,
+            "executorRole": "parent",
+            "childReaction": child_reaction,
+            "improvementStatus": improvement_status,
+            "barriers": barriers or [],
+            "notes": notes,
+            "attachments": {},
+            "submittedAt": "2026-04-04T08:00:00Z",
+            "source": {"kind": "structured", "workflow": "manual"},
+            "fallback": {"rawInterventionCardId": "card-1"},
+        }
+    )
+    return snapshot
+
+
 def test_parent_trend_service_emotion_month_returns_improving():
     result = asyncio.run(
         run_parent_trend_query(
@@ -346,3 +378,46 @@ def test_parent_trend_service_defaults_to_seven_day_window():
 
     assert result["windowDays"] == 7
     assert result["query"]["resolvedWindowDays"] == 7
+
+
+def test_parent_trend_service_positive_structured_feedback_enters_supporting_signals():
+    result = asyncio.run(
+        run_parent_trend_query(
+            {
+                "question": "最近成长情况怎么样？",
+                "childId": "child-1",
+                "appSnapshot": build_feedback_signal_snapshot(
+                    execution_status="completed",
+                    improvement_status="clear_improvement",
+                    child_reaction="accepted",
+                    notes="The bedtime routine worked better this week.",
+                ),
+            }
+        )
+    )
+
+    assert any(signal["sourceType"] == "feedback" for signal in result["supportingSignals"])
+    assert any("明确改善" in signal["summary"] for signal in result["supportingSignals"])
+    assert "家长结构化反馈" in result["explanation"]
+
+
+def test_parent_trend_service_negative_structured_feedback_adds_warning_and_barrier():
+    result = asyncio.run(
+        run_parent_trend_query(
+            {
+                "question": "最近成长情况怎么样？",
+                "childId": "child-1",
+                "appSnapshot": build_feedback_signal_snapshot(
+                    execution_status="unable_to_execute",
+                    improvement_status="worse",
+                    child_reaction="resisted",
+                    barriers=["Child had a fever"],
+                    notes="The family could not execute the task tonight.",
+                ),
+            }
+        )
+    )
+
+    assert any(signal["sourceType"] == "feedback" for signal in result["supportingSignals"])
+    assert any("Child had a fever" in warning for warning in result["warnings"])
+    assert "暂时无法执行" in result["explanation"]

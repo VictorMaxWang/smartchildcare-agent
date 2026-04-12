@@ -86,6 +86,7 @@ function formatTimelineTime(value: string) {
 export default function ParentAgentPage() {
   const searchParams = useSearchParams();
   const childFromQuery = searchParams.get("child");
+  const routeIntent = searchParams.get("intent");
   const trendDebugEnabled = searchParams.get("trace") === "debug";
   const trendDebugCase = trendDebugEnabled
     ? resolveParentTrendDebugCase(searchParams.get("trendCase"))
@@ -136,6 +137,7 @@ export default function ParentAgentPage() {
   const reflexionRequestRef = useRef(0);
   const reflexionAbortRef = useRef<AbortController | null>(null);
   const selectedChildIdRef = useRef(selectedChildId);
+  const autoTrendHandledRef = useRef<string | null>(null);
 
   const selectedFeed = useMemo(
     () => parentFeed.find((item) => item.child.id === selectedChildId) ?? parentFeed[0],
@@ -281,6 +283,13 @@ export default function ParentAgentPage() {
     selectedFeed && storybookDemoSeedId
       ? `/parent/storybook?child=${selectedFeed.child.id}&demoSeed=${storybookDemoSeedId}`
       : `/parent/storybook?child=${selectedFeed?.child.id ?? ""}`;
+  const unifiedTrendQuestion = useMemo(
+    () =>
+      selectedFeed
+        ? `${selectedFeed.child.name} 最近趋势怎么样？`
+        : "我想看孩子最近趋势",
+    [selectedFeed]
+  );
 
   useEffect(() => {
     if (!selectedChildId && parentFeed[0]?.child.id) {
@@ -476,7 +485,7 @@ export default function ParentAgentPage() {
     }
   }, [readRouteError]);
 
-  async function submitTrendQuery(nextQuestion: string) {
+  const submitTrendQuery = useCallback(async (nextQuestion: string) => {
     if (!selectedFeed) return;
     if (trendDebugCase) {
       setQuestion("");
@@ -526,7 +535,23 @@ export default function ParentAgentPage() {
     } finally {
       setTrendLoading(false);
     }
-  }
+  }, [
+    attendanceRecords,
+    children,
+    consultations,
+    growthRecords,
+    guardianFeedbacks,
+    healthCheckRecords,
+    interventionCards,
+    mealRecords,
+    mobileDrafts,
+    normalizeTrendFailureMessage,
+    readTrendRouteError,
+    reminders,
+    selectedFeed,
+    taskCheckInRecords,
+    trendDebugCase,
+  ]);
 
   async function submitFollowUp(prefilledQuestion?: string) {
     if (!activeContext || !currentResult) return;
@@ -588,6 +613,21 @@ export default function ParentAgentPage() {
       setFollowUpLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (routeIntent !== "query_trend" || !selectedFeed || trendDebugCase) {
+      return;
+    }
+
+    const autoTrendKey = `${selectedFeed.child.id}:${routeIntent}`;
+    if (autoTrendHandledRef.current === autoTrendKey) {
+      return;
+    }
+
+    autoTrendHandledRef.current = autoTrendKey;
+    setQuestion(unifiedTrendQuestion);
+    void submitTrendQuery(unifiedTrendQuestion);
+  }, [routeIntent, selectedFeed, submitTrendQuery, trendDebugCase, unifiedTrendQuestion]);
 
   useEffect(() => {
     if (!baseContext || !snapshot) return;

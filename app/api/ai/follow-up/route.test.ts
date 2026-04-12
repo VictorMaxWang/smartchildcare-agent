@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AiFollowUpPayload } from "@/lib/ai/types";
+import { buildTasksFromFollowUpCardContext } from "@/lib/tasks/task-model";
 import { POST } from "./route.ts";
 
 function withEnv(
@@ -106,6 +107,7 @@ function buildPayload(): AiFollowUpPayload {
     },
     currentInterventionCard: {
       id: "card-1",
+      consultationId: "consult-1",
       title: "Sleep support",
       tonightHomeAction: "Keep the same bedtime routine tonight.",
       observationPoints: ["Watch bedtime resistance."],
@@ -158,6 +160,120 @@ test("follow-up route accepts structured latestFeedback and falls back locally w
       assert.equal(typeof body.answer, "string");
       assert.notEqual((body.answer as string).length, 0);
       assert.equal(body.error, undefined);
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("follow-up route reselects task-aware structured feedback from snapshot recentDetails", async () => {
+  const originalFetch = globalThis.fetch;
+  const payload = buildPayload();
+  const parentTaskId = buildTasksFromFollowUpCardContext({
+    childId: payload.snapshot.child.id,
+    currentInterventionCard: payload.currentInterventionCard!,
+  }).parentTask.taskId;
+  let memoryRequestBody: Record<string, unknown> | null = null;
+
+  payload.latestFeedback = {
+    feedbackId: "fb-unrelated",
+    childId: "child-1",
+    sourceRole: "parent",
+    sourceChannel: "manual",
+    relatedTaskId: "task-unrelated",
+    relatedConsultationId: "consult-unrelated",
+    executionStatus: "completed",
+    executionCount: 1,
+    executorRole: "parent",
+    childReaction: "accepted",
+    improvementStatus: "clear_improvement",
+    barriers: [],
+    notes: "A different task went well.",
+    attachments: {},
+    submittedAt: "2026-04-12T08:00:00.000Z",
+    source: {
+      kind: "structured",
+      workflow: "manual",
+      createdBy: "Parent Chen",
+      createdByRole: "parent",
+    },
+    fallback: {},
+  };
+  payload.snapshot.recentDetails.feedback = [
+    {
+      feedbackId: "fb-task-aware",
+      childId: "child-1",
+      sourceRole: "parent",
+      sourceChannel: "manual",
+      relatedTaskId: parentTaskId,
+      relatedConsultationId: "consult-task-aware",
+      executionStatus: "unable_to_execute",
+      executionCount: 1,
+      executorRole: "parent",
+      childReaction: "resisted",
+      improvementStatus: "worse",
+      barriers: ["Child had a fever"],
+      notes: "The family could not execute the task tonight.",
+      attachments: {},
+      submittedAt: "2026-04-11T20:00:00.000Z",
+      source: {
+        kind: "structured",
+        workflow: "manual",
+        createdBy: "Parent Chen",
+        createdByRole: "parent",
+      },
+      fallback: {
+        rawInterventionCardId: "card-1",
+      },
+    },
+  ];
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.endsWith("/api/v1/agents/parent/follow-up")) {
+      return new Response(JSON.stringify({ error: "not implemented" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    if (url.endsWith("/api/v1/memory/context")) {
+      memoryRequestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ error: "memory unavailable" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    throw new Error(`Unexpected fetch url: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    await withEnv({ BRAIN_API_BASE_URL: "http://brain.example.com" }, async () => {
+      const response = await POST(
+        new Request("http://localhost:3000/api/ai/follow-up", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-ai-force-fallback": "1",
+          },
+          body: JSON.stringify(payload),
+        })
+      );
+
+      const body = (await response.json()) as Record<string, unknown>;
+
+      assert.equal(response.status, 200);
+      assert.equal(
+        (memoryRequestBody?.options as Record<string, unknown> | undefined)?.session_id,
+        "consult-task-aware"
+      );
+      assert.ok(
+        ((body.continuityNotes as string[] | undefined) ?? []).some(
+          (item) => item.includes("Child had a fever") || item.includes(parentTaskId)
+        )
+      );
     });
   } finally {
     globalThis.fetch = originalFetch;

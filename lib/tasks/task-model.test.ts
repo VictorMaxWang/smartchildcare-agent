@@ -123,6 +123,7 @@ test("legacy reminders, guardian feedback and check-ins reconcile into canonical
 test("task adapter builds follow-up compatible intervention card context", () => {
   const { parentTask, followUpTask } = buildInterventionTasksFromCard({
     id: "card-c-1-demo",
+    consultationId: "consult-card-1",
     title: "Evening Decompression",
     targetChildId: "c-1",
     tonightHomeAction: "Keep a calm bedtime routine.",
@@ -137,6 +138,7 @@ test("task adapter builds follow-up compatible intervention card context", () =>
   });
 
   assert.equal(cardContext.id, "card-c-1-demo");
+  assert.equal(cardContext.consultationId, "consult-card-1");
   assert.equal(cardContext.tonightHomeAction, "Keep a calm bedtime routine.");
   assert.equal(cardContext.reviewIn48h, "Check whether tomorrow drop-off is calmer.");
 });

@@ -182,6 +182,10 @@ function matchesFeedbackToTask(task: CanonicalTask, feedback: TaskEscalationFeed
   if (feedback.relatedTaskId) {
     return feedback.relatedTaskId === task.taskId;
   }
+  const consultationId = task.legacyRefs?.consultationId;
+  if (feedback.relatedConsultationId && consultationId) {
+    return feedback.relatedConsultationId === consultationId;
+  }
   const cardId = task.legacyRefs?.interventionCardId;
   if (feedback.interventionCardId && cardId) {
     return feedback.interventionCardId === cardId;

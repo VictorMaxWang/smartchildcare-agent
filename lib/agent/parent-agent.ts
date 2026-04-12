@@ -539,6 +539,7 @@ export function buildParentAgentFollowUpPayload(params: {
       : undefined,
     currentInterventionCard: {
       id: params.suggestionResult.interventionCard.id,
+      consultationId: params.suggestionResult.interventionCard.consultationId,
       title: params.suggestionResult.interventionCard.title,
       tonightHomeAction: params.suggestionResult.interventionCard.tonightHomeAction,
       observationPoints: params.suggestionResult.interventionCard.observationPoints,

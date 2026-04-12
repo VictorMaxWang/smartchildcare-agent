@@ -1,5 +1,7 @@
 import type { ParentAgentChildContext } from "@/lib/agent/parent-agent";
 import type { WeeklyReportSnapshot } from "@/lib/ai/types";
+import { selectStructuredFeedbackConsumption } from "@/lib/feedback/consumption";
+import type { ParentStructuredFeedbackLite } from "@/lib/feedback/types";
 
 function uniqueTexts(items: Array<string | undefined>, limit = 4) {
   const result: string[] = [];
@@ -36,21 +38,48 @@ function buildSchoolActivityRate(context: ParentAgentChildContext) {
   return Math.min(100, Math.round((activeDates.size / 5) * 100));
 }
 
+function hasPositiveFeedbackState(
+  feedback: ParentAgentChildContext["latestFeedback"] | ParentStructuredFeedbackLite
+) {
+  return (
+    feedback?.improved === true ||
+    feedback?.improvementStatus === "slight_improvement" ||
+    feedback?.improvementStatus === "clear_improvement" ||
+    feedback?.childReaction === "accepted" ||
+    feedback?.childReaction === "improved"
+  );
+}
+
 export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext): WeeklyReportSnapshot {
   const weeklyHealthAbnormalCount = context.weeklyHealthChecks.filter((item) => item.isAbnormal).length;
   const topGrowthCategory = getTopGrowthCategory(context);
   const attentionCount = context.attentionGrowthRecords.length + weeklyHealthAbnormalCount;
+  const feedbackConsumption = selectStructuredFeedbackConsumption(
+    [context.latestFeedback, context.weeklyFeedbacks],
+    {
+      childId: context.child.id,
+      relatedTaskId: context.activeTask?.taskId,
+      relatedConsultationId: context.currentInterventionCard?.consultationId,
+      interventionCardId: context.currentInterventionCard?.id,
+        }
+  );
+  const selectedFeedback = feedbackConsumption.feedback;
+  const positiveFeedback = hasPositiveFeedbackState(selectedFeedback);
 
   const highlights = uniqueTexts(
     [
-      context.latestFeedback?.improved === true ? "最近一次家庭反馈显示孩子已有稳定改善" : undefined,
+      positiveFeedback ? "最近一次结构化反馈显示家庭动作已经开始起效" : undefined,
+      selectedFeedback?.childReaction === "accepted" || selectedFeedback?.childReaction === "improved"
+        ? `家长反馈提到孩子对家庭动作的反应更配合：${selectedFeedback.childReaction}`
+        : undefined,
+      feedbackConsumption.summary && positiveFeedback ? feedbackConsumption.summary : undefined,
       context.weeklyFeedbacks.length > 0 ? `本周已形成 ${context.weeklyFeedbacks.length} 次家园反馈` : undefined,
       topGrowthCategory ? `本周变化主要集中在${topGrowthCategory}` : undefined,
       context.weeklyMeals.length > 0 ? `本周已记录 ${context.weeklyMeals.length} 条饮食与补水线索` : undefined,
       context.teacherSuggestionSummary,
       ...context.smartInsights.filter((item) => item.level !== "warning").map((item) => item.title),
     ],
-    4
+    5
   );
 
   const risks = uniqueTexts(
@@ -58,9 +87,21 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
       ...context.smartInsights.filter((item) => item.level === "warning").map((item) => item.title),
       ...context.focusReasons,
       context.pendingReviews.length > 0 ? `仍有 ${context.pendingReviews.length} 项观察待继续跟进` : undefined,
-      context.latestFeedback?.improved === false ? "上一次家庭行动后改善仍不稳定" : undefined,
+      !positiveFeedback && feedbackConsumption.summary ? feedbackConsumption.summary : undefined,
+      ...feedbackConsumption.openLoops,
+      feedbackConsumption.primaryActionSupport,
     ],
-    4
+    5
+  );
+
+  const continuityNotes = uniqueTexts(
+    [
+      feedbackConsumption.summary,
+      ...feedbackConsumption.continuitySignals,
+      ...feedbackConsumption.openLoops,
+      feedbackConsumption.primaryActionSupport,
+    ],
+    6
   );
 
   return {
@@ -97,7 +138,8 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
     highlights:
       highlights.length > 0
         ? highlights
-        : ["本周已汇总园内观察与家庭反馈，适合继续做家园共育复盘"],
+        : ["本周已汇总园内观察与家庭反馈，适合继续把家园协同做成连续闭环。"],
     risks,
+    continuityNotes: continuityNotes.length > 0 ? continuityNotes : undefined,
   };
 }

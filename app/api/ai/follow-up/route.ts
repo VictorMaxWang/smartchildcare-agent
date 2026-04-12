@@ -3,7 +3,7 @@ import { executeFollowUp, getAiRuntimeOptions, isValidFollowUpPayload } from "@/
 import type { AiFollowUpPayload, ChildSuggestionSnapshot } from "@/lib/ai/types";
 import { buildConsultationInputFromSnapshot } from "@/lib/agent/consultation/input";
 import { maybeRunHighRiskConsultation } from "@/lib/agent/consultation/coordinator";
-import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
+import { selectStructuredFeedbackConsumption } from "@/lib/feedback/consumption";
 import { forwardBrainRequest } from "@/lib/server/brain-client";
 import { buildMemoryContextForPrompt } from "@/lib/server/memory-context";
 import {
@@ -25,6 +25,21 @@ function mergeTasks(...taskGroups: Array<CanonicalTask[] | undefined>) {
 
 function isFollowUpTask(task: CanonicalTask | undefined): task is FollowUpTask {
   return Boolean(task && task.taskType === "follow_up");
+}
+
+function uniqueTexts(items: Array<string | undefined>, limit = 5) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const item of items) {
+    const normalized = item?.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+
+  return result;
 }
 
 function buildTaskContext(payload: AiFollowUpPayload) {
@@ -92,6 +107,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid follow-up payload" }, { status: 400 });
   }
 
+  const taskContext = buildTaskContext(payload);
+  const feedbackConsumption =
+    payload.scope === "institution" || !("child" in payload.snapshot)
+      ? {
+          feedback: undefined,
+          summary: undefined,
+          continuitySignals: [] as string[],
+          openLoops: [] as string[],
+          primaryActionSupport: undefined,
+        }
+      : selectStructuredFeedbackConsumption(
+          [payload.latestFeedback, payload.snapshot.recentDetails?.feedback],
+          {
+            childId: payload.snapshot.child.id,
+            relatedTaskId: taskContext.activeTask?.taskId,
+            relatedConsultationId:
+              taskContext.currentInterventionCard?.consultationId ??
+              payload.currentInterventionCard?.consultationId ??
+              payload.latestFeedback?.relatedConsultationId,
+            interventionCardId: taskContext.currentInterventionCard?.id ?? payload.currentInterventionCard?.id,
+          }
+        );
+
+  const sessionId =
+    feedbackConsumption.feedback?.relatedConsultationId ??
+    taskContext.currentInterventionCard?.consultationId ??
+    payload.currentInterventionCard?.consultationId;
   const memoryContext =
     payload.scope === "institution" || !("child" in payload.snapshot)
       ? null
@@ -99,9 +141,10 @@ export async function POST(request: Request) {
           childId: payload.snapshot.child.id,
           workflowType: "parent-follow-up",
           query: payload.question,
+          sessionId,
           request,
         });
-  const taskContext = buildTaskContext(payload);
+
   const nextPayload =
     payload.scope === "institution" || !("child" in payload.snapshot) || !memoryContext
       ? payload
@@ -110,18 +153,27 @@ export async function POST(request: Request) {
           snapshot: {
             ...payload.snapshot,
             memoryContext: memoryContext.promptContext,
-            continuityNotes: payload.snapshot.continuityNotes ?? [
-              `参考了${payload.snapshot.child.name}的长期与近期连续上下文`,
-            ],
+            continuityNotes:
+              payload.snapshot.continuityNotes ??
+              uniqueTexts([
+                `参考了${payload.snapshot.child.name}的长期与近期连续上下文。`,
+                feedbackConsumption.summary,
+                ...feedbackConsumption.continuitySignals,
+                ...feedbackConsumption.openLoops,
+              ]),
           },
           memoryContext: memoryContext.promptContext,
-          continuityNotes: payload.continuityNotes,
+          continuityNotes: uniqueTexts([
+            ...(payload.continuityNotes ?? []),
+            feedbackConsumption.summary,
+            ...feedbackConsumption.continuitySignals,
+            ...feedbackConsumption.openLoops,
+          ]),
         };
+
   const taskAwarePayload = {
     ...nextPayload,
-    latestFeedback: nextPayload.latestFeedback
-      ? (toFollowUpFeedbackLite(nextPayload.latestFeedback) ?? undefined)
-      : undefined,
+    latestFeedback: feedbackConsumption.feedback,
     activeTask: taskContext.activeTask,
     tasks: taskContext.tasks,
     currentInterventionCard: taskContext.currentInterventionCard ?? nextPayload.currentInterventionCard,
@@ -133,9 +185,10 @@ export async function POST(request: Request) {
       ? null
       : await maybeRunHighRiskConsultation(
           buildConsultationInputFromSnapshot({
-            snapshot: (taskAwarePayload.snapshot as ChildSuggestionSnapshot),
+            snapshot: taskAwarePayload.snapshot as ChildSuggestionSnapshot,
             latestFeedback: taskAwarePayload.latestFeedback,
             currentInterventionCard: taskAwarePayload.currentInterventionCard,
+            activeTaskId: taskContext.activeTask?.taskId,
             question: payload.question,
             followUp: result,
             source: "api",

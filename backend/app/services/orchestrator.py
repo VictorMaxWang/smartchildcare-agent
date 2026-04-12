@@ -146,15 +146,144 @@ def _extract_child_ids(value: dict[str, Any], limit: int = 3) -> list[str]:
 
 
 def _extract_session_id(*values: Any) -> str | None:
-    keys = ("session_id", "sessionId", "consultationId", "consultation_id")
-    for value in values:
+    keys = (
+        "session_id",
+        "sessionId",
+        "consultationId",
+        "consultation_id",
+        "relatedConsultationId",
+        "related_consultation_id",
+    )
+    nested_keys = (
+        "latestFeedback",
+        "feedback",
+        "currentInterventionCard",
+        "snapshot",
+        "result",
+        "recentDetails",
+    )
+
+    def _scan(value: Any, depth: int = 0) -> str | None:
+        if depth > 3:
+            return None
+        if isinstance(value, list):
+            for item in value[:3]:
+                resolved = _scan(item, depth + 1)
+                if resolved:
+                    return resolved
+            return None
         if not isinstance(value, dict):
-            continue
+            return None
         for key in keys:
             item = _coerce_string(value.get(key))
             if item:
                 return item
+        for nested_key in nested_keys:
+            resolved = _scan(value.get(nested_key), depth + 1)
+            if resolved:
+                return resolved
+        return None
+
+    for value in values:
+        resolved = _scan(value)
+        if resolved:
+            return resolved
     return None
+
+
+def _compact_feedback(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    compact: dict[str, Any] = {}
+    for key in (
+        "feedbackId",
+        "childId",
+        "sourceRole",
+        "sourceChannel",
+        "relatedTaskId",
+        "relatedConsultationId",
+        "executionStatus",
+        "executionCount",
+        "executorRole",
+        "childReaction",
+        "improvementStatus",
+        "barriers",
+        "notes",
+        "attachments",
+        "submittedAt",
+        "source",
+        "fallback",
+        "id",
+        "date",
+        "status",
+        "content",
+        "interventionCardId",
+        "sourceWorkflow",
+        "executed",
+        "improved",
+        "freeNote",
+    ):
+        item = value.get(key)
+        if item is not None:
+            compact[key] = item
+
+    return compact or None
+
+
+def _extract_feedback_snapshot_fragment(*values: Any) -> dict[str, Any]:
+    latest_feedback: dict[str, Any] | None = None
+    recent_feedback: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def append_feedback(value: Any) -> None:
+        nonlocal latest_feedback
+        if isinstance(value, list):
+            for item in value:
+                append_feedback(item)
+            return
+
+        compact = _compact_feedback(value)
+        if not compact:
+            return
+
+        key = (
+            _coerce_string(compact.get("feedbackId"))
+            or _coerce_string(compact.get("id"))
+            or ":".join(
+                [
+                    _coerce_string(compact.get("childId")) or "",
+                    _coerce_string(compact.get("submittedAt") or compact.get("date")) or "",
+                    _coerce_string(compact.get("notes") or compact.get("content")) or "",
+                ]
+            )
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        if latest_feedback is None:
+            latest_feedback = compact
+        recent_feedback.append(compact)
+
+    def append_from_record(record: Any) -> None:
+        if not isinstance(record, dict):
+            return
+        append_feedback(record.get("latestFeedback"))
+        append_feedback(record.get("feedback"))
+        recent_details = safe_dict(record.get("recentDetails"))
+        append_feedback(recent_details.get("feedback"))
+
+    for value in values:
+        append_from_record(value)
+        if isinstance(value, dict):
+            append_from_record(value.get("snapshot"))
+
+    fragment: dict[str, Any] = {}
+    if latest_feedback is not None:
+        fragment["latestFeedback"] = latest_feedback
+    if recent_feedback:
+        fragment["recentDetails"] = {"feedback": recent_feedback[:3]}
+    return fragment
 
 
 def _build_trace_metadata(task: str, payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
@@ -472,7 +601,12 @@ class Orchestrator:
                 "session_id": session_id,
                 "snapshot_type": snapshot_type,
                 "input_summary": _summarize_value(effective_payload),
-                "snapshot_json": {"task": task, "traceId": trace_id, "result": result},
+                "snapshot_json": {
+                    "task": task,
+                    "traceId": trace_id,
+                    **_extract_feedback_snapshot_fragment(result, effective_payload),
+                    "result": result,
+                },
             }
             if self._should_background_persistence(task):
                 self._schedule_background_task(
@@ -655,6 +789,7 @@ class Orchestrator:
                                     snapshot_json={
                                         "task": "high-risk-consultation",
                                         "traceId": trace_id,
+                                        **_extract_feedback_snapshot_fragment(final_result, effective_payload),
                                         "result": final_result,
                                     },
                                 )

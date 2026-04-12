@@ -26,6 +26,7 @@ import {
 } from "recharts";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import EmptyState from "@/components/EmptyState";
+import UnifiedIntentEntryCard from "@/components/intent/UnifiedIntentEntryCard";
 import ScrollReveal from "@/components/ScrollReveal";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -136,6 +137,19 @@ export default function InstitutionMonitorPage() {
           </div>
         </div>
       </div>
+
+      <UnifiedIntentEntryCard
+        roleHint="teacher"
+        sourcePage="/teacher"
+        title="一句话直达老师当前最该进的 workflow"
+        placeholder="例如：帮我看看今天最需要优先处理的孩子，或开始一次会诊"
+        examples={[
+          "帮我看看今天最需要优先处理的孩子",
+          "开始一次会诊",
+          "生成本周周报",
+          "记录一条观察",
+        ]}
+      />
 
       <ScrollReveal>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">

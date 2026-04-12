@@ -182,13 +182,23 @@ export default function TeacherHighRiskConsultationPage() {
   const searchParams = useSearchParams();
   const traceMode: ConsultationTraceMode = searchParams.get("trace") === "debug" ? "debug" : "demo";
   const traceCaseParam = searchParams.get("traceCase");
+  const routeIntent = searchParams.get("intent");
+  const queryChildId = searchParams.get("childId");
+  const queryPreferredChildId =
+    queryChildId && visibleChildren.some((child) => child.id === queryChildId)
+      ? queryChildId
+      : "";
   const traceCase: ConsultationTraceCase | null =
     traceMode === "debug" && traceCaseParam && isConsultationTraceCase(traceCaseParam) ? traceCaseParam : null;
 
-  const [selectedChildId, setSelectedChildId] = useState(visibleChildren[0]?.id ?? "");
+  const [selectedChildId, setSelectedChildId] = useState("");
   const [result, setResult] = useState<ConsultationApiResult | null>(null);
   const [activeStage, setActiveStage] = useState<ConsultationStageKey | null>(null);
-  const [streamMessage, setStreamMessage] = useState<string>("点击右侧按钮启动流式会诊");
+  const [streamMessage, setStreamMessage] = useState<string>(() =>
+    routeIntent === "start_consultation"
+      ? "已从统一入口定位到高风险会诊，可直接补充说明后开始。"
+      : "点击右侧按钮启动流式会诊"
+  );
   const [streamError, setStreamError] = useState<string | null>(null);
   const [stageStatuses, setStageStatuses] = useState<Partial<Record<ConsultationStageKey, ConsultationStageStatusEvent>>>({});
   const [stageUi, setStageUi] = useState<ConsultationStageUiMap>({});
@@ -217,7 +227,7 @@ export default function TeacherHighRiskConsultationPage() {
       }),
     [currentUser, guardianFeedbacks, growthRecords, healthCheckRecords, presentChildren, visibleChildren]
   );
-  const activeChildId = selectedChildId || visibleChildren[0]?.id || "";
+  const activeChildId = selectedChildId || queryPreferredChildId || visibleChildren[0]?.id || "";
   const childContext = useMemo(() => buildTeacherAgentChildContext(classContext, activeChildId), [classContext, activeChildId]);
   const autoContext = useMemo(() => (childContext ? buildHighRiskConsultationAutoContext({ classContext, childContext }) : null), [childContext, classContext]);
   const selectedChild = childContext?.child;

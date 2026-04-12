@@ -52,7 +52,25 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
 
-  return nextResolve(specifier, context);
+  try {
+    return await nextResolve(specifier, context);
+  } catch (error) {
+    if (
+      error?.code === "ERR_MODULE_NOT_FOUND" &&
+      !specifier.startsWith("node:") &&
+      !path.extname(specifier)
+    ) {
+      for (const candidate of [`${specifier}.js`, `${specifier}.mjs`, `${specifier}/index.js`]) {
+        try {
+          return await nextResolve(candidate, context);
+        } catch {
+          // Keep trying the next candidate.
+        }
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function load(url, context, nextLoad) {
