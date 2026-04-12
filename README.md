@@ -472,9 +472,3 @@ py scripts/generate_readme_architecture_png.py
 
 </details>
 
-## 补充文档
-
-- [当前状态账本](./docs/current-status-ledger.md)
-- [工作流地图](./docs/agent-workflows.md)
-- [演示脚本](./docs/demo-script.md)
-- [协作手册](./AGENTS.md)
