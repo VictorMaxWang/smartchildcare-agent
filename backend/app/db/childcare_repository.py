@@ -520,7 +520,7 @@ def _normalize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _demo_snapshot() -> dict[str, Any]:
+def _demo_snapshot_legacy_block_unused() -> dict[str, Any]:
     return _normalize_snapshot(
         {
             "children": [
@@ -725,8 +725,7 @@ def _build_mysql_kwargs(url: str) -> dict[str, Any]:
         "cursorclass": aiomysql.DictCursor,
         "ssl": ssl_value,
     }
-
-
+# Use backend.app.db.demo_snapshot as the single live demo seed source.
 def _demo_snapshot() -> dict[str, Any]:
     return _normalize_snapshot(build_demo_snapshot())
 

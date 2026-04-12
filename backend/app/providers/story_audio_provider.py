@@ -61,8 +61,13 @@ def _has_vivo_credentials(settings: Settings) -> bool:
     return bool(app_id and app_key)
 
 
+def story_audio_provider_prefers_vivo(settings: Settings) -> bool:
+    provider_mode = settings.storybook_audio_provider.strip().lower() or "auto"
+    return provider_mode in {"auto", "vivo"}
+
+
 def can_use_vivo_story_audio_provider(settings: Settings) -> bool:
-    return settings.storybook_audio_provider.strip().lower() == "vivo" and _has_vivo_credentials(settings)
+    return story_audio_provider_prefers_vivo(settings) and _has_vivo_credentials(settings)
 
 
 def _build_mock_audio_script(
@@ -257,7 +262,7 @@ class VivoStoryAudioProvider:
             child_id=child_id,
             story_id=story_id,
             scene_index=scene_index,
-            voice_style=voice_style,
+            voice_style=resolved_voice_style,
         )
         model_name = f"{tts_result.get('engineId')}/{tts_result.get('voiceName')}"
         output = {
@@ -267,6 +272,8 @@ class VivoStoryAudioProvider:
             "audioStatus": "ready",
             "captionTiming": tts_result.get("captionTiming") or build_story_caption_timing(script),
             "voiceStyle": tts_result.get("voiceStyle") or resolved_voice_style,
+            "engineId": tts_result.get("engineId"),
+            "voiceName": tts_result.get("voiceName"),
             "audioBytes": tts_result.get("audioBytes"),
             "audioContentType": tts_result.get("audioContentType") or "audio/wav",
             "cacheHit": False,

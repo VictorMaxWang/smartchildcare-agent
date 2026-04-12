@@ -22,7 +22,7 @@ import {
   type RegisterAccountInput,
   type SessionUser,
 } from "@/lib/auth/accounts";
-import type { InterventionCard } from "@/lib/agent/intervention-card";
+import { buildInterventionCardFromConsultation, type InterventionCard } from "@/lib/agent/intervention-card";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate, shiftLocalDate, startOfLocalDay } from "@/lib/date";
 import { emptyInstitutionSnapshot } from "@/lib/persistence/bootstrap";
 import { materializeTasksFromLegacy, pickActiveTask } from "@/lib/tasks/task-model";
@@ -65,7 +65,7 @@ export const BEHAVIOR_CATEGORIES: BehaviorCategory[] = [
 export const MEAL_TYPES: MealType[] = ["早餐", "午餐", "晚餐", "加餐"];
 export const FOOD_CATEGORY_OPTIONS: FoodCategory[] = ["蔬果", "蛋白", "主食", "奶制品", "饮品", "其他"];
 export const INSTITUTION_NAME = "春芽普惠托育中心";
-const DEMO_DATASET_VERSION = "v3-role-home-recovery";
+const DEMO_DATASET_VERSION = "v4-demo-recovery-hotfix";
 
 const TODAY = getLocalToday();
 const UNAUTHENTICATED_USER: User = {
@@ -1993,7 +1993,7 @@ function getLatestSnapshotDate(snapshot: AppStateSnapshot): string | null {
     ...snapshot.growth.map((record) => normalizeLocalDate(record.createdAt)),
     ...snapshot.feedback.map((record) => normalizeLocalDate(record.date)),
     ...snapshot.taskCheckIns.map((record) => normalizeLocalDate(record.date)),
-  ].filter(Boolean);
+  ].filter((value): value is string => Boolean(value));
 
   if (dates.length === 0) return null;
   return dates.reduce((latest, current) => (current > latest ? current : latest));
@@ -2029,6 +2029,286 @@ function cloneDemoSnapshotTemplate(): AppStateSnapshot {
     mobileDrafts: [],
     reminders: [],
     tasks: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+const DEMO_HERO_CONSULTATION_CHILD_IDS = new Set(["c-1", "c-8", "c-11", "c-14", "c-15"]);
+
+function demoDateMs(value?: string) {
+  if (!value) return 0;
+  const exact = new Date(value).getTime();
+  if (Number.isFinite(exact) && exact > 0) return exact;
+  const normalized = normalizeLocalDate(value);
+  return normalized ? new Date(`${normalized}T00:00:00`).getTime() : 0;
+}
+
+function shiftDemoTemporalValue(value: string | undefined, diffDays: number) {
+  if (!value) return value;
+  if (diffDays === 0) return value;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return shiftDemoDate(value, diffDays);
+  }
+
+  const isoMatch = value.match(/^(\d{4}-\d{2}-\d{2})(T.*)$/);
+  if (isoMatch) {
+    return `${shiftDemoDate(isoMatch[1], diffDays)}${isoMatch[2]}`;
+  }
+
+  const spacedMatch = value.match(/^(\d{4}-\d{2}-\d{2})( .*)$/);
+  if (spacedMatch) {
+    return `${shiftDemoDate(spacedMatch[1], diffDays)}${spacedMatch[2]}`;
+  }
+
+  return value;
+}
+
+function buildDemoReminderAt(anchor: string, hour: number, minute: number, dayOffset = 0) {
+  const next = new Date(anchor);
+  next.setDate(next.getDate() + dayOffset);
+  next.setHours(hour, minute, 0, 0);
+  return next.toISOString();
+}
+
+function linkDemoFeedbackToNarrative(
+  records: GuardianFeedback[],
+  interventionCards: InterventionCard[],
+  consultations: ConsultationResult[]
+) {
+  const cardByChildId = new Map(interventionCards.map((card) => [card.targetChildId, card] as const));
+  const consultationByChildId = new Map(consultations.map((item) => [item.childId, item] as const));
+  const latestFeedbackIds = new Set(
+    [...records]
+      .filter((record) => DEMO_HERO_CONSULTATION_CHILD_IDS.has(record.childId))
+      .sort(
+        (left, right) =>
+          demoDateMs(right.submittedAt ?? right.date) - demoDateMs(left.submittedAt ?? left.date)
+      )
+      .filter((record, index, items) => items.findIndex((item) => item.childId === record.childId) === index)
+      .map((record) => record.id)
+  );
+
+  return records.map((record) => {
+    const interventionCard = cardByChildId.get(record.childId);
+    const consultation = consultationByChildId.get(record.childId);
+    if (!interventionCard || !consultation || !latestFeedbackIds.has(record.id)) {
+      return { ...record };
+    }
+
+    return {
+      ...record,
+      interventionCardId: record.interventionCardId ?? interventionCard.id,
+      relatedConsultationId: record.relatedConsultationId ?? consultation.consultationId,
+      sourceWorkflow: record.sourceWorkflow ?? "manual",
+    };
+  });
+}
+
+function buildDemoReminderItems(
+  interventionCards: InterventionCard[],
+  consultations: ConsultationResult[],
+  childMap: Map<string, Child>
+): ReminderItem[] {
+  const familyStatusByChildId: Record<string, ReminderItem["status"]> = {
+    "c-1": "done",
+    "c-8": "acknowledged",
+    "c-11": "acknowledged",
+    "c-14": "acknowledged",
+    "c-15": "pending",
+  };
+  const teacherStatusByChildId: Record<string, ReminderItem["status"]> = {
+    "c-1": "done",
+    "c-8": "pending",
+    "c-11": "pending",
+    "c-14": "acknowledged",
+    "c-15": "pending",
+  };
+  const adminStatusByConsultationId: Record<string, ReminderItem["status"]> = {
+    "consultation-c-15": "pending",
+    "consultation-c-14": "acknowledged",
+    "consultation-c-8": "pending",
+    "consultation-c-11": "pending",
+  };
+
+  return [
+    ...interventionCards.flatMap((card) => {
+      const childName = childMap.get(card.targetChildId)?.name ?? "幼儿";
+      const createdAt = card.createdAt ?? new Date().toISOString();
+      return [
+        {
+          reminderId: `reminder-family-${card.id}`,
+          reminderType: "family-task",
+          targetRole: "parent",
+          targetId: card.targetChildId,
+          childId: card.targetChildId,
+          title: `${childName} 今晚家庭跟进`,
+          description: card.tonightHomeAction,
+          scheduledAt: buildDemoReminderAt(createdAt, 20, 30),
+          status: familyStatusByChildId[card.targetChildId] ?? "pending",
+          sourceId: card.id,
+          sourceType: "intervention_card",
+        },
+        {
+          reminderId: `reminder-review-${card.id}`,
+          reminderType: "review-48h",
+          targetRole: "teacher",
+          targetId: card.targetChildId,
+          childId: card.targetChildId,
+          title: `${childName} 48 小时复核`,
+          description: card.reviewIn48h,
+          scheduledAt: buildDemoReminderAt(createdAt, 9, 30, 2),
+          status: teacherStatusByChildId[card.targetChildId] ?? "pending",
+          sourceId: card.id,
+          sourceType: "intervention_card",
+        },
+      ] satisfies ReminderItem[];
+    }),
+    ...consultations
+      .filter((consultation) => consultation.shouldEscalateToAdmin)
+      .map((consultation) => {
+        const childName = childMap.get(consultation.childId)?.name ?? "幼儿";
+        return {
+          reminderId: `reminder-admin-${consultation.consultationId}`,
+          reminderType: "admin-focus",
+          targetRole: "admin",
+          targetId: consultation.childId,
+          childId: consultation.childId,
+          title: `${childName} 园长跟进`,
+          description: consultation.directorDecisionCard.reason || consultation.triggerReason,
+          scheduledAt: consultation.directorDecisionCard.recommendedAt,
+          status: adminStatusByConsultationId[consultation.consultationId] ?? "pending",
+          sourceId: consultation.consultationId,
+          sourceType: "consultation",
+        } satisfies ReminderItem;
+      }),
+  ];
+}
+
+function buildDemoMobileDrafts(
+  consultations: ConsultationResult[],
+  childMap: Map<string, Child>
+): MobileDraft[] {
+  const voiceDraftChildIds = ["c-8", "c-11", "c-14", "c-15"];
+  const draftConfigByChildId: Record<
+    string,
+    {
+      asrConfidence: number;
+      warning?: string;
+      category: "EMOTION" | "HEALTH" | "SLEEP" | "DIET";
+      confidence: number;
+      suggestedAction: string;
+    }
+  > = {
+    "c-8": {
+      asrConfidence: 0.73,
+      warning: "router_low_confidence",
+      category: "EMOTION",
+      confidence: 0.46,
+      suggestedAction: "补入园哭闹持续时长与安抚方式。",
+    },
+    "c-11": {
+      asrConfidence: 0.92,
+      category: "DIET",
+      confidence: 0.88,
+      suggestedAction: "补蔬菜尝试量和替代食物记录。",
+    },
+    "c-14": {
+      asrConfidence: 0.78,
+      warning: "detail_missing",
+      category: "SLEEP",
+      confidence: 0.58,
+      suggestedAction: "补午睡入睡时长与醒后情绪。",
+    },
+    "c-15": {
+      asrConfidence: 0.95,
+      category: "HEALTH",
+      confidence: 0.91,
+      suggestedAction: "补下午饮水刻度和晚间补水反馈。",
+    },
+  };
+
+  const drafts: MobileDraft[] = [];
+  voiceDraftChildIds.forEach((childId, index) => {
+    const consultation = consultations.find((item) => item.childId === childId);
+    const childName = childMap.get(childId)?.name;
+    const config = draftConfigByChildId[childId];
+    if (!consultation || !childName || !config) {
+      return;
+    }
+
+    const createdAt = buildDemoReminderAt(consultation.generatedAt, 9 + index, 5 + index * 7);
+    drafts.push({
+      draftId: `demo-draft-${childId}`,
+      childId,
+      draftType: "voice",
+      targetRole: "teacher",
+      content: `${childName} demo-safe voice observation`,
+      structuredPayload: {
+        kind: "teacher-voice-understanding",
+        t5Seed: {
+          transcript: `${childName} ${consultation.triggerReason}`,
+          warnings: config.warning ? [config.warning] : [],
+          draft_items: [
+            {
+              category: config.category,
+              summary: consultation.summary,
+              structured_fields: {},
+              confidence: config.confidence,
+              suggested_actions: [config.suggestedAction],
+              raw_excerpt: consultation.triggerReason,
+            },
+          ],
+        },
+        understanding: {
+          meta: {
+            asr: {
+              confidence: config.asrConfidence,
+            },
+          },
+        },
+      },
+      syncStatus: "synced" satisfies MobileDraftSyncStatus,
+      createdAt,
+      updatedAt: createdAt,
+      syncedAt: createdAt,
+    });
+  });
+  return drafts;
+}
+
+function applyDemoNarrativeScaffold(snapshot: AppStateSnapshot): AppStateSnapshot {
+  const childMap = new Map(snapshot.children.map((child) => [child.id, child] as const));
+  const consultations = buildDemoConsultationResults();
+  const interventionCards = consultations
+    .map((consultation) => {
+      const child = childMap.get(consultation.childId);
+      if (!child) return null;
+      return buildInterventionCardFromConsultation({
+        targetChildId: consultation.childId,
+        childName: child.name,
+        consultation,
+        generatedAt: consultation.generatedAt,
+      });
+    })
+    .filter((card): card is InterventionCard => Boolean(card));
+  const feedback = linkDemoFeedbackToNarrative(snapshot.feedback, interventionCards, consultations);
+  const reminders = buildDemoReminderItems(interventionCards, consultations, childMap);
+  const scaffoldTasks = materializeTasksFromLegacy({
+    interventionCards,
+    consultations,
+    reminders,
+    guardianFeedbacks: feedback,
+    taskCheckIns: snapshot.taskCheckIns,
+  });
+
+  return {
+    ...snapshot,
+    feedback,
+    interventionCards,
+    consultations,
+    mobileDrafts: buildDemoMobileDrafts(consultations, childMap),
+    reminders,
+    tasks: scaffoldTasks,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -2139,12 +2419,13 @@ function shiftDemoSnapshotDates(snapshot: AppStateSnapshot, targetToday: string)
     growth: snapshot.growth.map((record) => ({
       ...record,
       createdAt: shiftDemoDateTime(record.createdAt, diffDays),
-      reviewDate: record.reviewDate ? shiftDemoDate(record.reviewDate, diffDays) : undefined,
+      reviewDate: shiftDemoTemporalValue(record.reviewDate, diffDays),
     })),
     feedback: snapshot.feedback.map((record) => ({
       ...record,
       date: shiftDemoDate(record.date, diffDays),
-      submittedAt: shiftDemoDate(record.submittedAt, diffDays),
+      submittedAt:
+        shiftDemoTemporalValue(record.submittedAt, diffDays) ?? shiftDemoDate(record.date, diffDays),
     })),
     health: snapshot.health.map((record) => ({
       ...record,
@@ -2153,6 +2434,44 @@ function shiftDemoSnapshotDates(snapshot: AppStateSnapshot, targetToday: string)
     taskCheckIns: snapshot.taskCheckIns.map((record) => ({
       ...record,
       date: shiftDemoDate(record.date, diffDays),
+    })),
+    interventionCards: snapshot.interventionCards.map((record) => ({
+      ...record,
+      createdAt: shiftDemoTemporalValue(record.createdAt, diffDays),
+      updatedAt: shiftDemoTemporalValue(record.updatedAt, diffDays),
+    })),
+    consultations: snapshot.consultations.map((record) => {
+      const dueAt = (record as ConsultationResult & { dueAt?: string }).dueAt;
+      return {
+        ...record,
+        generatedAt: shiftDemoTemporalValue(record.generatedAt, diffDays) ?? record.generatedAt,
+        ...(dueAt ? { dueAt: shiftDemoTemporalValue(dueAt, diffDays) ?? dueAt } : {}),
+        directorDecisionCard: {
+          ...record.directorDecisionCard,
+          recommendedAt:
+            shiftDemoTemporalValue(record.directorDecisionCard.recommendedAt, diffDays) ??
+            record.directorDecisionCard.recommendedAt,
+        },
+      };
+    }),
+    mobileDrafts: snapshot.mobileDrafts.map((record) => ({
+      ...record,
+      createdAt: shiftDemoTemporalValue(record.createdAt, diffDays) ?? record.createdAt,
+      updatedAt: shiftDemoTemporalValue(record.updatedAt, diffDays) ?? record.updatedAt,
+      syncedAt: shiftDemoTemporalValue(record.syncedAt, diffDays),
+    })),
+    reminders: snapshot.reminders.map((record) => ({
+      ...record,
+      scheduledAt: shiftDemoTemporalValue(record.scheduledAt, diffDays) ?? record.scheduledAt,
+    })),
+    tasks: snapshot.tasks.map((record) => ({
+      ...record,
+      dueAt: shiftDemoTemporalValue(record.dueAt, diffDays) ?? record.dueAt,
+      createdAt: shiftDemoTemporalValue(record.createdAt, diffDays) ?? record.createdAt,
+      updatedAt: shiftDemoTemporalValue(record.updatedAt, diffDays) ?? record.updatedAt,
+      completedAt: shiftDemoTemporalValue(record.completedAt, diffDays),
+      lastEvidenceAt: shiftDemoTemporalValue(record.lastEvidenceAt, diffDays),
+      statusChangedAt: shiftDemoTemporalValue(record.statusChangedAt, diffDays),
     })),
     updatedAt: new Date().toISOString(),
   };
@@ -2207,14 +2526,27 @@ function validateDemoSnapshotCoverage(snapshot: AppStateSnapshot, targetToday: s
 function buildFreshDemoSnapshot(targetToday = getLocalToday()): AppStateSnapshot {
   const template = cloneDemoSnapshotTemplate();
   const attendanceLookup = buildAttendanceLookup(template.attendance);
-  const normalizedTemplate: AppStateSnapshot = {
+  const normalizedTemplate = applyDemoNarrativeScaffold({
     ...template,
     meals: attachDemoMealPhotos(keepRecordsOnPresentDays(template.meals, attendanceLookup)),
     growth: attachDemoGrowthMedia(template.growth),
     health: keepRecordsOnPresentDays(template.health, attendanceLookup),
-  };
+  });
 
   return validateDemoSnapshotCoverage(shiftDemoSnapshotDates(normalizedTemplate, targetToday), targetToday);
+}
+
+function hydrateDemoSnapshotForToday(snapshot: AppStateSnapshot, targetToday = getLocalToday()) {
+  const attendanceLookup = buildAttendanceLookup(snapshot.attendance);
+  const normalizedSnapshot = applyDemoNarrativeScaffold({
+    ...snapshot,
+    meals: attachDemoMealPhotos(keepRecordsOnPresentDays(snapshot.meals, attendanceLookup)),
+    growth: attachDemoGrowthMedia(snapshot.growth),
+    health: keepRecordsOnPresentDays(snapshot.health, attendanceLookup),
+    tasks: [],
+  });
+
+  return validateDemoSnapshotCoverage(shiftDemoSnapshotDates(normalizedSnapshot, targetToday), targetToday);
 }
 
 function filterChildrenByUser(children: Child[], user: User) {
@@ -4301,11 +4633,13 @@ export function AppProvider({ children: childNodes }: { children: ReactNode }) {
 
       if (isDemoUser) {
         lastSyncedSnapshotKeyRef.current = null;
-        const demoSnapshot = readScopedSnapshot(
+        const rawDemoSnapshot = readScopedSnapshot(
           currentStorageNamespace ?? `demo:${currentUser.id}`,
           buildFreshDemoSnapshot(getLocalToday())
         );
-        applySnapshot(scopeSnapshotForSessionUser(demoSnapshot, currentUser));
+        const demoSnapshot =
+          normalizeAppStateSnapshot(rawDemoSnapshot) ?? buildFreshDemoSnapshot(getLocalToday());
+        applySnapshot(scopeSnapshotForSessionUser(hydrateDemoSnapshotForToday(demoSnapshot), currentUser));
         if (active) {
           setDataLoading(false);
         }

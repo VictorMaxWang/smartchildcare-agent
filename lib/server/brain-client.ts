@@ -6,6 +6,7 @@ export const SMARTCHILDCARE_FALLBACK_REASON_HEADER = "x-smartchildcare-fallback-
 export const SMARTCHILDCARE_UPSTREAM_HOST_HEADER = "x-smartchildcare-upstream-host";
 
 export type BrainTransport =
+  | "brain-proxy-error"
   | "remote-brain-proxy"
   | "next-json-fallback"
   | "next-stream-fallback";
@@ -40,6 +41,7 @@ type BrainBaseUrlDetails = {
   normalizedBaseUrl: string | null;
   hadApiV1Suffix: boolean;
   implicitDefault: boolean;
+  localDevCandidateBaseUrls: string[];
 };
 
 function resolveBrainBaseUrlDetails(): BrainBaseUrlDetails {
@@ -53,16 +55,19 @@ function resolveBrainBaseUrlDetails(): BrainBaseUrlDetails {
       normalizedBaseUrl,
       hadApiV1Suffix: configuredBaseUrl !== normalizedBaseUrl,
       implicitDefault: false,
+      localDevCandidateBaseUrls: [],
     };
   }
 
   if (process.env.NODE_ENV !== "production") {
-    const fallbackBaseUrl = resolveLocalDevBrainBaseUrl();
+    const localDevCandidateBaseUrls = resolveLocalDevBrainBaseUrls();
+    const fallbackBaseUrl = localDevCandidateBaseUrls[0] ?? null;
     return {
       rawBaseUrl: fallbackBaseUrl,
       normalizedBaseUrl: fallbackBaseUrl,
       hadApiV1Suffix: false,
       implicitDefault: true,
+      localDevCandidateBaseUrls,
     };
   }
 
@@ -71,6 +76,7 @@ function resolveBrainBaseUrlDetails(): BrainBaseUrlDetails {
     normalizedBaseUrl: null,
     hadApiV1Suffix: false,
     implicitDefault: false,
+    localDevCandidateBaseUrls: [],
   };
 }
 
@@ -128,10 +134,13 @@ function mergeHeaders(base: HeadersInit, extra?: HeadersInit) {
   return headers;
 }
 
-function resolveLocalDevBrainBaseUrl() {
-  const appPort = Number(process.env.APP_PORT?.trim() || "8000");
-  const safePort = Number.isFinite(appPort) && appPort > 0 ? appPort : 8000;
-  return `http://127.0.0.1:${safePort}`;
+function resolveLocalDevBrainBaseUrls() {
+  const candidatePorts = [process.env.APP_PORT?.trim(), "8000", "8010"];
+  const ports = candidatePorts
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
+
+  return [...new Set(ports)].map((port) => `http://127.0.0.1:${port}`);
 }
 
 export function getBrainBaseUrl() {
@@ -239,16 +248,18 @@ export async function forwardBrainRequest(
   const retryStrategy: BrainRetryStrategy = baseUrlDetails.hadApiV1Suffix
     ? "normalized-base-retry"
     : "none";
-  const attemptedBaseUrls = [
-    baseUrlDetails.rawBaseUrl ?? baseUrl,
-    ...(
-      retryStrategy === "normalized-base-retry" &&
-      baseUrlDetails.normalizedBaseUrl &&
-      baseUrlDetails.normalizedBaseUrl !== baseUrlDetails.rawBaseUrl
-        ? [baseUrlDetails.normalizedBaseUrl]
-        : []
-    ),
-  ].filter(Boolean) as string[];
+  const attemptedBaseUrls = baseUrlDetails.implicitDefault
+    ? baseUrlDetails.localDevCandidateBaseUrls
+    : ([
+        baseUrlDetails.rawBaseUrl ?? baseUrl,
+        ...(
+          retryStrategy === "normalized-base-retry" &&
+          baseUrlDetails.normalizedBaseUrl &&
+          baseUrlDetails.normalizedBaseUrl !== baseUrlDetails.rawBaseUrl
+            ? [baseUrlDetails.normalizedBaseUrl]
+            : []
+        ),
+      ].filter(Boolean) as string[]);
 
   try {
     const requestBody =
@@ -258,105 +269,130 @@ export async function forwardBrainRequest(
 
     let lastStatusCode: number | null = null;
     let lastFallbackReason: string | null = null;
+    let lastUpstreamHost = upstreamHost;
     for (const [attemptIndex, attemptBaseUrl] of attemptedBaseUrls.entries()) {
-      const proxiedResponse = await fetch(`${attemptBaseUrl}${targetPath}`, {
-        method,
-        headers: buildForwardHeaders(request),
-        body: requestBody,
-        cache: "no-store",
-        signal: controller.signal,
-      });
+      lastUpstreamHost = resolveUpstreamHost(attemptBaseUrl);
 
-      if (shouldFallback(proxiedResponse)) {
-        lastStatusCode = proxiedResponse.status;
-        lastFallbackReason = `brain-status-${proxiedResponse.status}`;
-        const canRetryWithNormalizedBase =
-          proxiedResponse.status === 404 &&
-          retryStrategy === "normalized-base-retry" &&
-          attemptIndex === 0 &&
-          attemptedBaseUrls.length > 1;
+      try {
+        const proxiedResponse = await fetch(`${attemptBaseUrl}${targetPath}`, {
+          method,
+          headers: buildForwardHeaders(request),
+          body: requestBody,
+          cache: "no-store",
+          signal: controller.signal,
+        });
 
-        if (canRetryWithNormalizedBase) {
+        if (shouldFallback(proxiedResponse)) {
+          lastStatusCode = proxiedResponse.status;
+          lastFallbackReason = `brain-status-${proxiedResponse.status}`;
+          const canRetryWithNormalizedBase =
+            proxiedResponse.status === 404 &&
+            retryStrategy === "normalized-base-retry" &&
+            attemptIndex === 0 &&
+            attemptedBaseUrls.length > 1;
+          const canRetryWithNextLocalCandidate =
+            baseUrlDetails.implicitDefault && attemptIndex < attemptedBaseUrls.length - 1;
+
+          if (canRetryWithNormalizedBase) {
+            console.warn(
+              `[BRAIN_PROXY] Brain returned 404 for ${targetPath} via ${attemptBaseUrl}; retrying with normalized base ${attemptedBaseUrls[attemptIndex + 1]}.`
+            );
+            continue;
+          }
+
+          if (canRetryWithNextLocalCandidate) {
+            console.warn(
+              `[BRAIN_PROXY] Brain returned ${proxiedResponse.status} for ${targetPath} via ${attemptBaseUrl}; retrying next local candidate ${attemptedBaseUrls[attemptIndex + 1]}.`
+            );
+            continue;
+          }
+
           console.warn(
-            `[BRAIN_PROXY] Brain returned 404 for ${targetPath} via ${attemptBaseUrl}; retrying with normalized base ${attemptedBaseUrls[attemptIndex + 1]}.`
+            `[BRAIN_PROXY] Falling back for ${targetPath}: backend returned ${proxiedResponse.status} (${lastFallbackReason}).`
+          );
+          return {
+            response: null,
+            targetPath,
+            upstreamHost: lastUpstreamHost,
+            fallbackReason: lastFallbackReason,
+            statusCode: lastStatusCode,
+            retryStrategy,
+            elapsedMs: Date.now() - startedAt,
+            timeoutMs,
+          };
+        }
+
+        const responseHeaders = new Headers();
+        const contentType = proxiedResponse.headers.get("content-type");
+        if (contentType) responseHeaders.set("content-type", contentType);
+
+        const cacheControl = proxiedResponse.headers.get("cache-control");
+        if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+
+        const transportHeaders = buildTransportHeaders({
+          transport: "remote-brain-proxy",
+          targetPath,
+          upstreamHost: lastUpstreamHost,
+        });
+        transportHeaders.forEach((value, key) => {
+          responseHeaders.set(key, value);
+        });
+
+        console.info(
+          `[BRAIN_PROXY] Remote brain proxy succeeded for ${targetPath} via ${lastUpstreamHost ?? "unknown-upstream"}.`
+        );
+
+        return {
+          response: new Response(proxiedResponse.body, {
+            status: proxiedResponse.status,
+            statusText: proxiedResponse.statusText,
+            headers: responseHeaders,
+          }),
+          targetPath,
+          upstreamHost: lastUpstreamHost,
+          fallbackReason: null,
+          statusCode: null,
+          retryStrategy,
+          elapsedMs: Date.now() - startedAt,
+          timeoutMs,
+        };
+      } catch (error) {
+        lastFallbackReason = fallbackReasonFromError(error);
+        const canRetryWithNextLocalCandidate =
+          baseUrlDetails.implicitDefault &&
+          !(error instanceof DOMException && error.name === "AbortError") &&
+          attemptIndex < attemptedBaseUrls.length - 1;
+
+        if (canRetryWithNextLocalCandidate) {
+          console.warn(
+            `[BRAIN_PROXY] Fetch failed for ${targetPath} via ${attemptBaseUrl} (${lastFallbackReason}); retrying next local candidate ${attemptedBaseUrls[attemptIndex + 1]}.`
           );
           continue;
         }
 
         console.warn(
-          `[BRAIN_PROXY] Falling back for ${targetPath}: backend returned ${proxiedResponse.status} (${lastFallbackReason}).`
+          `[BRAIN_PROXY] Falling back for ${targetPath}: ${lastFallbackReason}.`,
+          error
         );
         return {
           response: null,
           targetPath,
-          upstreamHost: resolveUpstreamHost(attemptBaseUrl),
+          upstreamHost: lastUpstreamHost,
           fallbackReason: lastFallbackReason,
-          statusCode: lastStatusCode,
+          statusCode: null,
           retryStrategy,
           elapsedMs: Date.now() - startedAt,
           timeoutMs,
         };
       }
-
-      const responseHeaders = new Headers();
-      const contentType = proxiedResponse.headers.get("content-type");
-      if (contentType) responseHeaders.set("content-type", contentType);
-
-      const cacheControl = proxiedResponse.headers.get("cache-control");
-      if (cacheControl) responseHeaders.set("cache-control", cacheControl);
-
-      const responseUpstreamHost = resolveUpstreamHost(attemptBaseUrl);
-      const transportHeaders = buildTransportHeaders({
-        transport: "remote-brain-proxy",
-        targetPath,
-        upstreamHost: responseUpstreamHost,
-      });
-      transportHeaders.forEach((value, key) => {
-        responseHeaders.set(key, value);
-      });
-
-      console.info(
-        `[BRAIN_PROXY] Remote brain proxy succeeded for ${targetPath} via ${responseUpstreamHost ?? "unknown-upstream"}.`
-      );
-
-      return {
-        response: new Response(proxiedResponse.body, {
-          status: proxiedResponse.status,
-          statusText: proxiedResponse.statusText,
-          headers: responseHeaders,
-        }),
-        targetPath,
-        upstreamHost: responseUpstreamHost,
-        fallbackReason: null,
-        statusCode: null,
-        retryStrategy,
-        elapsedMs: Date.now() - startedAt,
-        timeoutMs,
-      };
     }
 
     return {
       response: null,
       targetPath,
-      upstreamHost,
+      upstreamHost: lastUpstreamHost,
       fallbackReason: lastFallbackReason ?? "brain-proxy-unavailable",
       statusCode: lastStatusCode,
-      retryStrategy,
-      elapsedMs: Date.now() - startedAt,
-      timeoutMs,
-    };
-  } catch (error) {
-    const fallbackReason = fallbackReasonFromError(error);
-    console.warn(
-      `[BRAIN_PROXY] Falling back for ${targetPath}: ${fallbackReason}.`,
-      error
-    );
-    return {
-      response: null,
-      targetPath,
-      upstreamHost,
-      fallbackReason,
-      statusCode: null,
       retryStrategy,
       elapsedMs: Date.now() - startedAt,
       timeoutMs,
@@ -369,6 +405,7 @@ export async function forwardBrainRequest(
 export const brainClientInternals = {
   normalizeBaseUrl,
   trimTrailingSlash,
+  resolveLocalDevBrainBaseUrls,
   resolveBrainBaseUrlDetails,
 };
 

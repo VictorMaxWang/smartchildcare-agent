@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
 from dataclasses import dataclass, field
 import hashlib
 import logging
@@ -16,6 +16,7 @@ from app.providers.story_audio_provider import (
     build_story_caption_timing,
     can_use_vivo_story_audio_provider,
     resolve_story_audio_provider,
+    story_audio_provider_prefers_vivo,
 )
 from app.providers.story_image_provider import (
     MockStoryImageProvider,
@@ -91,6 +92,7 @@ STYLE_PALETTES: dict[str, dict[str, str]] = {
 STORYBOOK_MEDIA_WARM_JOB_TTL_SECONDS = 20 * 60
 STORYBOOK_MEDIA_WARM_MAX_WORKERS = 4
 STORYBOOK_MEDIA_WARM_PRIORITY_SCENE_COUNT = 2
+STORYBOOK_AUDIO_PRIORITY_SYNC_TIMEOUT_SECONDS = 0.3
 STORYBOOK_FIRST_BYTE_HIGHLIGHT_LIMIT = 4
 
 MediaWarmJobStatus = Literal["disabled", "idle", "warming", "ready", "partial", "error"]
@@ -122,6 +124,10 @@ class _StoryBookMediaWarmJob:
 _storybook_media_warm_executor = ThreadPoolExecutor(
     max_workers=STORYBOOK_MEDIA_WARM_MAX_WORKERS,
     thread_name_prefix="storybook-media",
+)
+_storybook_audio_priority_executor = ThreadPoolExecutor(
+    max_workers=max(1, STORYBOOK_MEDIA_WARM_PRIORITY_SCENE_COUNT),
+    thread_name_prefix="storybook-audio-priority",
 )
 _storybook_media_warm_jobs: dict[str, _StoryBookMediaWarmJob] = {}
 _storybook_media_warm_lock = Lock()
@@ -1810,17 +1816,44 @@ def _read_cached_scene(*, provider: Any, kwargs: dict[str, Any]) -> Any | None:
         return None
 
 
+def _is_priority_storybook_audio_scene(scene_index: int) -> bool:
+    return 1 <= scene_index <= STORYBOOK_MEDIA_WARM_PRIORITY_SCENE_COUNT
+
+
+def _submit_priority_storybook_audio_render(*, provider: Any, kwargs: dict[str, Any]) -> Future[Any]:
+    return _storybook_audio_priority_executor.submit(provider.render_scene, **kwargs)
+
+
+def _resolve_prefetched_provider_result(*, future: Future[Any], timeout_seconds: float) -> Any | None:
+    try:
+        return future.result(timeout=max(timeout_seconds, 0.0))
+    except FutureTimeoutError:
+        future.cancel()
+        return None
+    except Exception:
+        return None
+
+
 def _render_cached_or_fallback(
     *,
     primary_provider: Any,
     fallback_provider: Any,
     kwargs: dict[str, Any],
+    prefetched_result_future: Future[Any] | None = None,
+    prefetched_result_timeout_seconds: float | None = None,
 ) -> tuple[Any, bool]:
-    # First-byte SLA depends on miss -> immediate fallback. Live providers may only be read from cache here;
-    # uncached media must be warmed asynchronously after the story skeleton has already returned.
+    # First-byte image delivery remains cache-first. Audio may prefetch priority scenes within a bounded
+    # sync budget; misses still fall back honestly and continue async warming after the skeleton returns.
     cached_result = _read_cached_scene(provider=primary_provider, kwargs=kwargs)
     if cached_result is not None:
         return cached_result, True
+    if prefetched_result_future is not None:
+        prefetched_result = _resolve_prefetched_provider_result(
+            future=prefetched_result_future,
+            timeout_seconds=prefetched_result_timeout_seconds or 0.0,
+        )
+        if prefetched_result is not None:
+            return prefetched_result, bool(prefetched_result.output.get("cacheHit"))
     return fallback_provider.render_scene(**kwargs), False
 
 
@@ -2079,7 +2112,7 @@ def _resolve_missing_image_config(settings: Any) -> list[str]:
 
 def _resolve_missing_audio_config(settings: Any) -> list[str]:
     missing: list[str] = []
-    if _normalize_text(getattr(settings, "storybook_audio_provider", "")) != "vivo":
+    if not story_audio_provider_prefers_vivo(settings):
         missing.append("storybook_audio_provider")
     if not _normalize_text(getattr(settings, "vivo_app_id", "")):
         missing.append("VIVO_APP_ID")
@@ -2419,6 +2452,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
         media_kind="audio",
     )
 
+    prepared_scene_requests: list[dict[str, Any]] = []
     scene_requests: list[dict[str, Any]] = []
     image_pending_scene_indices: set[int] = set()
     audio_pending_scene_indices: set[int] = set()
@@ -2446,27 +2480,65 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
             "audio_script": scene["audioScript"],
             "voice_style": scene["voiceStyle"],
         }
-        image_result, image_cache_hit = _render_cached_or_fallback(
-            primary_provider=image_provider,
-            fallback_provider=fallback_image_provider,
-            kwargs=image_kwargs,
-        )
-        audio_result, audio_cache_hit = _render_cached_or_fallback(
-            primary_provider=audio_provider,
-            fallback_provider=fallback_audio_provider,
-            kwargs=audio_kwargs,
-        )
-        if image_live_enabled and not _scene_has_real_image(image_result):
-            image_pending_scene_indices.add(scene["sceneIndex"])
-        if audio_live_enabled and not _scene_has_real_audio(audio_result):
-            audio_pending_scene_indices.add(scene["sceneIndex"])
-
-        scene_requests.append(
+        priority_audio_future = None
+        cached_audio_result = None
+        if audio_live_enabled and _is_priority_storybook_audio_scene(scene["sceneIndex"]):
+            cached_audio_result = _read_cached_scene(provider=audio_provider, kwargs=audio_kwargs)
+            if cached_audio_result is None:
+                priority_audio_future = _submit_priority_storybook_audio_render(
+                    provider=audio_provider,
+                    kwargs=audio_kwargs,
+                )
+        prepared_scene_requests.append(
             {
                 "sceneIndex": scene["sceneIndex"],
                 "scene": scene,
                 "image_kwargs": image_kwargs,
                 "audio_kwargs": audio_kwargs,
+                "cached_audio_result": cached_audio_result,
+                "priority_audio_future": priority_audio_future,
+            }
+        )
+
+    priority_audio_sync_deadline = (
+        monotonic() + STORYBOOK_AUDIO_PRIORITY_SYNC_TIMEOUT_SECONDS
+        if any(scene_request["priority_audio_future"] is not None for scene_request in prepared_scene_requests)
+        else None
+    )
+
+    for scene_request in prepared_scene_requests:
+        image_result, image_cache_hit = _render_cached_or_fallback(
+            primary_provider=image_provider,
+            fallback_provider=fallback_image_provider,
+            kwargs=scene_request["image_kwargs"],
+        )
+        cached_audio_result = scene_request["cached_audio_result"]
+        if cached_audio_result is not None:
+            audio_result, audio_cache_hit = cached_audio_result, True
+        else:
+            remaining_audio_sync_budget = (
+                max(0.0, priority_audio_sync_deadline - monotonic())
+                if priority_audio_sync_deadline is not None
+                else None
+            )
+            audio_result, audio_cache_hit = _render_cached_or_fallback(
+                primary_provider=audio_provider,
+                fallback_provider=fallback_audio_provider,
+                kwargs=scene_request["audio_kwargs"],
+                prefetched_result_future=scene_request["priority_audio_future"],
+                prefetched_result_timeout_seconds=remaining_audio_sync_budget,
+            )
+        if image_live_enabled and not _scene_has_real_image(image_result):
+            image_pending_scene_indices.add(scene_request["sceneIndex"])
+        if audio_live_enabled and not _scene_has_real_audio(audio_result):
+            audio_pending_scene_indices.add(scene_request["sceneIndex"])
+
+        scene_requests.append(
+            {
+                "sceneIndex": scene_request["sceneIndex"],
+                "scene": scene_request["scene"],
+                "image_kwargs": scene_request["image_kwargs"],
+                "audio_kwargs": scene_request["audio_kwargs"],
                 "image_result": image_result,
                 "audio_result": audio_result,
                 "image_cache_hit": image_cache_hit,
@@ -2546,6 +2618,8 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
                 "audioStatus": audio_status,
                 "captionTiming": caption_timing,
                 "voiceStyle": audio_result.output.get("voiceStyle") or scene_blueprint["voiceStyle"],
+                "engineId": _normalize_text(audio_result.output.get("engineId")) or None,
+                "voiceName": _normalize_text(audio_result.output.get("voiceName")) or None,
                 "highlightSource": scene_blueprint["highlightSource"],
                 "imageCacheHit": image_cache_hit,
                 "audioCacheHit": audio_cache_hit,
@@ -2574,7 +2648,7 @@ async def run_parent_storybook(payload: dict[str, Any]) -> dict[str, Any]:
     )
     first_byte_done_ms = _elapsed_ms(request_started_at)
     logger.info(
-        "parent_storybook.first_byte story_id=%s request_source=%s payload_trim_ms=%d scene_build_ms=%d warm_submit_ms=%d fallback_asset_build_ms=%d first_byte_done_ms=%d scene_count=%d cache_hit=%s cache_hit_count=%d image_cache_hit_count=%d audio_cache_hit_count=%d image_live_enabled=%s audio_live_enabled=%s image_pending_scene_count=%d audio_pending_scene_count=%d image_provider=%s audio_provider=%s live_provider_request_thread_policy=cache-read-only",
+        "parent_storybook.first_byte story_id=%s request_source=%s payload_trim_ms=%d scene_build_ms=%d warm_submit_ms=%d fallback_asset_build_ms=%d first_byte_done_ms=%d scene_count=%d cache_hit=%s cache_hit_count=%d image_cache_hit_count=%d audio_cache_hit_count=%d image_live_enabled=%s audio_live_enabled=%s image_pending_scene_count=%d audio_pending_scene_count=%d image_provider=%s audio_provider=%s live_provider_request_thread_policy=priority-sync+async-warm",
         story_id,
         request_source,
         payload_trim_ms,

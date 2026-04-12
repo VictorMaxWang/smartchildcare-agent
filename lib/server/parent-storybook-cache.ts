@@ -13,12 +13,13 @@ import type {
 const STORYBOOK_CACHE_NAMESPACE = "storybook-v2-dual-track-2";
 const STORYBOOK_RESPONSE_TTL_SECONDS = 12 * 60;
 const STORYBOOK_MEDIA_TTL_SECONDS = 20 * 60;
+type StoryBookCacheTransport = Exclude<BrainTransport, "brain-proxy-error">;
 
 type StoryBookResponseCacheEntry = {
   expiresAt: number;
   value: {
     story: ParentStoryBookResponse;
-    transport: BrainTransport;
+    transport: StoryBookCacheTransport;
     targetPath: string;
     upstreamHost: string | null;
     fallbackReason: string | null;
@@ -52,6 +53,10 @@ function cleanupExpired() {
       mediaAssetCache.delete(key);
     }
   }
+}
+
+function resolveMediaIdFromUrl(url: string) {
+  return url.split("/").pop() || null;
 }
 
 function cloneStory(story: ParentStoryBookResponse) {
@@ -261,8 +266,21 @@ export function prepareParentStoryBookResponseForDelivery(
         nextScene = {
           ...nextScene,
           audioUrl: cachedUrl,
+          audioRef: resolveMediaIdFromUrl(cachedUrl) ?? nextScene.audioRef,
         };
       }
+    }
+
+    if (
+      nextScene.audioStatus === "ready" &&
+      typeof nextScene.audioUrl === "string" &&
+      nextScene.audioUrl.startsWith("/api/ai/parent-storybook/media/") &&
+      !nextScene.audioRef
+    ) {
+      nextScene = {
+        ...nextScene,
+        audioRef: resolveMediaIdFromUrl(nextScene.audioUrl),
+      };
     }
 
     if (
@@ -310,9 +328,7 @@ export function prepareParentStoryBookResponseForDelivery(
     imageDelivery:
       nextStory.providerMeta.imageDelivery ??
       resolveProviderImageDelivery(nextStory),
-    audioDelivery:
-      nextStory.providerMeta.audioDelivery ??
-      resolveProviderAudioDelivery(nextStory),
+    audioDelivery: resolveProviderAudioDelivery(nextStory),
   };
 
   nextStory.cacheMeta = {

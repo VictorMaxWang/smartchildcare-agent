@@ -115,6 +115,8 @@ class ParentStoryBookScene(ParentStoryBookModel):
     audio_status: ParentStoryBookMediaStatus
     caption_timing: ParentStoryBookCaptionTiming | None = None
     voice_style: str
+    engine_id: str | None = None
+    voice_name: str | None = None
     highlight_source: str
     image_cache_hit: bool = False
     audio_cache_hit: bool = False

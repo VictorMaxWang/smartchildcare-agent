@@ -725,6 +725,8 @@ export interface ParentStoryBookScene {
   audioStatus: ParentStoryBookMediaStatus;
   captionTiming?: ParentStoryBookCaptionTiming;
   voiceStyle: string;
+  engineId?: string | null;
+  voiceName?: string | null;
   highlightSource: string;
   imageCacheHit?: boolean;
   audioCacheHit?: boolean;

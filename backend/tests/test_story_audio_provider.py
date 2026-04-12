@@ -4,7 +4,7 @@ import pytest
 from pydantic import SecretStr
 
 from app.core.config import Settings
-from app.providers.story_audio_provider import VivoStoryAudioProvider
+from app.providers.story_audio_provider import VivoStoryAudioProvider, resolve_story_audio_provider
 from app.services.storybook_runtime_cache import get_storybook_runtime_cache
 
 
@@ -71,7 +71,29 @@ def test_vivo_story_audio_provider_renders_and_reuses_runtime_cache():
     assert first.output["audioStatus"] == "ready"
     assert first.output["audioUrl"] == "data:audio/wav;base64,AAAA"
     assert first.output["voiceStyle"] == "warm-storytelling"
+    assert first.output["engineId"] == "short_audio_synthesis_jovi"
+    assert first.output["voiceName"] == "yige"
     assert cached is not None
     assert cached.output["cacheHit"] is True
     assert cached.output["audioStatus"] == "ready"
+    assert cached.output["engineId"] == "short_audio_synthesis_jovi"
+    assert cached.output["voiceName"] == "yige"
     assert len(calls) == 1
+
+
+def test_story_audio_provider_prefers_vivo_in_auto_mode_when_credentials_exist():
+    provider = resolve_story_audio_provider(_settings(storybook_audio_provider="auto"))
+
+    assert provider.provider_name == "vivo-story-tts"
+
+
+def test_story_audio_provider_falls_back_to_mock_without_vivo_credentials():
+    provider = resolve_story_audio_provider(
+        Settings(
+            storybook_audio_provider="auto",
+            vivo_app_id=None,
+            vivo_app_key=None,
+        )
+    )
+
+    assert provider.provider_name == "storybook-mock-preview"

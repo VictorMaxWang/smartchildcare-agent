@@ -94,6 +94,8 @@ class _WarmableProvider:
                     "audioScript": kwargs["audio_script"],
                     "audioStatus": "ready" if self.ready else "fallback",
                     "voiceStyle": kwargs["voice_style"],
+                    "engineId": "short_audio_synthesis_jovi" if self.ready else None,
+                    "voiceName": "yige" if self.ready else None,
                     "audioBytes": b"RIFF" if self.ready else None,
                     "audioContentType": "audio/wav" if self.ready else None,
                 },
@@ -184,9 +186,17 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
 
     first = client.post("/api/v1/agents/parent/storybook", json=build_payload())
     first_body = first.json()
-    assert first_body["providerMeta"]["mode"] == "fallback"
+    assert first_body["providerMeta"]["mode"] == "mixed"
+    assert first_body["providerMeta"]["audioDelivery"] == "mixed"
+    assert first_body["providerMeta"]["audioProvider"] == "vivo-story-tts+storybook-mock-preview"
     assert first_body["providerMeta"]["diagnostics"]["image"]["jobStatus"] == "warming"
     assert first_body["providerMeta"]["diagnostics"]["audio"]["jobStatus"] == "warming"
+    assert first_body["providerMeta"]["diagnostics"]["audio"]["readySceneCount"] == 2
+    assert first_body["scenes"][0]["audioStatus"] == "ready"
+    assert first_body["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert first_body["scenes"][0]["audioRef"]
+    assert first_body["scenes"][0]["engineId"] == "short_audio_synthesis_jovi"
+    assert first_body["scenes"][0]["voiceName"] == "yige"
     assert await_storybook_media_warming(first_body["storyId"], timeout_seconds=2.0) is True
 
     response = client.post("/api/v1/agents/parent/storybook", json=build_payload())
@@ -201,6 +211,9 @@ def test_parent_storybook_endpoint_can_return_live_media(monkeypatch):
     assert body["scenes"][0]["imageStatus"] == "ready"
     assert body["scenes"][0]["audioStatus"] == "ready"
     assert body["scenes"][0]["audioUrl"].startswith("/api/ai/parent-storybook/media/")
+    assert body["scenes"][0]["audioRef"]
+    assert body["scenes"][0]["engineId"] == "short_audio_synthesis_jovi"
+    assert body["scenes"][0]["voiceName"] == "yige"
     assert body["scenes"][0]["imageSourceKind"] == "real"
     assert body["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert body["providerMeta"]["diagnostics"]["brain"]["reachable"] is True

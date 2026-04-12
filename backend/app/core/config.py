@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     vivo_ocr_path: str = "/ocr/general_recognition"
     vivo_embedding_model: str = "m3e-base"
     storybook_image_provider: str = "mock"
-    storybook_audio_provider: str = "mock"
+    storybook_audio_provider: str = "auto"
     storybook_image_business_code: str = "pc"
     storybook_image_style_config: str = "4cbc9165bc615ea0815301116e7925a3"
     storybook_image_width: int = 768

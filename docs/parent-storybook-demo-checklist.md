@@ -3,6 +3,7 @@ Updated: `2026-04-07`
 
 ## Before demo
 - Confirm frontend and FastAPI brain are both running.
+- If you are not on plain local dev, set `BRAIN_API_BASE_URL` explicitly before opening Storybook. Production-like runs must not rely on local port guessing.
 - Confirm `/parent` and `/parent/storybook` both open normally on mobile width.
 - Confirm `VIVO_APP_ID` and `VIVO_APP_KEY` are injected only through environment variables.
 - Confirm the demo child feed exists and the storybook entry is visible on `/parent`.
@@ -16,10 +17,12 @@ Updated: `2026-04-07`
 - Go back to `/parent`, then reopen storybook and confirm the session still holds.
 
 ## Storybook smoke
+- Run `npm run ai:smoke:storybook` with the real page fixture before the demo and confirm the first request is `remote-brain-proxy`, not `next-json-fallback`.
 - Switch between all 3 presets and confirm the container theme changes immediately.
 - Play one scene with real audio if available.
 - If real audio is blocked or missing, confirm subtitle preview starts automatically.
 - Swipe or tap to move between scenes and confirm the transition stays smooth on mobile.
+- Reuse the same payload and allow warming/polling until `imageDelivery` reaches at least `mixed`.
 - Reopen the same story and confirm cache badges or faster load behavior are visible.
 
 ## On-screen narration
