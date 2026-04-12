@@ -262,15 +262,16 @@
 - Lane：关怀模式 / 祖辈模式线
 - 问题定义：Parent 默认模式更适合年轻父母，但真实照护者里有大量祖辈，需要更大字、更少层级、更少选择成本。
 - 目标效果：增加关怀模式，切换后采用大字卡片、一屏一句话、今晚做什么、明天提醒什么的低门槛版本。
-- 主要触达层：Parent 首页 / Parent Agent / Storybook 相关 UI
-- 建议触达模块：`app/parent/page.tsx`、`app/parent/agent/page.tsx`、`app/parent/storybook/page.tsx`、`components/parent/*`、`components/role-shell/RoleScaffold.tsx`
+- 主要触达层：Parent 首页 / Parent Agent
+- 建议触达模块：`app/parent/page.tsx`、`app/parent/agent/page.tsx`、`components/parent/CareModeToggle.tsx`、`components/parent/ParentCareFocusCard.tsx`、`components/parent/ParentTransparencyPanel.tsx`、`components/parent/ParentStructuredFeedbackComposer.tsx`、`components/weekly-report/WeeklyReportPreviewCard.tsx`、`lib/care-mode.ts`
 - 推荐前置依赖：无
 - 推荐 subagents：`frontend_architect + reviewer_tester`
 - 是否适合并行：高
 - 最小验收方式：开启关怀模式后，家长侧关键页面信息密度显著下降且仍保留主链路入口
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
-- 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
+- 当前状态：`Done-code-only`
+- 2026-04-12 更新：`/parent` 与 `/parent/agent` 已新增本地持久化的关怀模式切换层，优先级为 `?care=1|0 > localStorage > false`；首屏收敛为大字行动摘要、最短主按钮与最小反馈入口，周报预览 / 透明层 / 结构化反馈均已补 additive `careMode` 展示变体；Storybook 页面本体、T12 语音播报与账户级偏好仍未纳入本阶段。
+- 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T12｜关怀模式：一键播报 + 一键语音反馈
 
@@ -465,7 +466,12 @@
 - 是否适合并行：中
 - 最小验收方式：形成统一 age-band policy，并被至少两条主链路引用
 - 是否需人工 walkthrough / 真机 / 录屏再验：否
-- 当前状态：`Planned`
+- 当前状态：`Done (shared policy + Trend/Parent Weekly)`
+- 本轮落地说明：
+  - `shared/age-band-care-policy.json` 已作为唯一策略源落地，统一定义 `0-12m`、`12-24m`、`24-36m` 的 care focus、teacher observation focus、parent action tone、weekly report focus、default intervention focus、do not overstate signals。
+  - `backend/app/services/parent_trend_service.py` 已薄接入 age-band policy，在 explanation / supportingSignals / warnings 上体现年龄差异。
+  - Parent Weekly 已通过 `lib/agent/parent-weekly-report.ts`、`lib/ai/weekly-report.ts`、`lib/ai/fallback.ts`、`lib/ai/mock.ts`、`backend/app/providers/mock.py` 开始消费 `ageBandContext`。
+  - `app/api/ai/weekly-report/route.ts` 本轮保持 transport-only；Teacher / Parent / Storybook / Intervention 主链的全面接入留给 `T23`。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
 
 ### T23｜年龄分层照护引擎接入主链路

@@ -6,6 +6,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.db.childcare_repository import ChildcareRepository
+from app.services.age_band_policy import get_age_band_label, resolve_age_band_context
 
 
 SUPPORTED_WINDOWS = (7, 14, 30)
@@ -94,6 +95,61 @@ def _payload_get(payload: dict[str, Any], *keys: str) -> Any:
         if key in payload:
             return payload.get(key)
     return None
+
+
+def _age_band_focus_text(age_band_context: dict[str, Any] | None) -> str | None:
+    if not isinstance(age_band_context, dict):
+        return None
+
+    policy = age_band_context.get("policy")
+    if not isinstance(policy, dict):
+        return None
+
+    weekly_focus = [
+        text
+        for text in (_coerce_string(item) for item in policy.get("weeklyReportFocus") or [])
+        if text
+    ]
+    if not weekly_focus:
+        return None
+    return "、".join(weekly_focus[:2])
+
+
+def _build_age_band_explanation(age_band_context: dict[str, Any] | None) -> str | None:
+    focus_text = _age_band_focus_text(age_band_context)
+    label = get_age_band_label(age_band_context)
+    if not focus_text or not label:
+        return None
+    return f"结合{label}阶段的照护重点，当前更适合把变化放在{focus_text}这些托育线索上连续观察。"
+
+
+def _build_age_band_supporting_signal(age_band_context: dict[str, Any] | None) -> dict[str, Any] | None:
+    focus_text = _age_band_focus_text(age_band_context)
+    label = get_age_band_label(age_band_context)
+    if not focus_text or not label:
+        return None
+    return {
+        "sourceType": "age_band_policy",
+        "summary": f"{label}阶段优先看{focus_text}这些照护线索的连续变化。",
+    }
+
+
+def _build_age_band_warning(age_band_context: dict[str, Any] | None) -> str | None:
+    if not isinstance(age_band_context, dict):
+        return None
+
+    policy = age_band_context.get("policy")
+    if not isinstance(policy, dict):
+        return None
+
+    reminders = [
+        text
+        for text in (_coerce_string(item) for item in policy.get("doNotOverstateSignals") or [])
+        if text
+    ]
+    if not reminders:
+        return None
+    return f"年龄分层提醒：{reminders[0]}"
 
 
 def _coerce_string(value: Any) -> str | None:
@@ -887,17 +943,43 @@ async def run_parent_trend_query(payload: dict[str, Any]) -> dict[str, Any]:
     feedback_signals, feedback_explanation, feedback_warnings = _build_feedback_signal_bundle(
         history.get("feedback", [])
     )
+    age_band_context = resolve_age_band_context(
+        {
+            "birthDate": _coerce_string(child.get("birthDate")),
+            "ageBand": _coerce_string(child.get("ageBand")),
+            "asOfDate": end_date.isoformat(),
+        }
+    )
     warnings.extend(feedback_warnings)
     supporting_signals, continuity_note, memory_meta = _maybe_extend_with_memory(
         [*selected_metrics["signals"], *feedback_signals],
         payload,
     )
+    age_band_supporting_signal = _build_age_band_supporting_signal(age_band_context)
+    if age_band_supporting_signal is not None:
+        supporting_signals = _unique_signals([age_band_supporting_signal, *supporting_signals])
+
+    age_band_warning = _build_age_band_warning(age_band_context)
+    if age_band_warning:
+        warnings.append(age_band_warning)
+
+    deduped_warnings: list[str] = []
+    seen_warnings: set[str] = set()
+    for warning in warnings:
+        text = _coerce_string(warning)
+        if not text or text in seen_warnings:
+            continue
+        seen_warnings.add(text)
+        deduped_warnings.append(text)
+
+    age_band_explanation = _build_age_band_explanation(age_band_context)
     explanation = " ".join(
         part
         for part in (
             _trend_conclusion(intent, _coerce_string(child.get("name")), window_days, trend_label),
             _comparison_sentence(comparison, observed_days, window_days),
             feedback_explanation,
+            age_band_explanation,
             FOLLOW_UP_HINTS[intent],
             continuity_note,
         )
@@ -936,7 +1018,7 @@ async def run_parent_trend_query(payload: dict[str, Any]) -> dict[str, Any]:
             "fallbackUsed": repository.fallback,
             "source": repository.source,
         },
-        "warnings": warnings,
+        "warnings": deduped_warnings,
         "source": repository.source,
         "fallback": repository.fallback,
     }

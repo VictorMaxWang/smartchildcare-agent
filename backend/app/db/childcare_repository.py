@@ -12,6 +12,7 @@ from uuid import uuid4
 import aiomysql
 
 from app.db.demo_snapshot import build_demo_snapshot
+from app.services.age_band_policy import resolve_age_band_context
 
 
 DEFAULT_SNAPSHOT_KEYS = (
@@ -866,12 +867,23 @@ class ChildcareRepository:
         return None
 
     def child_summary(self, child: dict[str, Any]) -> dict[str, Any]:
+        age_band_context = resolve_age_band_context(
+            {
+                "birthDate": _coerce_string(child.get("birthDate")),
+                "ageBand": _coerce_string(child.get("ageBand")),
+                "asOfDate": self.snapshot.get("updatedAt"),
+            }
+        )
         return {
             "childId": _coerce_string(child.get("id")),
             "name": _coerce_string(child.get("name")),
             "nickname": _coerce_string(child.get("nickname")),
             "className": _coerce_string(child.get("className")),
             "institutionId": _coerce_string(child.get("institutionId")) or self.institution_id,
+            "birthDate": _coerce_string(child.get("birthDate")),
+            "ageBand": _coerce_string(child.get("ageBand")),
+            "normalizedAgeBand": _coerce_string(age_band_context.get("normalizedAgeBand")),
+            "ageBandSource": _coerce_string(age_band_context.get("source")),
         }
 
     def _child_records(self, bucket: str, child_id: str) -> list[dict[str, Any]]:

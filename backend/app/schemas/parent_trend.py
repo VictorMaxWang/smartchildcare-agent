@@ -37,6 +37,10 @@ class ParentTrendChild(ParentTrendModel):
     nickname: str | None = None
     class_name: str | None = None
     institution_id: str | None = None
+    birth_date: str | None = None
+    age_band: str | None = None
+    normalized_age_band: str | None = None
+    age_band_source: str | None = None
 
 
 class ParentTrendQuerySummary(ParentTrendModel):

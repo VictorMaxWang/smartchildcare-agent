@@ -19,6 +19,7 @@
 - T7 health-file-bridge：`/teacher/health-file-bridge`、`/api/ai/health-file-bridge` 与 backend schema/service skeleton 已落地；OCR / writeback / live escalation 仍未验证
 - T24/T25 Teacher Copilot：backend contract 与 `/teacher/agent` UI 已合入；仍缺人工 walkthrough
 - T26/T27 Weekly Report V2：Teacher / Admin / Parent 三角色都已接到同源 `/api/ai/weekly-report`；`/teacher/agent`、`/admin`、`/parent` 均新增轻量周报预览入口，其中 Admin 首页预览与 `/admin/agent?action=weekly-report` 完整工作区分工明确；当前状态仍是 `Done-code-only`，未写成 fully live 或 Demo-ready
+- T11 Care Mode：`/parent` 与 `/parent/agent` 已新增 `普通模式 / 关怀模式` 前端切换层，状态优先级为 `?care=1|0 > localStorage > false`；关怀模式首屏已收敛为大字摘要、最短主按钮与最小反馈入口，复杂次级信息后置到“更多内容”，当前状态为 `Done-code-only`
 - T28 Admin 质量驾驶舱 metrics engine：backend-only 聚合链路已落地，`POST /api/v1/agents/metrics/admin-quality` 可稳定输出 8 个 named metrics 与 `source / fallback / confidence / coverage`
 - T29 Admin 质量驾驶舱 UI：`/admin` 已新增第二层治理区，位于风险优先级与 TOP 3 之后、风险儿童/班级区之前；仍需完整 walkthrough / 录屏再验
 - staging 与 vivo provider：仍必须保守表达，不写成 `fully healthy`、`fully switched` 或 `fully live`
@@ -119,7 +120,7 @@
 | `T8` | 外部健康文件桥接：OCR / 多模态抽取 | `Planned` | 外部健康文件桥接 | `T7` | 中 | 样例文件 walkthrough | `TR+A` |
 | `T9` | 外部健康文件桥接：专业信息 -> 托育动作映射 | `Planned` | 外部健康文件桥接 | `T8` | 中 | walkthrough / trace 检查 | `TR+A` |
 | `T10` | 外部健康文件桥接：写回主系统闭环 | `Planned` | 外部健康文件桥接 | `T7`、`T8`、`T9` | 低中 | walkthrough / 录屏 | `TR+L+A` |
-| `T11` | 关怀模式 / 祖辈模式：大字卡片 + 简化交互 | `Planned` | 关怀模式 / 祖辈模式 | - | 高 | walkthrough / 录屏 | `TR+A` |
+| `T11` | 关怀模式 / 祖辈模式：大字卡片 + 简化交互 | `Done-code-only` | 关怀模式 / 祖辈模式 | - | 高 | walkthrough / 录屏 | `TR+A` |
 | `T12` | 关怀模式：一键播报 + 一键语音反馈 | `Planned` | 关怀模式 / 祖辈模式 | `T11` | 中 | 真机 / 录屏 | `TR+A` |
 | `T13` | 统一意图入口：后端路由器 | `Planned` | 统一意图入口 | - | 高 | contract smoke | `TR+A` |
 | `T14` | 统一意图入口：前端超级入口 + deeplink 卡 | `Done-code-only` | 统一意图入口 | `T13` | 中 | walkthrough / 录屏 | `TR+L+A` |

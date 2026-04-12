@@ -386,3 +386,43 @@ test("buildParentWeeklyReportSnapshot keeps honest defaults when parent context 
   assert.deepEqual(snapshot.risks, []);
   assert.deepEqual(snapshot.highlights, ["本周已汇总园内观察与家庭反馈，适合继续把家园协同做成连续闭环。"]);
 });
+test("buildParentWeeklyReportSnapshot carries age-band context into parent weekly snapshot", () => {
+  const baseContext = createContext();
+  const infant = buildParentWeeklyReportSnapshot(
+    createContext({
+      child: {
+        ...baseContext.child,
+        birthDate: "2025-06-01",
+      },
+      today: "2026-04-12",
+    })
+  );
+  const toddler = buildParentWeeklyReportSnapshot(
+    createContext({
+      child: {
+        ...baseContext.child,
+        birthDate: "2024-05-01",
+      },
+      today: "2026-04-12",
+    })
+  );
+  const olderToddler = buildParentWeeklyReportSnapshot(
+    createContext({
+      child: {
+        ...baseContext.child,
+        birthDate: "2023-05-01",
+      },
+      today: "2026-04-12",
+    })
+  );
+
+  assert.equal(infant.ageBandContext?.normalizedAgeBand, "0-12m");
+  assert.equal(toddler.ageBandContext?.normalizedAgeBand, "12-24m");
+  assert.equal(olderToddler.ageBandContext?.normalizedAgeBand, "24-36m");
+
+  assert.notEqual(infant.highlights[0], toddler.highlights[0]);
+  assert.notEqual(toddler.highlights[0], olderToddler.highlights[0]);
+  assert.notDeepEqual(infant.risks, toddler.risks);
+  assert.notDeepEqual(toddler.risks, olderToddler.risks);
+  assert.ok(infant.continuityNotes?.some((item) => item.includes("家长动作语气建议")));
+});

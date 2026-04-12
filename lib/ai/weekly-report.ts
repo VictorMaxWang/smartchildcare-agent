@@ -1,3 +1,4 @@
+import { describeAgeBandWeeklyGuidance } from "@/lib/age-band/policy";
 import type {
   AiTrendPrediction,
   MemoryContextMeta,
@@ -59,6 +60,10 @@ function buildItemsFromStrings(items: string[], fallbackLabel: string): WeeklyRe
   return uniqueTexts(items, 4).map((detail, index) =>
     buildItem(`${fallbackLabel}${index + 1}`, detail)
   );
+}
+
+function getParentWeeklyAgeBandGuidance(snapshot: WeeklyReportSnapshot) {
+  return describeAgeBandWeeklyGuidance(snapshot.ageBandContext);
 }
 
 export function normalizeWeeklyReportRole(value: unknown): WeeklyReportRole | null {
@@ -125,25 +130,25 @@ function buildTeacherSections(
       id: TEACHER_SECTION_IDS[0],
       title: "本周异常",
       summary:
-        anomalyItems[0]?.detail ??
-        "本周无集中异常，但仍需保留对重点儿童的异常复盘入口。",
+        anomalyItems[0]?.detail ?? "本周无集中异常，但仍需保留对重点儿童的异常复盘入口。",
       items: anomalyItems,
     },
     {
       id: TEACHER_SECTION_IDS[1],
       title: "补录项",
       summary:
-        makeUpItems[0] ??
-        "优先清空待复查与家园反馈的补录空档，保证下周判断基于连续记录。",
+        makeUpItems[0] ?? "优先清空待复查与家园反馈的补录空档，保证下周判断基于连续记录。",
       items: buildItemsFromStrings(makeUpItems, "补录项"),
     },
     {
       id: TEACHER_SECTION_IDS[2],
       title: "下周重点观察",
       summary:
-        observationItems[0]?.detail ??
-        "下周继续围绕晨检异常、待复查和家园同步做重点观察。",
-      items: observationItems.length > 0 ? observationItems : [buildItem("观察点1", "下周固定一次周初重点儿童复盘。")],
+        observationItems[0]?.detail ?? "下周继续围绕晨检异常、待复查和家园同步做重点观察。",
+      items:
+        observationItems.length > 0
+          ? observationItems
+          : [buildItem("观察点1", "下周固定一次周初重点儿童复盘。")],
     },
   ];
 }
@@ -167,7 +172,7 @@ function buildAdminSections(
       ...risks,
       ...snapshot.topAttentionChildren.slice(0, 2).map(
         (child) =>
-          `${child.childName} 本周被点名 ${child.attentionCount} 次，可作为班级问题热力追踪入口。`
+          `${child.childName} 本周被点名 ${child.attentionCount} 次，可作为班级问题热力入口。`
       ),
       highlights[0] ?? "",
     ],
@@ -211,8 +216,7 @@ function buildAdminSections(
     {
       id: ADMIN_SECTION_IDS[3],
       title: "下周治理重点",
-      summary:
-        nextWeekActions[0] ?? "下周先收敛治理重点，再安排班级与家园闭环动作。",
+      summary: nextWeekActions[0] ?? "下周先收敛治理重点，再安排班级与家园闭环动作。",
       items: buildItemsFromStrings(nextWeekActions, "治理动作"),
     },
   ];
@@ -225,16 +229,27 @@ function buildParentSections(
   nextWeekActions: string[],
   trendPrediction: AiTrendPrediction
 ): WeeklyReportSection[] {
+  const ageBandGuidance = getParentWeeklyAgeBandGuidance(snapshot);
   const changeSummary =
     highlights[0] ??
-    `本周主要变化集中在出勤 ${snapshot.overview.attendanceRate}% 和重点观察项是否继续增加。`;
-  const homeAction = nextWeekActions[0] ?? "下周只保留一个最重要的家庭配合动作，并在执行后回传结果。";
+    (ageBandGuidance
+      ? `${ageBandGuidance.label}阶段更适合围绕${ageBandGuidance.focusText}看一周内的连续变化。`
+      : `本周主要变化集中在出勤 ${snapshot.overview.attendanceRate}% 和重点观察项是否继续增加。`);
+  const homeAction =
+    nextWeekActions[0] ??
+    (ageBandGuidance
+      ? `下周先围绕${ageBandGuidance.actionText}安排一个稳定、容易复现的家庭动作。`
+      : "下周只保留一个最重要的家庭配合动作，并在执行后回传结果。");
   const feedbackItems = uniqueTexts(
     [
+      ageBandGuidance?.cautionText ?? "",
       risks[0] ?? "",
       snapshot.overview.feedbackCount > 0
         ? `请补充本周 ${snapshot.overview.feedbackCount} 次家园互动里最关键的一次家庭反馈。`
         : "请补充一次家庭侧观察，帮助老师判断本周变化是否持续。",
+      ageBandGuidance
+        ? `如果你观察到${ageBandGuidance.focusText}有变化，请尽量在当天回传给老师。`
+        : "",
       trendPrediction === "up"
         ? "如果你观察到问题在加重，请在周初第一天直接反馈给老师。"
         : "如果你观察到问题已改善，也请回传给老师，方便调整下周重点。",
@@ -250,7 +265,10 @@ function buildParentSections(
       items: buildItemsFromStrings(
         [
           changeSummary,
-          highlights[1] ?? `本周共记录 ${snapshot.overview.mealRecordCount} 条饮食相关信息。`,
+          highlights[1] ??
+            (ageBandGuidance
+              ? `${ageBandGuidance.label}阶段建议继续记录${ageBandGuidance.focusText}的连续表现。`
+              : `本周共记录 ${snapshot.overview.mealRecordCount} 条饮食相关信息。`),
         ],
         "变化"
       ),

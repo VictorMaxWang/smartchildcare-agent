@@ -421,3 +421,41 @@ def test_parent_trend_service_negative_structured_feedback_adds_warning_and_barr
     assert any(signal["sourceType"] == "feedback" for signal in result["supportingSignals"])
     assert any("Child had a fever" in warning for warning in result["warnings"])
     assert "暂时无法执行" in result["explanation"]
+def test_parent_trend_service_age_band_policy_changes_explanation_signals_and_warnings():
+    def _run_with_birth_date(birth_date: str) -> dict:
+        snapshot = build_feedback_signal_snapshot(
+            execution_status="completed",
+            improvement_status="clear_improvement",
+            child_reaction="accepted",
+            notes="The home action felt easier this week.",
+        )
+        snapshot["children"][0]["birthDate"] = birth_date
+        return asyncio.run(
+            run_parent_trend_query(
+                {
+                    "question": "最近成长情况怎么样？",
+                    "childId": "child-1",
+                    "appSnapshot": snapshot,
+                }
+            )
+        )
+
+    infant_result = _run_with_birth_date("2025-06-01")
+    toddler_result = _run_with_birth_date("2024-05-01")
+    older_toddler_result = _run_with_birth_date("2023-05-01")
+
+    assert infant_result["child"]["normalizedAgeBand"] == "0-12m"
+    assert toddler_result["child"]["normalizedAgeBand"] == "12-24m"
+    assert older_toddler_result["child"]["normalizedAgeBand"] == "24-36m"
+
+    assert infant_result["explanation"] != toddler_result["explanation"]
+    assert toddler_result["explanation"] != older_toddler_result["explanation"]
+
+    assert any(signal["sourceType"] == "age_band_policy" for signal in infant_result["supportingSignals"])
+    assert any("喂养与补水节律" in signal["summary"] for signal in infant_result["supportingSignals"])
+    assert any("语言萌发与模仿社交" in signal["summary"] for signal in toddler_result["supportingSignals"])
+    assert any("同伴互动和规则切换" in signal["summary"] for signal in older_toddler_result["supportingSignals"])
+
+    assert any("年龄分层提醒" in warning for warning in infant_result["warnings"])
+    assert infant_result["warnings"] != toddler_result["warnings"]
+    assert toddler_result["warnings"] != older_toddler_result["warnings"]

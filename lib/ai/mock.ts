@@ -8,6 +8,7 @@ import type {
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { describeAgeBandWeeklyGuidance } from "@/lib/age-band/policy";
 import { buildActionizedWeeklyReportResponse, normalizeWeeklyReportRole } from "@/lib/ai/weekly-report";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 
@@ -207,6 +208,37 @@ export function buildMockWeeklyReport(
   role?: WeeklyReportRole
 ): WeeklyReportResponse {
   const resolvedRole = role ?? normalizeWeeklyReportRole(snapshot.role) ?? "admin";
+  const ageBandGuidance = resolvedRole === "parent" ? describeAgeBandWeeklyGuidance(snapshot.ageBandContext) : null;
+  if (ageBandGuidance) {
+    return buildActionizedWeeklyReportResponse({
+      role: resolvedRole,
+      snapshot,
+      summary: `${snapshot.periodLabel}里，${ageBandGuidance.label}阶段更适合围绕${ageBandGuidance.focusText}做连续复盘。`,
+      highlights: [
+        `${ageBandGuidance.label}阶段本周重点放在${ageBandGuidance.focusText}这些照护变化。`,
+        ...(snapshot.highlights.length > 0
+          ? snapshot.highlights.slice(0, 2)
+          : [`家长动作建议保持${ageBandGuidance.parentActionTone}`]),
+      ].slice(0, 3),
+      risks: [
+        ageBandGuidance.cautionText,
+        ...(snapshot.risks.length > 0
+          ? snapshot.risks.slice(0, 2)
+          : ["如果家庭回传过少，下周重点会更难收敛。"]),
+      ].slice(0, 3),
+      nextWeekActions: [
+        `下周先围绕${ageBandGuidance.actionText}保留一条最重要的家庭动作。`,
+        `如果你观察到${ageBandGuidance.focusText}有变化，请尽量在当天反馈给老师。`,
+        ageBandGuidance.cautionText,
+      ],
+      trendPrediction:
+        snapshot.overview.healthAbnormalCount > 0 || snapshot.overview.pendingReviewCount > 2
+          ? "up"
+          : "stable",
+      disclaimer: "鏈缓璁敱鏈湴瑙勫垯鐢熸垚锛屼粎鐢ㄤ簬鎵樿偛瑙傚療涓庡鍥矡閫氬弬鑰冿紝涓嶆瀯鎴愬尰鐤楄瘖鏂€?",
+      source: "mock",
+    });
+  }
   return buildActionizedWeeklyReportResponse({
     role: resolvedRole,
     snapshot,

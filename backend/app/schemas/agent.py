@@ -52,6 +52,7 @@ class WeeklyReportSnapshot(FlexibleModel):
     institutionName: str = ""
     periodLabel: str = ""
     role: str | None = None
+    ageBandContext: dict[str, Any] | None = None
     overview: WeeklyReportOverview = Field(default_factory=WeeklyReportOverview)
     diet: WeeklyReportDiet = Field(default_factory=WeeklyReportDiet)
     topAttentionChildren: list[WeeklyReportAttentionChild] = Field(default_factory=list)

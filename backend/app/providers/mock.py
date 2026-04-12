@@ -462,12 +462,78 @@ def build_mock_weekly_report(payload: dict[str, Any]) -> dict[str, Any]:
     payload = _hydrate_demo_payload(payload, mode="weekly")
     snapshot = safe_dict(payload.get("snapshot"))
     role = resolve_weekly_report_role(payload) or "admin"
+    age_band_context = safe_dict(snapshot.get("ageBandContext"))
+    age_band_policy = safe_dict(age_band_context.get("policy"))
     institution_name = str(snapshot.get("institutionName") or "机构")
     period = str(snapshot.get("periodLabel") or "本周")
     overview = safe_dict(snapshot.get("overview"))
     attendance_rate = int(overview.get("attendanceRate") or 0)
     prompt_context = _memory_prompt_context(payload)
     continuity_notes = _continuity_notes(payload, institution_name)
+
+    if role == "parent" and age_band_policy:
+        weekly_focus = unique_texts(
+            [str(item) for item in safe_list(age_band_policy.get("weeklyReportFocus")) if str(item).strip()],
+            limit=2,
+        )
+        default_actions = unique_texts(
+            [str(item) for item in safe_list(age_band_policy.get("defaultInterventionFocus")) if str(item).strip()],
+            limit=2,
+        )
+        do_not_overstate = unique_texts(
+            [str(item) for item in safe_list(age_band_policy.get("doNotOverstateSignals")) if str(item).strip()],
+            limit=2,
+        )
+        parent_action_tone = str(age_band_policy.get("parentActionTone") or "").strip()
+        age_band_label = {"0-12m": "0-12月", "12-24m": "12-24月", "24-36m": "24-36月"}.get(
+            str(age_band_policy.get("ageBand") or ""),
+            "当前月龄",
+        )
+        focus_text = "、".join(weekly_focus[:2]) if weekly_focus else "当前照护重点"
+        primary_action = default_actions[0] if default_actions else "保留一条稳定、容易复现的家庭动作"
+
+        return build_actionized_weekly_report(
+            role=role,
+            snapshot=snapshot,
+            summary=first_non_empty(
+                [
+                    continuity_notes[0] if continuity_notes else "",
+                    f"{period}里更建议围绕{focus_text}做连续复盘；{age_band_label}阶段家长动作以{parent_action_tone or '安稳、轻量的小动作配合'}为主。",
+                ],
+                f"{period}里更建议围绕{focus_text}做连续复盘；{age_band_label}阶段家长动作以{parent_action_tone or '安稳、轻量的小动作配合'}为主。",
+            ),
+            highlights=unique_texts(
+                [
+                    f"{age_band_label}阶段本周先看{focus_text}这些照护变化。",
+                    *safe_list(snapshot.get("highlights"))[:2],
+                    *prompt_context["recent_continuity_signals"][:1],
+                ],
+                limit=4,
+            ),
+            risks=unique_texts(
+                [
+                    do_not_overstate[0] if do_not_overstate else "",
+                    *safe_list(snapshot.get("risks"))[:2],
+                    *prompt_context["open_loops"][:1],
+                ],
+                limit=4,
+            ),
+            next_week_actions=unique_texts(
+                [
+                    f"下周先围绕{primary_action}保留一条最重要的家庭动作。",
+                    f"如果你观察到{focus_text}有变化，请尽量在当天回传给老师。",
+                    do_not_overstate[0] if do_not_overstate else "",
+                    *prompt_context["last_consultation_takeaways"][:1],
+                ],
+                limit=4,
+            ),
+            trend_prediction="stable" if attendance_rate >= 80 else "down",
+            disclaimer="褰撳墠涓?FastAPI mock 杈撳嚭锛岀敤浜庡墠鍚庣鑱旇皟銆?",
+            source="mock",
+            model="mock-weekly-report-v1",
+            continuity_notes=continuity_notes,
+            memory_meta=_memory_meta(payload),
+        )
 
     result = build_actionized_weekly_report(
         role=role,

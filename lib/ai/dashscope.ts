@@ -275,6 +275,7 @@ function buildWeeklyReportPrompt(snapshot: WeeklyReportSnapshot, role: WeeklyRep
     "你只能做托育运营分析和下周行动建议，不做医疗诊断，不输出任何额外文本。",
     "请基于输入的周度运营摘要输出严格JSON。",
     "JSON字段必须为: summary, highlights, risks, nextWeekActions, trendPrediction, disclaimer。",
+    "如果输入包含 ageBandContext，请把该年龄阶段的 weeklyReportFocus、parentActionTone 和 doNotOverstateSignals 融入输出，避免写成泛儿童建议。",
     "summary必须是中文字符串，长度控制在100到160字，适合用于比赛答辩或运营周报。",
     "highlights、risks、nextWeekActions必须是字符串数组。",
     "trendPrediction只能是up|stable|down，表示下周风险趋势上升、持平或下降。",

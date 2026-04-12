@@ -15,6 +15,7 @@ import type { CanonicalTask } from "@/lib/tasks/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 type ExecutionCountOption = 1 | 2 | 3;
 
@@ -53,7 +54,7 @@ const EXECUTION_COUNT_OPTIONS: Array<{
 }> = [
   { value: 1, label: "1次" },
   { value: 2, label: "2次" },
-  { value: 3, label: "3次+" },
+  { value: 3, label: "3次" },
 ];
 
 const EXECUTOR_ROLE_OPTIONS: Array<{
@@ -107,6 +108,11 @@ interface ParentStructuredFeedbackComposerProps {
   notePrefill?: { value: string; token: number } | null;
   onSubmit: (input: ParentStructuredFeedbackComposerSubmitInput) => void;
   onSnoozeReminder?: () => void;
+  careMode?: boolean;
+}
+
+function getOptionButtonClassName(careMode: boolean) {
+  return careMode ? "min-h-12 rounded-2xl px-4 text-base" : "rounded-full";
 }
 
 export default function ParentStructuredFeedbackComposer({
@@ -121,6 +127,7 @@ export default function ParentStructuredFeedbackComposer({
   notePrefill,
   onSubmit,
   onSnoozeReminder,
+  careMode = false,
 }: ParentStructuredFeedbackComposerProps) {
   const [executionStatus, setExecutionStatus] =
     useState<ParentFeedbackExecutionStatus | null>(null);
@@ -133,7 +140,9 @@ export default function ParentStructuredFeedbackComposer({
     useState<ParentFeedbackExecutorRole>("parent");
   const [barriers, setBarriers] = useState<string[]>([]);
   const [notes, setNotes] = useState(() => notePrefill?.value ?? "");
-  const [showDetails, setShowDetails] = useState(() => Boolean(notePrefill?.value));
+  const [showDetails, setShowDetails] = useState(() =>
+    careMode ? false : Boolean(notePrefill?.value)
+  );
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
 
   const composerMessage = validationMessage ?? statusMessage;
@@ -141,6 +150,7 @@ export default function ParentStructuredFeedbackComposer({
     consultation?.followUp48h?.[0] ??
     interventionCard?.reviewIn48h ??
     "提交后会继续带入 48 小时复查上下文。";
+  const optionButtonClassName = getOptionButtonClassName(careMode);
 
   function handleSubmit() {
     if (!interventionCard) {
@@ -191,42 +201,55 @@ export default function ParentStructuredFeedbackComposer({
   return (
     <div className="space-y-4">
       <div className="rounded-3xl border border-slate-100 bg-white p-4">
-        <div className="flex flex-wrap gap-2">
-          {activeTask ? <Badge variant="info">已关联今晚任务</Badge> : null}
-          {interventionCard?.consultationId || consultation ? (
-            <Badge variant="warning">已关联复查上下文</Badge>
-          ) : null}
-          {latestFeedback ? (
-            <Badge variant="secondary">最近反馈：{latestFeedback.status}</Badge>
-          ) : (
-            <Badge variant="secondary">今晚可提交首条结构化反馈</Badge>
-          )}
-          {reminderStatus ? (
-            <Badge variant="outline">提醒状态：{reminderStatus}</Badge>
-          ) : null}
-        </div>
-        <p className="mt-3 text-sm font-semibold text-slate-900">
+        {!careMode ? (
+          <div className="flex flex-wrap gap-2">
+            {activeTask ? <Badge variant="info">已关联今晚任务</Badge> : null}
+            {interventionCard?.consultationId || consultation ? (
+              <Badge variant="warning">已关联复查上下文</Badge>
+            ) : null}
+            {latestFeedback ? (
+              <Badge variant="secondary">最近反馈：{latestFeedback.status}</Badge>
+            ) : (
+              <Badge variant="secondary">今晚可提交首条结构化反馈</Badge>
+            )}
+            {reminderStatus ? (
+              <Badge variant="outline">提醒状态：{reminderStatus}</Badge>
+            ) : null}
+          </div>
+        ) : (
+          <Badge variant="info" className="px-3 py-1 text-sm">
+            快速反馈
+          </Badge>
+        )}
+        <p className={careMode ? "mt-4 text-lg font-semibold leading-8 text-slate-900" : "mt-3 text-sm font-semibold text-slate-900"}>
           {interventionCard?.title ?? "当前暂无可提交反馈的干预卡"}
         </p>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <p className={careMode ? "mt-3 text-base leading-8 text-slate-700" : "mt-2 text-sm leading-6 text-slate-600"}>
           {interventionCard?.tonightHomeAction ??
             "请先生成或选择当前干预卡，提交按钮会在有上下文后启用。"}
         </p>
         <p className="mt-3 text-sm leading-6 text-slate-600">
           48 小时内复查：{reviewLabel}
         </p>
+        {careMode && notePrefill?.value && !showDetails ? (
+          <p className="mt-3 text-sm leading-6 text-sky-700">
+            已带入一条补充草稿，可在“补充情况（可选）”里查看。
+          </p>
+        ) : null}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className={cn("grid gap-4", careMode ? "grid-cols-1" : "lg:grid-cols-3")}>
         <div className="rounded-3xl border border-slate-100 bg-white p-4">
-          <p className="text-sm font-semibold text-slate-900">今晚做了没有</p>
+          <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+            今晚做了没有
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {EXECUTION_STATUS_OPTIONS.map((option) => (
               <Button
                 key={option.value}
                 type="button"
                 variant={executionStatus === option.value ? "premium" : "outline"}
-                className="rounded-full"
+                className={optionButtonClassName}
                 onClick={() => {
                   setExecutionStatus(option.value);
                   setExecutionCount((current) =>
@@ -249,7 +272,7 @@ export default function ParentStructuredFeedbackComposer({
                     key={option.value}
                     type="button"
                     variant={executionCount === option.value ? "premium" : "outline"}
-                    className="rounded-full"
+                    className={optionButtonClassName}
                     onClick={() => setExecutionCount(option.value)}
                   >
                     {option.label}
@@ -261,14 +284,16 @@ export default function ParentStructuredFeedbackComposer({
         </div>
 
         <div className="rounded-3xl border border-slate-100 bg-white p-4">
-          <p className="text-sm font-semibold text-slate-900">孩子反应怎样</p>
+          <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+            孩子反应怎样
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {CHILD_REACTION_OPTIONS.map((option) => (
               <Button
                 key={option.value}
                 type="button"
                 variant={childReaction === option.value ? "premium" : "outline"}
-                className="rounded-full"
+                className={optionButtonClassName}
                 onClick={() => setChildReaction(option.value)}
               >
                 {option.label}
@@ -278,14 +303,16 @@ export default function ParentStructuredFeedbackComposer({
         </div>
 
         <div className="rounded-3xl border border-slate-100 bg-white p-4">
-          <p className="text-sm font-semibold text-slate-900">有没有更好一点</p>
+          <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+            有没有更好一点
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {IMPROVEMENT_STATUS_OPTIONS.map((option) => (
               <Button
                 key={option.value}
                 type="button"
                 variant={improvementStatus === option.value ? "premium" : "outline"}
-                className="rounded-full"
+                className={optionButtonClassName}
                 onClick={() => setImprovementStatus(option.value)}
               >
                 {option.label}
@@ -298,32 +325,38 @@ export default function ParentStructuredFeedbackComposer({
       <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-slate-900">补充更多情况</p>
+            <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+              {careMode ? "补充情况（可选）" : "补充更多情况"}
+            </p>
             <p className="mt-1 text-sm text-slate-600">
-              障碍、执行人、补充说明都放在第二层，不打断第一步快速反馈。
+              {careMode
+                ? "这些内容不是必须填，只有需要时再展开。"
+                : "阻碍、执行人、补充说明都放在第二层，不打断第一步快速反馈。"}
             </p>
           </div>
           <Button
             type="button"
             variant="outline"
-            className="rounded-full"
+            className={careMode ? "min-h-11 rounded-2xl px-4 text-base" : "rounded-full"}
             onClick={() => setShowDetails((current) => !current)}
           >
-            {showDetails ? "收起补充" : "补充更多"}
+            {showDetails ? "收起补充" : careMode ? "打开补充情况" : "补充更多"}
           </Button>
         </div>
 
         {showDetails ? (
           <div className="mt-4 space-y-4">
             <div className="rounded-3xl border border-white/80 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">谁来执行</p>
+              <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+                谁来执行
+              </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {EXECUTOR_ROLE_OPTIONS.map((option) => (
                   <Button
                     key={option.value}
                     type="button"
                     variant={executorRole === option.value ? "premium" : "outline"}
-                    className="rounded-full"
+                    className={optionButtonClassName}
                     onClick={() => setExecutorRole(option.value)}
                   >
                     {option.label}
@@ -333,14 +366,16 @@ export default function ParentStructuredFeedbackComposer({
             </div>
 
             <div className="rounded-3xl border border-white/80 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">遇到哪些障碍</p>
+              <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+                遇到哪些阻碍
+              </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {BARRIER_OPTIONS.map((option) => (
                   <Button
                     key={option}
                     type="button"
                     variant={barriers.includes(option) ? "premium" : "outline"}
-                    className="rounded-full"
+                    className={optionButtonClassName}
                     onClick={() => setBarriers((current) => toggleBarrier(current, option))}
                   >
                     {option}
@@ -350,25 +385,29 @@ export default function ParentStructuredFeedbackComposer({
             </div>
 
             <div className="rounded-3xl border border-white/80 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">补充说明</p>
+              <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+                补充说明
+              </p>
               <Textarea
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder="补充今晚的场景、持续时间、孩子状态，或 OCR 草稿里的细节。"
-                className="mt-3 min-h-28 bg-white"
+                className={cn("mt-3 bg-white", careMode ? "min-h-32 text-base" : "min-h-28")}
               />
             </div>
 
             <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-900">附件补充</p>
+              <p className={careMode ? "text-base font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>
+                附件补充
+              </p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 语音和图片补充将在后续任务接入。本轮先保留结构化字段与占位入口，不上传文件。
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button type="button" variant="outline" className="rounded-full" disabled>
+                <Button type="button" variant="outline" className={optionButtonClassName} disabled>
                   语音补充 即将支持
                 </Button>
-                <Button type="button" variant="outline" className="rounded-full" disabled>
+                <Button type="button" variant="outline" className={optionButtonClassName} disabled>
                   图片补充 即将支持
                 </Button>
               </div>
@@ -379,19 +418,21 @@ export default function ParentStructuredFeedbackComposer({
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-100 bg-emerald-50/70 p-4">
         <div>
-          <p className="text-sm font-semibold text-slate-900">
-            {feedbackPrompt ?? "提交后，下一轮 follow-up 会自动带上这条结构化反馈。"}
+          <p className={careMode ? "text-base font-semibold leading-8 text-slate-900" : "text-sm font-semibold text-slate-900"}>
+            {feedbackPrompt ?? "提交后，下一轮 follow-up 会自动带入这条结构化反馈。"}
           </p>
-          <p className="mt-1 text-sm text-slate-600">
-            数据会先进入 canonical feedback shape，再自动镜像 legacy 兼容字段。
-          </p>
+          {!careMode ? (
+            <p className="mt-1 text-sm text-slate-600">
+              数据会先进入 canonical feedback shape，再自动镜像 legacy 兼容字段。
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           {onSnoozeReminder ? (
             <Button
               type="button"
               variant="outline"
-              className="rounded-xl"
+              className={careMode ? "min-h-12 rounded-2xl px-4 text-base" : "rounded-xl"}
               onClick={onSnoozeReminder}
             >
               稍后提醒
@@ -399,7 +440,7 @@ export default function ParentStructuredFeedbackComposer({
           ) : null}
           <Button
             type="button"
-            className="rounded-xl"
+            className={careMode ? "min-h-12 rounded-2xl px-5 text-base" : "rounded-xl"}
             onClick={handleSubmit}
             disabled={!interventionCard}
           >
@@ -409,7 +450,9 @@ export default function ParentStructuredFeedbackComposer({
       </div>
 
       {composerMessage ? (
-        <p className="text-sm text-slate-600">{composerMessage}</p>
+        <p className={careMode ? "text-base leading-7 text-slate-600" : "text-sm text-slate-600"}>
+          {composerMessage}
+        </p>
       ) : null}
     </div>
   );

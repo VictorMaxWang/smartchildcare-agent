@@ -1,5 +1,6 @@
 import type { ParentAgentChildContext } from "@/lib/agent/parent-agent";
 import type { WeeklyReportSnapshot } from "@/lib/ai/types";
+import { describeAgeBandWeeklyGuidance, resolveAgeBandContext } from "@/lib/age-band/policy";
 import { selectStructuredFeedbackConsumption } from "@/lib/feedback/consumption";
 import type { ParentStructuredFeedbackLite } from "@/lib/feedback/types";
 
@@ -54,6 +55,11 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
   const weeklyHealthAbnormalCount = context.weeklyHealthChecks.filter((item) => item.isAbnormal).length;
   const topGrowthCategory = getTopGrowthCategory(context);
   const attentionCount = context.attentionGrowthRecords.length + weeklyHealthAbnormalCount;
+  const ageBandContext = resolveAgeBandContext({
+    birthDate: context.child.birthDate,
+    asOfDate: context.today,
+  });
+  const ageBandGuidance = describeAgeBandWeeklyGuidance(ageBandContext);
   const feedbackConsumption = selectStructuredFeedbackConsumption(
     [context.latestFeedback, context.weeklyFeedbacks],
     {
@@ -68,6 +74,9 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
 
   const highlights = uniqueTexts(
     [
+      ageBandGuidance
+        ? `${ageBandGuidance.label}阶段本周先看${ageBandGuidance.focusText}这些照护变化。`
+        : undefined,
       positiveFeedback ? "最近一次结构化反馈显示家庭动作已经开始起效" : undefined,
       selectedFeedback?.childReaction === "accepted" || selectedFeedback?.childReaction === "improved"
         ? `家长反馈提到孩子对家庭动作的反应更配合：${selectedFeedback.childReaction}`
@@ -86,6 +95,7 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
     [
       ...context.smartInsights.filter((item) => item.level === "warning").map((item) => item.title),
       ...context.focusReasons,
+      ageBandGuidance?.cautionText,
       context.pendingReviews.length > 0 ? `仍有 ${context.pendingReviews.length} 项观察待继续跟进` : undefined,
       !positiveFeedback && feedbackConsumption.summary ? feedbackConsumption.summary : undefined,
       ...feedbackConsumption.openLoops,
@@ -96,6 +106,7 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
 
   const continuityNotes = uniqueTexts(
     [
+      ageBandGuidance ? `家长动作语气建议：${ageBandGuidance.parentActionTone}` : undefined,
       feedbackConsumption.summary,
       ...feedbackConsumption.continuitySignals,
       ...feedbackConsumption.openLoops,
@@ -108,6 +119,7 @@ export function buildParentWeeklyReportSnapshot(context: ParentAgentChildContext
     institutionName: context.child.className || "家园协同",
     periodLabel: "近7天",
     role: "parent",
+    ageBandContext,
     overview: {
       visibleChildren: 1,
       attendanceRate: buildSchoolActivityRate(context),

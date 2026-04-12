@@ -8,6 +8,7 @@ import type {
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { describeAgeBandWeeklyGuidance } from "@/lib/age-band/policy";
 import { buildActionizedWeeklyReportResponse, normalizeWeeklyReportRole } from "@/lib/ai/weekly-report";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 
@@ -212,6 +213,41 @@ export function buildFallbackWeeklyReport(
   role?: WeeklyReportRole
 ): WeeklyReportResponse {
   const resolvedRole = role ?? normalizeWeeklyReportRole(snapshot.role) ?? "admin";
+  const ageBandGuidance = resolvedRole === "parent" ? describeAgeBandWeeklyGuidance(snapshot.ageBandContext) : null;
+  if (ageBandGuidance) {
+    const trendPrediction =
+      snapshot.overview.healthAbnormalCount > 0 || snapshot.overview.pendingReviewCount > 2
+        ? "up"
+        : snapshot.diet.balancedRate >= 70 && snapshot.diet.hydrationAvg >= 150
+          ? "down"
+          : "stable";
+
+    return buildActionizedWeeklyReportResponse({
+      role: resolvedRole,
+      snapshot,
+      summary: `${snapshot.periodLabel}内更建议围绕${ageBandGuidance.focusText}做一周复盘，家长动作以${ageBandGuidance.parentActionTone}为主。`,
+      highlights: [
+        `${ageBandGuidance.label}阶段本周更看${ageBandGuidance.focusText}这些连续变化。`,
+        ...(snapshot.highlights.length > 0
+          ? snapshot.highlights.slice(0, 2)
+          : [`家长配合建议保持${ageBandGuidance.parentActionTone}`]),
+      ].slice(0, 3),
+      risks: [
+        ageBandGuidance.cautionText,
+        ...(snapshot.risks.length > 0
+          ? snapshot.risks.slice(0, 2)
+          : ["如缺少家庭回传，老师很难判断这些变化是否稳定。"]),
+      ].slice(0, 3),
+      nextWeekActions: [
+        `下周先围绕${ageBandGuidance.actionText}做一个稳定、容易复现的小动作。`,
+        `如果你观察到${ageBandGuidance.focusText}有变化，请尽量在当天回传给老师。`,
+        ageBandGuidance.cautionText,
+      ],
+      trendPrediction,
+      disclaimer: DEFAULT_DISCLAIMER,
+      source: "fallback",
+    });
+  }
   const trendPrediction =
     snapshot.overview.healthAbnormalCount > 0 || snapshot.overview.pendingReviewCount > 2
       ? "up"

@@ -30,6 +30,27 @@ export type ReminderType =
   | "admin-focus"
   | "draft-sync";
 export type ReminderStatus = "pending" | "acknowledged" | "done" | "snoozed";
+export type AgeBandPolicyId = "0-12m" | "12-24m" | "24-36m";
+
+export interface AgeBandPolicy {
+  ageBand: AgeBandPolicyId;
+  careFocus: string[];
+  teacherObservationFocus: string[];
+  parentActionTone: string;
+  weeklyReportFocus: string[];
+  defaultInterventionFocus: string[];
+  doNotOverstateSignals: string[];
+}
+
+export interface ResolvedAgeBandContext {
+  policyVersion: string;
+  birthDate?: string | null;
+  rawAgeBand?: string | null;
+  normalizedAgeBand: AgeBandPolicyId | null;
+  ageMonths?: number | null;
+  source: "birthDate" | "ageBand" | "unknown";
+  policy?: AgeBandPolicy | null;
+}
 
 export interface PromptMemoryContext {
   longTermTraits: string[];
@@ -282,6 +303,7 @@ export interface ChildSuggestionSnapshot {
     id: string;
     name: string;
     ageBand?: string;
+    ageBandContext?: ResolvedAgeBandContext;
     className?: string;
     allergies?: string[];
     specialNotes?: string;
@@ -770,6 +792,10 @@ export interface ParentTrendQueryChild {
   nickname?: string | null;
   className?: string | null;
   institutionId?: string | null;
+  birthDate?: string | null;
+  ageBand?: string | null;
+  normalizedAgeBand?: AgeBandPolicyId | null;
+  ageBandSource?: ResolvedAgeBandContext["source"] | null;
 }
 
 export interface ParentTrendQuerySummary {
@@ -848,6 +874,7 @@ export interface WeeklyReportSnapshot {
   institutionName: string;
   periodLabel: string;
   role: WeeklyReportRole | string;
+  ageBandContext?: ResolvedAgeBandContext;
   overview: {
     visibleChildren: number;
     attendanceRate: number;

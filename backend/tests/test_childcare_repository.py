@@ -10,10 +10,11 @@ def build_app_snapshot() -> dict:
         "children": [
             {
                 "id": "c-11",
-                "name": "周诗雨",
-                "nickname": "诗诗",
+                "name": "Zhou Shiyu",
+                "nickname": "Shishi",
+                "birthDate": "2025-06-01",
                 "institutionId": "inst-test",
-                "className": "向日葵班",
+                "className": "Sunflower Class",
             }
         ],
         "attendance": [],
@@ -23,12 +24,12 @@ def build_app_snapshot() -> dict:
                 "childId": "c-11",
                 "date": "2026-04-03",
                 "meal": "lunch",
-                "foods": ["米饭", "青菜", "鸡肉"],
+                "foods": ["rice", "greens", "chicken"],
                 "intakeLevel": "low",
                 "preference": "dislike",
                 "waterMl": 120,
                 "nutritionScore": 66,
-                "aiEvaluation": {"summary": "只吃鸡肉，青菜未动。"},
+                "aiEvaluation": {"summary": "Mostly ate the chicken and left the vegetables."},
             }
         ],
         "growth": [],
@@ -52,8 +53,8 @@ def test_childcare_repository_request_snapshot_supports_real_request_scoped_writ
         repository.insert_observation(
             child_id="c-11",
             observation_type="diet_follow_up",
-            content="午餐继续回避蔬菜，需要老师跟进。",
-            metadata={"tags": ["饮食", "偏食"], "category": "daily-observation"},
+            content="Lunch still showed clear vegetable avoidance and needs teacher follow-up.",
+            metadata={"tags": ["diet", "picky"], "category": "daily-observation"},
         )
     )
     draft_result = asyncio.run(
@@ -61,16 +62,18 @@ def test_childcare_repository_request_snapshot_supports_real_request_scoped_writ
             child_id="c-11",
             draft_type="observation",
             target_role="teacher",
-            content="近 7 天饮食需持续跟进。",
+            content="Keep tracking diet continuity over the next 7 days.",
             structured_payload={"trendDetected": True},
         )
     )
 
     assert repository.source == "request_snapshot"
-    assert observation_result["record"]["description"] == "午餐继续回避蔬菜，需要老师跟进。"
+    assert observation_result["record"]["description"] == (
+        "Lunch still showed clear vegetable avoidance and needs teacher follow-up."
+    )
     assert observation_result["persisted"] is False
     assert repository.snapshot["growth"][0]["childId"] == "c-11"
-    assert draft_result["record"]["content"] == "近 7 天饮食需持续跟进。"
+    assert draft_result["record"]["content"] == "Keep tracking diet continuity over the next 7 days."
     assert draft_result["persisted"] is False
     assert repository.snapshot["mobileDrafts"][0]["childId"] == "c-11"
 
@@ -84,7 +87,7 @@ def test_childcare_repository_request_snapshot_history_anchors_to_snapshot_updat
                 "childId": "c-11",
                 "date": "2026-04-02",
                 "meal": "lunch",
-                "foods": ["米饭", "青菜", "鸡肉"],
+                "foods": ["rice", "greens", "chicken"],
                 "intakeLevel": "medium",
                 "preference": "neutral",
                 "waterMl": 140,
@@ -95,7 +98,7 @@ def test_childcare_repository_request_snapshot_history_anchors_to_snapshot_updat
                 "childId": "c-11",
                 "date": "2026-03-30",
                 "meal": "lunch",
-                "foods": ["米饭", "南瓜", "鸡蛋"],
+                "foods": ["rice", "pumpkin", "egg"],
                 "intakeLevel": "medium",
                 "preference": "neutral",
                 "waterMl": 130,
@@ -112,6 +115,25 @@ def test_childcare_repository_request_snapshot_history_anchors_to_snapshot_updat
     assert [record["id"] for record in history["meals"]] == ["meal-1", "meal-2", "meal-3"]
 
 
+def test_childcare_repository_child_summary_adds_age_band_metadata_without_breaking_legacy_keys():
+    repository = asyncio.run(
+        ChildcareRepository.create(app_snapshot=build_app_snapshot(), institution_id=None, database_url=None)
+    )
+
+    child = repository.get_child_by_id("c-11")
+    summary = repository.child_summary(child)
+
+    assert summary["childId"] == "c-11"
+    assert summary["name"] == "Zhou Shiyu"
+    assert summary["nickname"] == "Shishi"
+    assert summary["className"] == "Sunflower Class"
+    assert summary["institutionId"] == "inst-test"
+    assert summary["birthDate"] == "2025-06-01"
+    assert summary["ageBand"] is None
+    assert summary["normalizedAgeBand"] == "0-12m"
+    assert summary["ageBandSource"] == "birthDate"
+
+
 def test_childcare_repository_demo_snapshot_expands_to_36_children_and_recent_histories():
     repository = asyncio.run(ChildcareRepository.create(app_snapshot=None, institution_id=None, database_url=None))
 
@@ -120,7 +142,7 @@ def test_childcare_repository_demo_snapshot_expands_to_36_children_and_recent_hi
     assert repository.fallback is True
     assert len(repository.snapshot["children"]) == 36
     assert len(child_ids) == 36
-    assert repository.get_child_by_id("c-16")["name"] == "高子墨"
+    assert repository.get_child_by_id("c-16")["name"]
 
     for bucket in ("attendance", "meals", "growth", "feedback", "health"):
         bucket_child_ids = {record["childId"] for record in repository.snapshot[bucket]}

@@ -8,6 +8,8 @@ import ReactMarkdown from "react-markdown";
 import { BrainCircuit, Clock3, Mic, ScanSearch, Send, Sparkles } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
+import CareModeToggle from "@/components/parent/CareModeToggle";
+import ParentCareFocusCard from "@/components/parent/ParentCareFocusCard";
 import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel";
 import ParentStructuredFeedbackComposer, {
   type ParentStructuredFeedbackComposerSubmitInput,
@@ -61,6 +63,7 @@ import { buildReminderItems } from "@/lib/mobile/reminders";
 import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
 import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
+import { useCareMode } from "@/lib/care-mode";
 import {
   buildInterventionTasksFromCard,
   materializeTasksFromLegacy,
@@ -91,6 +94,7 @@ export default function ParentAgentPage() {
   const trendDebugCase = trendDebugEnabled
     ? resolveParentTrendDebugCase(searchParams.get("trendCase"))
     : null;
+  const { careMode, setCareMode } = useCareMode();
   const {
     currentUser,
     children,
@@ -127,6 +131,7 @@ export default function ParentAgentPage() {
   const [trendError, setTrendError] = useState<string | null>(null);
   const [latestTrendQuery, setLatestTrendQuery] = useState<string | null>(null);
   const [latestTrendResult, setLatestTrendResult] = useState<ParentTrendQueryResponse | null>(null);
+  const [showMoreContent, setShowMoreContent] = useState(false);
   const [reflexionLoading, setReflexionLoading] = useState(false);
   const [parentMessageStatus, setParentMessageStatus] = useState<string | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
@@ -327,6 +332,11 @@ export default function ParentAgentPage() {
     setFeedbackStatus(null);
     setFeedbackNotePrefill(null);
   }, [selectedChildId]);
+
+  useEffect(() => {
+    if (!careMode) return;
+    setShowMoreContent(false);
+  }, [careMode, selectedChildId]);
 
   useEffect(() => {
     if (!selectedFeed || !currentResult) return;
@@ -788,18 +798,545 @@ export default function ParentAgentPage() {
     );
   }
 
+  const hasMultipleChildren = parentFeed.length > 1;
+  const normalPageActions = (
+    <>
+      <CareModeToggle
+        careMode={careMode}
+        onChange={setCareMode}
+        className="w-full sm:w-[320px]"
+      />
+      <InlineLinkButton href="/parent" label="返回家长首页" />
+      <InlineLinkButton
+        href={storybookHref}
+        label="打开今日微绘本"
+        variant="secondary"
+      />
+      <InlineLinkButton
+        href={`/parent/agent?child=${selectedFeed.child.id}`}
+        label="刷新当前建议"
+        variant="premium"
+      />
+    </>
+  );
+  const carePageActions = (
+    <>
+      <CareModeToggle
+        careMode={careMode}
+        onChange={setCareMode}
+        className="w-full sm:w-[320px]"
+      />
+      <InlineLinkButton href="/parent" label="返回家长首页" />
+      <InlineLinkButton
+        href={`/parent/agent?child=${selectedFeed.child.id}`}
+        label="刷新当前建议"
+        variant="premium"
+      />
+    </>
+  );
+
+  if (careMode) {
+    return (
+      <RolePageShell
+        badge={`家长 AI 助手 · 当前孩子 ${selectedFeed.child.name}`}
+        title="今晚先做一件事，做完再给老师一个最短反馈。"
+        description="关怀模式把首屏收敛成大字行动摘要，先让祖辈和低数字熟练度照护者看懂今晚做什么、明天看什么、为什么现在做。"
+        actions={carePageActions}
+      >
+        <RoleSplitLayout
+          stacked
+          aside={null}
+          main={
+            <div className="space-y-6">
+              <ParentCareFocusCard
+                badge="关怀模式"
+                title={`今晚先陪 ${selectedFeed.child.name} 做这一件事`}
+                description={
+                  currentResult?.summary ??
+                  "先完成今晚动作，再把孩子的反应告诉老师。"
+                }
+                items={[
+                  {
+                    label: "今晚就做这件事",
+                    value: displayTonightTopAction,
+                    tone: "amber",
+                  },
+                  {
+                    label: "明天老师会继续看",
+                    value: displayTeacherObservation,
+                    tone: "sky",
+                  },
+                  {
+                    label: "为什么现在做",
+                    value: displayWhyNow,
+                    tone: "emerald",
+                  },
+                ]}
+                actions={
+                  <>
+                    <Link href="#feedback" className="sm:flex-1">
+                      <Button className="min-h-12 w-full rounded-2xl text-base">
+                        做完后去反馈
+                      </Button>
+                    </Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-12 rounded-2xl text-base sm:flex-1"
+                      onClick={() => setShowMoreContent((prev) => !prev)}
+                    >
+                      {showMoreContent ? "收起更多内容" : "查看更多内容"}
+                    </Button>
+                  </>
+                }
+              />
+
+              <div id="feedback">
+                <SectionCard
+                  title="做完后告诉老师"
+                  description="首屏只保留最关键的三项反馈，补充情况可以稍后再填。"
+                >
+                  <ParentStructuredFeedbackComposer
+                    careMode
+                    key={`${selectedFeed.child.id}-${displayInterventionCard?.id ?? "no-card"}-${feedbackNotePrefill?.token ?? "no-prefill"}-care`}
+                    childId={selectedFeed.child.id}
+                    interventionCard={displayInterventionCard}
+                    activeTask={structuredFeedbackTaskContext?.activeTask}
+                    consultation={displayConsultation}
+                    feedbackPrompt={currentResult?.feedbackPrompt}
+                    reminderStatus={familyTaskReminder?.status}
+                    latestFeedback={selectedFeed.latestFeedback}
+                    statusMessage={feedbackStatus}
+                    notePrefill={feedbackNotePrefill}
+                    onSubmit={submitStructuredFeedback}
+                    onSnoozeReminder={snoozeFamilyReminder}
+                  />
+                </SectionCard>
+              </div>
+
+              {showMoreContent ? (
+                <div className="space-y-6">
+                  <AgentWorkspaceCard
+                    title="老师建议摘要"
+                    description="关怀模式下只保留结果标题、摘要、今晚动作和明天观察点。"
+                  >
+                    {suggestionLoading || !currentResult ? (
+                      <div className="rounded-3xl border border-slate-100 bg-white p-5 text-base text-slate-500">
+                        正在整理今晚最重要的一件事……
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {parentMessageStatus ? (
+                          <p className="text-sm leading-6 text-slate-600">
+                            {parentMessageStatus}
+                          </p>
+                        ) : null}
+                        <div className="rounded-[28px] border border-indigo-100 bg-indigo-50/60 p-5">
+                          <p className="text-xl font-semibold text-slate-950">
+                            {currentResult.title}
+                          </p>
+                          <p className="mt-3 text-base leading-8 text-slate-700">
+                            {currentResult.summary}
+                          </p>
+                          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                            <div className="rounded-3xl border border-white/80 bg-white/90 p-4">
+                              <p className="text-sm font-semibold text-slate-500">
+                                今晚要做
+                              </p>
+                              <p className="mt-3 text-lg font-semibold leading-8 text-slate-950">
+                                {displayTonightTopAction}
+                              </p>
+                            </div>
+                            <div className="rounded-3xl border border-white/80 bg-white/90 p-4">
+                              <p className="text-sm font-semibold text-slate-500">
+                                明天继续看
+                              </p>
+                              <p className="mt-3 text-lg font-semibold leading-8 text-slate-950">
+                                {displayTeacherObservation}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </AgentWorkspaceCard>
+
+                  {transparencyModel ? (
+                    <ParentTransparencyPanel
+                      careMode
+                      model={transparencyModel}
+                      title="这条建议为什么值得先做"
+                      description="先给一句话摘要和提醒，详细来源默认收起。"
+                    />
+                  ) : null}
+
+                  <SectionCard
+                    title="当前孩子情况"
+                    description="更多内容里再看孩子档案、最近风险和成长记录。"
+                  >
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                        <p className="text-lg font-semibold text-slate-900">
+                          {selectedFeed.child.name}
+                        </p>
+                        <p className="mt-2 text-sm text-slate-500">
+                          {selectedFeed.child.className} · {getAgeText(selectedFeed.child.birthDate)} ·
+                          出生于 {formatDisplayDate(selectedFeed.child.birthDate)}
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {selectedFeed.child.allergies.length > 0 ? (
+                            selectedFeed.child.allergies.map((item) => (
+                              <Badge key={item} variant="warning">
+                                过敏：{item}
+                              </Badge>
+                            ))
+                          ) : (
+                            <Badge variant="success">暂无过敏重点</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-3xl bg-amber-50 p-4">
+                          <p className="text-xs text-amber-700">近 7 天重点原因</p>
+                          <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">
+                            {baseContext.focusReasons[0]}
+                          </p>
+                        </div>
+                        <div className="rounded-3xl bg-sky-50 p-4">
+                          <p className="text-xs text-sky-700">补水状态</p>
+                          <p className="mt-2 text-2xl font-semibold text-slate-900">
+                            {hydrationDisplay?.statusLabel ?? "暂无"}
+                          </p>
+                          <p className="mt-1 text-xs text-sky-800/80">
+                            主动性：{hydrationDisplay?.initiativeLabel ?? "待观察"}
+                          </p>
+                        </div>
+                        <div className="rounded-3xl bg-white p-4 ring-1 ring-slate-100">
+                          <p className="text-xs text-slate-500">最近家长反馈</p>
+                          <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">
+                            {selectedFeed.latestFeedback
+                              ? selectedFeed.latestFeedback.status
+                              : "最近尚未形成反馈"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard
+                    title="成长行为与影像记录"
+                    description="需要看上下文时，再打开最近的成长记录和图片。"
+                  >
+                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                      <div className="space-y-3">
+                        {selectedFeed.weeklyGrowth.slice(0, 4).map((record) => (
+                          <div
+                            key={record.id}
+                            className="rounded-3xl border border-slate-100 bg-white p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {record.category}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                  {formatTimelineTime(record.createdAt)}
+                                </p>
+                              </div>
+                              <Badge
+                                variant={record.needsAttention ? "warning" : "success"}
+                              >
+                                {record.needsAttention ? "需继续观察" : "稳定亮点"}
+                              </Badge>
+                            </div>
+                            <p className="mt-3 text-sm leading-6 text-slate-600">
+                              {record.description}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {selectedFeed.mediaGallery.slice(0, 4).map((item) => (
+                          <div
+                            key={item.id}
+                            className="overflow-hidden rounded-3xl border border-slate-100 bg-white"
+                          >
+                            <div className="relative aspect-[4/3] bg-slate-100">
+                              <Image
+                                src={item.thumbnailUrl}
+                                alt={item.title}
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 768px) 100vw, 260px"
+                              />
+                            </div>
+                            <div className="space-y-2 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {item.title}
+                                </p>
+                                <Badge
+                                  variant={item.source === "meal" ? "info" : "secondary"}
+                                >
+                                  {item.source === "meal" ? "餐食图" : "成长影像"}
+                                </Badge>
+                              </div>
+                              <p className="text-xs leading-5 text-slate-500">
+                                {item.summary}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard
+                    title="继续追问与趋势"
+                    description="如果要进一步追问，完整 AI 工作区放在这里。"
+                  >
+                    <div className="space-y-4">
+                      <Textarea
+                        value={question}
+                        onChange={(event) => setQuestion(event.target.value)}
+                        placeholder="继续追问，例如：今晚如果孩子不配合，先从哪一步开始？"
+                        className="min-h-28 bg-white"
+                      />
+                      {trendDebugEnabled ? (
+                        <ParentTrendQaPanel
+                          childId={selectedFeed.child.id}
+                          activeCase={trendDebugCase}
+                        />
+                      ) : null}
+                      <div className="space-y-3">
+                        <div>
+                          <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">
+                            继续追问
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {currentResult?.recommendedQuestions.slice(0, 3).map((item) => (
+                              <Button
+                                key={item}
+                                type="button"
+                                variant="outline"
+                                className="rounded-full"
+                                onClick={() => void submitFollowUp(item)}
+                                disabled={questionLoading}
+                              >
+                                {item}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="mb-2 text-xs font-medium tracking-[0.14em] text-slate-400">
+                            趋势快问
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {PARENT_TREND_QUICK_QUESTIONS.map((item) => (
+                              <Button
+                                key={item}
+                                type="button"
+                                variant="outline"
+                                className="rounded-full border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100"
+                                onClick={() => {
+                                  setQuestion(item);
+                                  void submitFollowUp(item);
+                                }}
+                                disabled={questionLoading || !currentResult}
+                              >
+                                {item}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-3">
+                        <Button
+                          className="gap-2 rounded-xl"
+                          onClick={() => void submitFollowUp()}
+                          disabled={questionLoading || !question.trim() || !currentResult}
+                        >
+                          <Send className="h-4 w-4" />
+                          {followUpLoading
+                            ? "追问中…"
+                            : trendLoading
+                              ? "查询趋势中…"
+                              : "发送追问"}
+                        </Button>
+                      </div>
+                      <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
+                        {currentResult ? (
+                          <div className="prose prose-sm max-w-none text-slate-700">
+                            <ReactMarkdown>{currentResult.assistantAnswer}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-500">
+                            建议生成后，这里会显示结构化 AI 回复。
+                          </p>
+                        )}
+                      </div>
+                      {followUpLoading ? (
+                        <div className="rounded-3xl border border-slate-100 bg-white p-4 text-sm text-slate-500">
+                          AI 正在整理最新追问，请稍候…
+                        </div>
+                      ) : null}
+                      {hasVisibleTrendCard ? (
+                        <ParentTrendResponseCard
+                          question={displayedTrendQuestion}
+                          result={displayedTrendResult}
+                          loading={displayedTrendLoading}
+                          error={displayedTrendError}
+                          onRetry={
+                            displayedTrendQuestion
+                              ? () => void submitTrendQuery(displayedTrendQuestion)
+                              : undefined
+                          }
+                        />
+                      ) : null}
+                    </div>
+                  </SectionCard>
+
+                  {displayInterventionCard ? (
+                    <div id="intervention">
+                      <SectionCard
+                        title="当前干预卡详情"
+                        description="要看完整干预卡、沟通话术和教师后续跟进，再展开这里。"
+                      >
+                        <InterventionCardPanel
+                          card={displayInterventionCard}
+                          footer={
+                            <div className="grid gap-4 lg:grid-cols-2">
+                              <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  家长沟通话术
+                                </p>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">
+                                  {displayInterventionCard.parentMessageDraft}
+                                </p>
+                              </div>
+                              <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  教师后续跟进
+                                </p>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">
+                                  {displayInterventionCard.teacherFollowupDraft}
+                                </p>
+                              </div>
+                            </div>
+                          }
+                        />
+                      </SectionCard>
+                    </div>
+                  ) : null}
+
+                  <SectionCard title="会话历史" description="保留这次会话里的追问和 AI 回答。">
+                    <div className="space-y-3">
+                      {history.length > 0 ? (
+                        history.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-3xl border border-slate-100 bg-white p-4"
+                          >
+                            <div className="flex items-center gap-2 text-xs text-slate-400">
+                              <Clock3 className="h-3.5 w-3.5" />
+                              追问记录
+                            </div>
+                            <p className="mt-2 text-sm font-semibold text-slate-900">
+                              {item.question}
+                            </p>
+                            <div className="prose prose-sm mt-3 max-w-none text-slate-600">
+                              <ReactMarkdown>{item.result.assistantAnswer}</ReactMarkdown>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-slate-500">
+                          还没有追问记录，先点一个快捷问题或直接输入你的问题。
+                        </p>
+                      )}
+                    </div>
+                  </SectionCard>
+
+                  {hasMultipleChildren ? (
+                    <SectionCard
+                      title="切换孩子"
+                      description="如果一个账号下有多个孩子，可以从这里切换。"
+                    >
+                      <div className="space-y-2">
+                        {parentFeed.map((item) => (
+                          <button
+                            key={item.child.id}
+                            type="button"
+                            onClick={() => setSelectedChildId(item.child.id)}
+                            className={`w-full rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                              item.child.id === selectedFeed.child.id
+                                ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {item.child.name}
+                          </button>
+                        ))}
+                      </div>
+                    </SectionCard>
+                  ) : null}
+
+                  <SectionCard
+                    title="推荐继续追问"
+                    description="需要继续细化今晚动作时，再从这里进入。"
+                  >
+                    <div className="space-y-3">
+                      {(currentResult?.recommendedQuestions ?? PARENT_AGENT_QUICK_QUESTIONS).map(
+                        (item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => void submitFollowUp(item)}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                            disabled={questionLoading || !currentResult}
+                          >
+                            <div className="flex items-start gap-3">
+                              <Sparkles className="mt-0.5 h-4 w-4 text-indigo-500" />
+                              <span>{item}</span>
+                            </div>
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="其他入口" description="更多页面入口保留在这里，不占首屏。">
+                    <div className="space-y-3 text-sm text-slate-600">
+                      <Link
+                        href={`/parent?child=${selectedFeed.child.id}`}
+                        className="block rounded-2xl border border-slate-200 bg-white px-4 py-3 font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        返回家长首页
+                      </Link>
+                      <Link
+                        href="#intervention"
+                        className="block rounded-2xl border border-slate-200 bg-white px-4 py-3 font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        查看当前干预卡详情
+                      </Link>
+                    </div>
+                  </SectionCard>
+                </div>
+              ) : null}
+            </div>
+          }
+        />
+      </RolePageShell>
+    );
+  }
+
   return (
     <RolePageShell
       badge={`家长 AI 助手 · 当前儿童 ${selectedFeed.child.name}`}
       title="把今晚怎么做、做完怎么反馈、明天老师继续看什么，放进同一条 AI 闭环里"
       description="这一版家长 Agent 不再只是追问聊天框，而是基于真实 7 天业务数据、家庭任务、最近反馈和 AI 干预卡，给出今晚可执行动作，并把家长反馈直接送回下一轮 follow-up。"
-      actions={
-        <>
-          <InlineLinkButton href="/parent" label="返回家长首页" />
-          <InlineLinkButton href={storybookHref} label="打开今日微绘本" variant="secondary" />
-          <InlineLinkButton href={`/parent/agent?child=${selectedFeed.child.id}`} label="刷新当前建议" variant="premium" />
-        </>
-      }
+      actions={normalPageActions}
     >
       <RoleSplitLayout
         main={

@@ -115,3 +115,38 @@ test("weekly-report actionized builder emits parent sections", () => {
   );
   assert.equal(report.primaryAction?.ownerRole, "parent");
 });
+
+test("weekly-report parent sections fall back to age-band guidance when no explicit copy is provided", () => {
+  const report = buildActionizedWeeklyReportResponse({
+    role: "parent",
+    snapshot: {
+      ...createSnapshot("parent"),
+      ageBandContext: {
+        policyVersion: "t22-phase1-v1",
+        normalizedAgeBand: "12-24m",
+        source: "birthDate",
+        ageMonths: 18,
+        policy: {
+          ageBand: "12-24m",
+          careFocus: ["分离过渡", "语言萌发", "模仿社交", "自主进食与初步自理"],
+          teacherObservationFocus: ["分离恢复", "语言回应", "模仿意愿", "自主进食"],
+          parentActionTone: "以陪伴式过渡和清晰提示为主。",
+          weeklyReportFocus: ["分离过渡和情绪恢复", "语言萌发与模仿社交", "自主进食和初步自理"],
+          defaultInterventionFocus: ["先固定一个过渡场景", "围绕语言回应做短动作练习"],
+          doNotOverstateSignals: ["短时黏人常与分离过渡有关，不宜直接推断为稳定行为问题。"],
+        },
+      },
+    },
+    summary: "parent weekly summary",
+    highlights: [],
+    risks: [],
+    nextWeekActions: [],
+    trendPrediction: "stable",
+    disclaimer: "demo boundary only",
+    source: "mock",
+  });
+
+  assert.ok(report.sections[0]?.summary.includes("12-24月"));
+  assert.ok(report.sections[1]?.summary.includes("先固定一个过渡场景"));
+  assert.ok(report.sections[2]?.summary.includes("短时黏人"));
+});
