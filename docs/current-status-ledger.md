@@ -1,6 +1,6 @@
 # SmartChildcare Agent 当前状态账本
 
-更新基准：`2026-04-09`
+更新基准：`2026-04-12`
 
 本文件是**当前阶段、稳定 walkthrough、任务状态与验证边界的主账本**。如果它与其他文档冲突，统一按下面优先级处理：
 
@@ -20,6 +20,7 @@
 - T24/T25 Teacher Copilot：backend contract 与 `/teacher/agent` UI 已合入；仍缺人工 walkthrough
 - T26/T27 Weekly Report V2：Teacher / Admin / Parent 三角色都已接到同源 `/api/ai/weekly-report`；`/teacher/agent`、`/admin`、`/parent` 均新增轻量周报预览入口，其中 Admin 首页预览与 `/admin/agent?action=weekly-report` 完整工作区分工明确；当前状态仍是 `Done-code-only`，未写成 fully live 或 Demo-ready
 - T11 Care Mode：`/parent` 与 `/parent/agent` 已新增 `普通模式 / 关怀模式` 前端切换层，状态优先级为 `?care=1|0 > localStorage > false`；关怀模式首屏已收敛为大字摘要、最短主按钮与最小反馈入口，复杂次级信息后置到“更多内容”，当前状态为 `Done-code-only`
+- T12 Parent Voice Phase 1：`/parent` 与 `/parent/agent` 已补 browser-first 一键播报与最小语音反馈入口；当前口径只能写成 `Done-code-only (Phase 1 browser-first)`，不能写成真实后端 TTS / ASR 已接通
 - T28 Admin 质量驾驶舱 metrics engine：backend-only 聚合链路已落地，`POST /api/v1/agents/metrics/admin-quality` 可稳定输出 8 个 named metrics 与 `source / fallback / confidence / coverage`
 - T29 Admin 质量驾驶舱 UI：`/admin` 已新增第二层治理区，位于风险优先级与 TOP 3 之后、风险儿童/班级区之前；仍需完整 walkthrough / 录屏再验
 - staging 与 vivo provider：仍必须保守表达，不写成 `fully healthy`、`fully switched` 或 `fully live`
@@ -121,7 +122,7 @@
 | `T9` | 外部健康文件桥接：专业信息 -> 托育动作映射 | `Planned` | 外部健康文件桥接 | `T8` | 中 | walkthrough / trace 检查 | `TR+A` |
 | `T10` | 外部健康文件桥接：写回主系统闭环 | `Planned` | 外部健康文件桥接 | `T7`、`T8`、`T9` | 低中 | walkthrough / 录屏 | `TR+L+A` |
 | `T11` | 关怀模式 / 祖辈模式：大字卡片 + 简化交互 | `Done-code-only` | 关怀模式 / 祖辈模式 | - | 高 | walkthrough / 录屏 | `TR+A` |
-| `T12` | 关怀模式：一键播报 + 一键语音反馈 | `Planned` | 关怀模式 / 祖辈模式 | `T11` | 中 | 真机 / 录屏 | `TR+A` |
+| `T12` | 关怀模式：一键播报 + 一键语音反馈 | `Done-code-only (Phase 1 browser-first)` | 关怀模式 / 祖辈模式 | `T11` | 中 | 真机 / 录屏 | `TR+A` |
 | `T13` | 统一意图入口：后端路由器 | `Planned` | 统一意图入口 | - | 高 | contract smoke | `TR+A` |
 | `T14` | 统一意图入口：前端超级入口 + deeplink 卡 | `Done-code-only` | 统一意图入口 | `T13` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T15` | 家长反馈结构化回流：schema / store / normalize | `Done-code-only` | 家长反馈闭环 | - | 中 | schema / store smoke | `TR+A` |
@@ -131,8 +132,8 @@
 | `T19` | 会诊证据链 UI | `Done-code-only` | 会诊可解释性增强 | `T18` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T20` | 48 小时干预任务实体与生命周期 | `Planned` | 干预执行与升级 | - | 中 | workflow smoke | `TR+A` |
 | `T21` | 自动升级规则 | `Planned` | 干预执行与升级 | `T20` | 中 | walkthrough / trace 检查 | `TR+L+A` |
-| `T22` | 年龄分层照护引擎：共享策略层 | `Planned` | 年龄分层照护 | - | 中 | contract smoke | `TR+A` |
-| `T23` | 年龄分层照护引擎接入主链路 | `Planned` | 年龄分层照护 | `T22` | 中 | walkthrough / 录屏 | `TR+L+A` |
+| `T22` | 年龄分层照护引擎：共享策略层 | `Done (shared policy + Trend/Parent Weekly)` | 年龄分层照护 | - | 中 | contract smoke | `TR+A` |
+| `T23` | 年龄分层照护引擎接入主链路 | `Done-code-only (Phase 1)` | 年龄分层照护 | `T22` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T24` | Teacher Copilot：backend 能力包 | `Done-code-only` | Teacher Copilot | - | 中 | service smoke | `TR+A` |
 | `T25` | Teacher Copilot：UI 接入 | `Done-code-only` | Teacher Copilot | `T24` | 中 | walkthrough / 录屏 | `TR+L+A` |
 | `T26` | Weekly Report V2：三版本行动化 schema / generator | `Done-code-only` | Actionized Weekly Report | - | 中 | generator smoke | `TR+A` |
@@ -170,6 +171,8 @@
 - `T29` 已在 `/admin` 主列挂入独立质量驾驶舱区块，通过 `app/api/ai/admin-quality-metrics/route.ts` 薄代理与 `components/admin/AdminQualityMetricsPanel.tsx` 展示 8 个指标；UI 显式保留 `source / fallback / confidence / coverage`，不把 demo/proxy 指标包装成真实机构经营结论
 - `T30` 已落地 `backend/app/services/demand_insight_engine.py`、`backend/app/schemas/demand_insight.py` 与 `/api/v1/agents/insights/demand`；当前稳定输出 `topConcernTopics`、`consultationTriggerHeat`、`actionDifficultyTopics`、`weakFeedbackSegments`、`recurringIssueClusters`，并附带 `window / sourceSummary / dataQuality / source / fallback / warnings`
 - `T30` 当前主数据链路来自 `backend/app/db/childcare_repository.py` 的 `children / feedback / growth / health / meals / taskCheckIns / interventionCards / reminders`，叠加 memory snapshots 里的 `consultation-result`；`weekly-report-result` 与 `parent-follow-up-result` 仅作为辅助来源统计或弱信号，不宣称真实机构运营洞察
+- `T23` Phase 1 已把 shared `ageBandContext` 真正接进 `lib/agent/intervention-card.ts`、`lib/agent/parent-agent.ts`、`lib/agent/teacher-agent.ts` 三条主链，Parent / Teacher / Intervention 的建议重点、今晚动作、明天观察点与 48h 复盘开始体现 `0-12m`、`12-24m`、`24-36m` 的真实差异。
+- `T23` 本轮仍是 logic-first / code-only 收口：`app/parent/page.tsx`、`app/parent/agent/page.tsx`、`app/parent/storybook/page.tsx`、Admin / Teacher 首页布局、Storybook 页面 walkthrough 均未纳入本阶段，不应表述为年龄分层 UI 已全面完成。
 
 - 本轮 post-merge integration sweep 与 `T19` 的本地静态与定向测试已通过：`npm run lint`、`npm run build`、`npx --yes tsx --test lib/consultation/evidence-display.test.ts lib/consultation/normalize-result.test.ts lib/consultation/trace-view-model.test.ts lib/agent/admin-consultation-feed.test.ts lib/agent/health-file-bridge.test.ts`、`npx --yes tsx --test lib/teacher-copilot/normalize.test.ts`、`py -m pytest backend/tests/test_teacher_voice_understand.py backend/tests/test_health_file_bridge_service.py backend/tests/test_health_file_bridge_endpoint.py backend/tests/test_admin_consultation_feed.py backend/tests/test_high_risk_consultation_stream.py backend/tests/test_agents_mock.py backend/tests/test_parent_trend_service.py backend/tests/test_childcare_repository.py -q`；`/teacher/high-risk-consultation`、`/admin`、`/admin/agent`、`/teacher/agent`、`/teacher/health-file-bridge`、`/parent/agent` 的页面级 HTTP / 浏览器 walkthrough 仍未计为已通过
 - 本轮 `T30` backend aggregation smoke 已通过：`py -m pytest backend/tests/test_demand_insight_engine.py backend/tests/test_admin_consultation_feed.py backend/tests/test_childcare_repository.py backend/tests/test_orchestrator_memory.py backend/tests/test_parent_trend_service.py backend/tests/test_high_risk_consultation_stream.py -q`；`/api/v1/agents/insights/demand` 的 API smoke 已纳入 `backend/tests/test_demand_insight_engine.py`，但 Admin / T31 页面级消费 walkthrough 仍未计为已通过

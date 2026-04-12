@@ -2,13 +2,14 @@ import type {
   AiFollowUpPayload,
   AiFollowUpResponse,
   AiSuggestionResponse,
+  ChildSuggestionSnapshot,
   InstitutionSuggestionSnapshot,
   RuleFallbackItem,
   WeeklyReportRole,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
-import { describeAgeBandWeeklyGuidance } from "@/lib/age-band/policy";
+import { describeAgeBandActionGuidance, describeAgeBandWeeklyGuidance } from "@/lib/age-band/policy";
 import { buildActionizedWeeklyReportResponse, normalizeWeeklyReportRole } from "@/lib/ai/weekly-report";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 
@@ -22,7 +23,23 @@ function pickRiskLevel(items: RuleFallbackItem[]): "low" | "medium" | "high" {
   return "low";
 }
 
-export function buildFallbackSuggestion(items: RuleFallbackItem[]): AiSuggestionResponse {
+function uniqueTexts(items: Array<string | undefined>, limit = 4) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const item of items) {
+    const normalized = item?.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+
+  return result;
+}
+
+export function buildFallbackSuggestion(snapshot: ChildSuggestionSnapshot): AiSuggestionResponse {
+  const items = snapshot.ruleFallback;
   const top = items.slice(0, 3);
   const concerns = top.filter((i) => i.level === "warning").map((i) => i.title);
   const highlights = top.filter((i) => i.level !== "warning").map((i) => i.title);
@@ -31,25 +48,89 @@ export function buildFallbackSuggestion(items: RuleFallbackItem[]): AiSuggestion
     .filter(Boolean)
     .slice(0, 3)
     .join("；");
+  const childName = snapshot.child.name;
+  const ageBandGuidance = describeAgeBandActionGuidance(snapshot.child.ageBandContext);
 
   return {
     riskLevel: pickRiskLevel(items),
     summary:
+      (ageBandGuidance
+        ? `${childName} 当前处于${ageBandGuidance.label}阶段，更适合围绕${ageBandGuidance.careFocusText}做连续观察，家长动作建议${ageBandGuidance.parentActionTone}`
+        : undefined) ||
       summaryBase ||
       "近 7 天暂无明显高风险异常，建议继续保持晨检、饮食、成长记录与家长反馈的连续性，便于系统持续输出更贴合孩子状态的建议。",
-    highlights: highlights.length > 0 ? highlights : ["今日数据已同步，可继续观察趋势变化。"],
-    concerns: concerns.length > 0 ? concerns : ["暂未发现明显高风险信号，建议维持日常观察。"],
+    highlights:
+      uniqueTexts(
+        ageBandGuidance
+          ? [`${ageBandGuidance.label}阶段重点先看${ageBandGuidance.careFocusText}`, ...highlights]
+          : highlights,
+        3
+      ).length > 0
+        ? uniqueTexts(
+            ageBandGuidance
+              ? [`${ageBandGuidance.label}阶段重点先看${ageBandGuidance.careFocusText}`, ...highlights]
+              : highlights,
+            3
+          )
+        : ["今日数据已同步，可继续观察趋势变化。"],
+    concerns:
+      uniqueTexts(
+        ageBandGuidance
+          ? [ageBandGuidance.teacherObservationFocus[0], ageBandGuidance.cautionText, ...concerns]
+          : concerns,
+        3
+      ).length > 0
+        ? uniqueTexts(
+            ageBandGuidance
+              ? [ageBandGuidance.teacherObservationFocus[0], ageBandGuidance.cautionText, ...concerns]
+              : concerns,
+            3
+          )
+        : ["暂未发现明显高风险信号，建议维持日常观察。"],
     actions:
-      top.length > 0
-        ? top.map((i) => i.description).filter(Boolean)
-        : ["继续完成晨检、饮食与成长记录，确保每日数据完整。"],
+      uniqueTexts(
+        ageBandGuidance
+          ? [
+              `今天先${ageBandGuidance.defaultInterventionFocus[0] ?? `围绕${ageBandGuidance.careFocusText}补一条观察`}`,
+              `今晚先${ageBandGuidance.defaultInterventionFocus[1] ?? `围绕${ageBandGuidance.careFocusText}做一条小动作`}`,
+              `48小时内回看${ageBandGuidance.defaultInterventionFocus[2] ?? ageBandGuidance.careFocusText}`,
+              ...top.map((i) => i.description).filter(Boolean),
+            ]
+          : top.length > 0
+            ? top.map((i) => i.description).filter(Boolean)
+            : ["继续完成晨检、饮食与成长记录，确保每日数据完整。"],
+        4
+      ),
     actionPlan: {
       schoolActions:
-        top.length > 0
-          ? top.slice(0, 2).map((i) => `今天园内先做：${i.description}`)
-          : ["今天园内保持晨检、饮食和成长观察记录连续，及时标注异常变化。"],
-      familyActions: ["今晚家庭继续反馈作息、饮食和情绪表现，帮助系统判断建议是否有效。"],
-      reviewActions: ["48小时内结合新记录再次复盘，如异常持续或加重请及时联系专业人员。"],
+        uniqueTexts(
+          ageBandGuidance
+            ? [
+                `今天园内重点记录：${ageBandGuidance.teacherObservationFocus[0]}`,
+                ageBandGuidance.teacherObservationFocus[1]
+                  ? `今天园内继续看：${ageBandGuidance.teacherObservationFocus[1]}`
+                  : undefined,
+              ]
+            : top.length > 0
+              ? top.slice(0, 2).map((i) => `今天园内先做：${i.description}`)
+              : ["今天园内保持晨检、饮食和成长观察记录连续，及时标注异常变化。"],
+          2
+        ),
+      familyActions: uniqueTexts(
+        ageBandGuidance
+          ? [
+              `今晚先${ageBandGuidance.defaultInterventionFocus[1] ?? `围绕${ageBandGuidance.careFocusText}做一条小动作`}`,
+              `如果出现变化，请重点反馈：${ageBandGuidance.teacherObservationFocus[0]}`,
+            ]
+          : ["今晚家庭继续反馈作息、饮食和情绪表现，帮助系统判断建议是否有效。"],
+        2
+      ),
+      reviewActions: uniqueTexts(
+        ageBandGuidance
+          ? [`48小时内回看${ageBandGuidance.defaultInterventionFocus[2] ?? ageBandGuidance.careFocusText}。${ageBandGuidance.cautionText}`]
+          : ["48小时内结合新记录再次复盘，如异常持续或加重请及时联系专业人员。"],
+        2
+      ),
     },
     trendPrediction: pickRiskLevel(items) === "high" ? "up" : pickRiskLevel(items) === "medium" ? "stable" : "down",
     disclaimer: DEFAULT_DISCLAIMER,
@@ -120,41 +201,83 @@ export function buildFallbackFollowUp(payload: AiFollowUpPayload): AiFollowUpRes
   const pendingReviewCount = payload.snapshot.summary.growth.pendingReviewCount;
   const latestFeedback = payload.latestFeedback;
   const hydrationDisplay = getHydrationDisplayState(hydrationAvg);
+  const ageBandGuidance = describeAgeBandActionGuidance(payload.snapshot.child.ageBandContext);
 
   return {
     answer:
       `关于“${payload.suggestionTitle}”，更稳妥的做法是先把它拆成可执行的小动作。` +
       `${childName} 当前${hydrationDisplay.tone === "warning" ? `${hydrationDisplay.statusLabel}，` : "补水记录较连续，"}` +
       `${pendingReviewCount > 0 ? `且仍有${pendingReviewCount}项待复查，` : "当前重点项相对集中，"}` +
-      `所以建议先从最容易当天落实的一项园内动作和一项家庭动作开始，再用48小时连续记录验证是否有效。`,
-    keyPoints: [
-      "先确认这条建议对应的是哪个具体场景，比如晨起、午睡前、进餐中或离园后。",
-      "一次只调整一到两个变量，避免同时改太多导致无法判断是否有效。",
-      "家长反馈尽量写清执行时间、孩子反应和是否比前一天改善。",
-    ],
-    nextSteps: [
-      "今天园内先补充一次对应场景的观察记录，写明触发因素和处理结果。",
-      "今晚家庭按当前建议执行一次，并记录孩子的情绪、饮水或作息变化。",
-      "48小时内回看连续记录，如果仍无改善，再升级为重点跟踪事项。",
-    ],
-    tonightTopAction: payload.currentInterventionCard?.tonightHomeAction ?? "今晚先做一项最容易执行的家庭动作，并记录孩子当下反应。",
+      `${
+        ageBandGuidance
+          ? `这个阶段更适合${ageBandGuidance.parentActionTone}，所以建议优先围绕${ageBandGuidance.careFocusText}验证是否有效。`
+          : "所以建议先从最容易当天落实的一项园内动作和一项家庭动作开始，再用48小时连续记录验证是否有效。"
+      }`,
+    keyPoints: uniqueTexts(
+      [
+        ageBandGuidance?.teacherObservationFocus[0],
+        ageBandGuidance?.teacherObservationFocus[1],
+        "先确认这条建议对应的是哪个具体场景，比如晨起、午睡前、进餐中或离园后。",
+        "一次只调整一到两个变量，避免同时改太多导致无法判断是否有效。",
+        "家长反馈尽量写清执行时间、孩子反应和是否比前一天改善。",
+      ],
+      4
+    ),
+    nextSteps: uniqueTexts(
+      [
+        ageBandGuidance?.defaultInterventionFocus[0]
+          ? `今天园内先${ageBandGuidance.defaultInterventionFocus[0]}`
+          : "今天园内先补充一次对应场景的观察记录，写明触发因素和处理结果。",
+        ageBandGuidance?.defaultInterventionFocus[1]
+          ? `今晚家庭先${ageBandGuidance.defaultInterventionFocus[1]}`
+          : "今晚家庭按当前建议执行一次，并记录孩子的情绪、饮水或作息变化。",
+        ageBandGuidance?.defaultInterventionFocus[2]
+          ? `48小时内回看${ageBandGuidance.defaultInterventionFocus[2]}`
+          : "48小时内回看连续记录，如果仍无改善，再升级为重点跟踪事项。",
+      ],
+      4
+    ),
+    tonightTopAction:
+      payload.currentInterventionCard?.tonightHomeAction ??
+      (ageBandGuidance
+        ? `今晚先${ageBandGuidance.defaultInterventionFocus[1] ?? `围绕${ageBandGuidance.careFocusText}做一条小动作`}。`
+        : "今晚先做一项最容易执行的家庭动作，并记录孩子当下反应。"),
     whyNow:
       latestFeedback?.improved === false
-        ? "因为上一轮家庭动作效果还不稳定，需要今晚继续验证哪一步真正有效。"
-        : "因为今晚的执行情况会直接影响老师明天如何继续观察和调整建议。",
+        ? ageBandGuidance
+          ? `因为上一轮家庭动作效果还不稳定，${ageBandGuidance.label}阶段更适合${ageBandGuidance.parentActionTone}，需要今晚继续验证哪一步真正有效。`
+          : "因为上一轮家庭动作效果还不稳定，需要今晚继续验证哪一步真正有效。"
+        : ageBandGuidance
+          ? `因为${ageBandGuidance.label}阶段更适合围绕${ageBandGuidance.careFocusText}做连续观察，今晚的执行情况会直接影响老师明天如何继续观察和调整建议。`
+          : "因为今晚的执行情况会直接影响老师明天如何继续观察和调整建议。",
     homeSteps: [
-      payload.currentInterventionCard?.tonightHomeAction ?? "先按当前建议完成一项家庭动作。",
-      "执行时记录孩子的情绪、饮水或入睡反应。",
+      payload.currentInterventionCard?.tonightHomeAction ??
+        (ageBandGuidance
+          ? `先按“${ageBandGuidance.defaultInterventionFocus[1] ?? `围绕${ageBandGuidance.careFocusText}做一条小动作`}”完成一次家庭动作。`
+          : "先按当前建议完成一项家庭动作。"),
+      ageBandGuidance?.teacherObservationFocus[0]
+        ? `执行时重点记录：${ageBandGuidance.teacherObservationFocus[0]}`
+        : "执行时记录孩子的情绪、饮水或入睡反应。",
       "明早把结果反馈给老师，形成下一轮调整依据。",
     ],
-    observationPoints: payload.currentInterventionCard?.observationPoints ?? [
-      "孩子情绪是否更稳定",
-      "饮水或进食是否更配合",
-      "入睡和晨起是否比前一天更顺",
-    ],
+    observationPoints:
+      payload.currentInterventionCard?.observationPoints ??
+      uniqueTexts(
+        ageBandGuidance
+          ? ageBandGuidance.teacherObservationFocus.slice(0, 3)
+          : ["孩子情绪是否更稳定", "饮水或进食是否更配合", "入睡和晨起是否比前一天更顺"],
+        3
+      ),
     teacherObservation:
-      payload.currentInterventionCard?.tomorrowObservationPoint ?? `${childName} 明日入园后的情绪、晨检状态和家庭反馈是否一致。`,
-    reviewIn48h: payload.currentInterventionCard?.reviewIn48h ?? "48 小时内结合今晚反馈和明早入园状态复查一次。",
+      payload.currentInterventionCard?.tomorrowObservationPoint ??
+      (ageBandGuidance?.teacherObservationFocus[0]
+        ? `明天继续观察${ageBandGuidance.teacherObservationFocus[0]}，并核对今晚家庭动作后的变化。`
+        : `${childName} 明日入园后的情绪、晨检状态和家庭反馈是否一致。`),
+    reviewIn48h:
+      payload.currentInterventionCard?.reviewIn48h ??
+      (ageBandGuidance
+        ? `48 小时内回看${ageBandGuidance.defaultInterventionFocus[2] ?? ageBandGuidance.careFocusText}。${ageBandGuidance.cautionText}`.trim()
+        : "48 小时内结合今晚反馈和明早入园状态复查一次。"),
     recommendedQuestions: [
       "我做完之后应该怎么反馈？",
       "明天老师会继续看什么？",

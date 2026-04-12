@@ -137,7 +137,7 @@ export async function executeSuggestion(
   const fallback = {
     ...(isInstitutionScope
       ? buildFallbackInstitutionSuggestion(payload.snapshot as InstitutionSuggestionSnapshot)
-      : buildFallbackSuggestion((payload.snapshot as ChildSuggestionSnapshot).ruleFallback)),
+      : buildFallbackSuggestion(payload.snapshot as ChildSuggestionSnapshot)),
     model: isInstitutionScope ? "institution-rule-fallback" : "rule-fallback",
   } satisfies AiSuggestionResponse;
 

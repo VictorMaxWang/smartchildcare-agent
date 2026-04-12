@@ -16,6 +16,7 @@ import EmptyState from "@/components/EmptyState";
 import UnifiedIntentEntryCard from "@/components/intent/UnifiedIntentEntryCard";
 import CareModeToggle from "@/components/parent/CareModeToggle";
 import ParentCareFocusCard from "@/components/parent/ParentCareFocusCard";
+import ParentSpeakButton from "@/components/parent/ParentSpeakButton";
 import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel";
 import WeeklyReportPreviewCard from "@/components/weekly-report/WeeklyReportPreviewCard";
 import {
@@ -40,6 +41,7 @@ import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
 import { buildFallbackSuggestion } from "@/lib/ai/fallback";
 import type { AiSuggestionResponse, WeeklyReportResponse } from "@/lib/ai/types";
 import { useCareMode } from "@/lib/care-mode";
+import { buildParentSpeechScript } from "@/lib/voice/browser-tts";
 import { buildParentHomeViewModel } from "@/lib/view-models/role-home";
 import { formatDisplayDate, getAgeText, useApp } from "@/lib/store";
 
@@ -164,7 +166,7 @@ export default function ParentHomePage() {
         }
       } catch {
         if (!cancelled) {
-          const fallback = buildFallbackSuggestion(snapshotPayload.ruleFallback);
+          const fallback = buildFallbackSuggestion(snapshotPayload);
           setPreviewResult(buildParentAgentSuggestionResult({ context, suggestion: fallback }));
         }
       }
@@ -267,6 +269,23 @@ export default function ParentHomePage() {
     displayInterventionCard?.reviewIn48h ??
     "48 小时内继续观察今晚任务执行后的变化。";
   const recentCriticalReminder = previewResult?.title ?? viewModel.aiReminder.title;
+  const careFocusSpeechText = buildParentSpeechScript({
+    title: `${feed.child.name} 关怀模式摘要`,
+    sections: [
+      { label: "今晚做什么", text: displayTonightTaskDescription },
+      { label: "明天看什么", text: displayReviewIn48h },
+      { label: "最近一次关键提醒", text: recentCriticalReminder },
+    ],
+    outro: "浏览器播报，仅用于当前设备预览，不是后端真实语音。",
+  });
+  const reminderSpeechText = buildParentSpeechScript({
+    title: "AI 今日提醒",
+    sections: [
+      { label: "提醒", text: previewResult?.title ?? viewModel.aiReminder.title },
+      { label: "为什么现在看", text: previewResult?.whyNow ?? displayWhyRecommended },
+    ],
+    outro: "浏览器播报，仅用于当前设备预览，不是后端真实语音。",
+  });
 
   const headerActions = (
     <>
@@ -502,6 +521,11 @@ export default function ParentHomePage() {
                 ]}
                 actions={
                   <>
+                    <ParentSpeakButton
+                      text={careFocusSpeechText}
+                      careMode
+                      variant="secondary"
+                    />
                     <InlineLinkButton href={agentHref} label="去看今晚怎么做" variant="premium" />
                     <InlineLinkButton href={`${agentHref}#feedback`} label="做完后去反馈" />
                   </>
@@ -510,6 +534,13 @@ export default function ParentHomePage() {
 
               <SectionCard title="一句话提醒" description="先告诉你现在最重要的一件事。">
                 <div className="rounded-3xl border border-indigo-100 bg-indigo-50/70 p-5">
+                  <ParentSpeakButton
+                    text={reminderSpeechText}
+                    label="读给我听"
+                    careMode
+                    variant="secondary"
+                    className="mb-4"
+                  />
                   <p className="text-lg font-semibold leading-9 text-slate-900">
                     {previewResult?.title ?? viewModel.aiReminder.title}
                   </p>
@@ -663,6 +694,11 @@ export default function ParentHomePage() {
               }
             >
               <div className="rounded-3xl border border-indigo-100 bg-indigo-50/60 p-5">
+                <ParentSpeakButton
+                  text={reminderSpeechText}
+                  label="浏览器播报"
+                  className="mb-4"
+                />
                 <p className="text-base font-semibold text-slate-900">
                   {previewResult?.title ?? viewModel.aiReminder.title}
                 </p>

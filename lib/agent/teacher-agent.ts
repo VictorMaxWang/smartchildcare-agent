@@ -6,10 +6,12 @@ import type {
   ConsultationResult,
   MemoryContextEnvelope,
   MemoryContextMeta,
+  ResolvedAgeBandContext,
   RuleFallbackItem,
   WeeklyReportResponse,
   WeeklyReportSnapshot,
 } from "@/lib/ai/types";
+import { describeAgeBandActionGuidance, getAgeBandLabel, resolveAgeBandContext } from "@/lib/age-band/policy";
 import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import type { GuardianFeedback } from "@/lib/feedback/types";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate } from "@/lib/date";
@@ -141,6 +143,7 @@ export interface TeacherAgentChildContext {
   recentFeedbacks: TeacherAgentGuardianFeedbackSnapshot[];
   latestFeedback?: TeacherAgentGuardianFeedbackSnapshot;
   focusReasons: string[];
+  ageBandContext?: ResolvedAgeBandContext;
 }
 
 export interface TeacherAgentClassContext {
@@ -171,7 +174,7 @@ const AGE_BAND_LABELS = {
   older: "6岁以上",
 } as const;
 
-function getAgeBandFromBirthDate(birthDate: string) {
+function getLegacyAgeBandFromBirthDate(birthDate: string) {
   const birth = new Date(birthDate);
   const now = new Date();
   let months = (now.getFullYear() - birth.getFullYear()) * 12;
@@ -183,6 +186,10 @@ function getAgeBandFromBirthDate(birthDate: string) {
   if (months < 36) return AGE_BAND_LABELS.toddler;
   if (months < 72) return AGE_BAND_LABELS.preschool;
   return AGE_BAND_LABELS.older;
+}
+
+function getTeacherAgeBandGuidance(context: TeacherAgentChildContext) {
+  return describeAgeBandActionGuidance(context.ageBandContext);
 }
 
 function buildChildMap(children: TeacherAgentChildSnapshot[]) {
@@ -453,6 +460,10 @@ export function buildTeacherAgentChildContext(
   const recentFeedbacks = classContext.weeklyFeedbacks
     .filter((record) => record.childId === childId)
     .sort((left, right) => right.date.localeCompare(left.date));
+  const ageBandContext = resolveAgeBandContext({
+    birthDate: child.birthDate,
+    asOfDate: classContext.today,
+  });
 
   const context = {
     today: classContext.today,
@@ -467,6 +478,7 @@ export function buildTeacherAgentChildContext(
     recentFeedbacks,
     latestFeedback: recentFeedbacks[0],
     focusReasons: [],
+    ageBandContext,
   } satisfies TeacherAgentChildContext;
 
   return {
@@ -540,7 +552,8 @@ export function buildTeacherChildSuggestionSnapshot(context: TeacherAgentChildCo
     child: {
       id: context.child.id,
       name: context.child.name,
-      ageBand: getAgeBandFromBirthDate(context.child.birthDate),
+      ageBand: getAgeBandLabel(context.ageBandContext) ?? getLegacyAgeBandFromBirthDate(context.child.birthDate),
+      ageBandContext: context.ageBandContext,
       className: context.child.className,
       allergies: context.child.allergies,
       specialNotes: context.child.specialNotes,
@@ -681,8 +694,17 @@ export function buildTeacherWeeklyReportSnapshot(context: TeacherAgentClassConte
 }
 
 function buildCommunicationSummary(context: TeacherAgentChildContext, answer: string) {
+  const ageBandGuidance = getTeacherAgeBandGuidance(context);
   const leading = answer.trim();
-  if (leading) return leading;
+  if (leading) {
+    return ageBandGuidance
+      ? `${ageBandGuidance.label}阶段当前优先围绕${ageBandGuidance.careFocusText}组织沟通。${leading}`
+      : leading;
+  }
+
+  if (ageBandGuidance) {
+    return `建议优先围绕 ${context.child.name} 当前${ageBandGuidance.careFocusText}这些重点和家长沟通，先同步园内表现，再约定今晚配合点与明日复查节奏。`;
+  }
 
   if (context.todayAbnormalChecks.length > 0) {
     return `建议今天优先向家长同步 ${context.child.name} 的晨检异常和园内观察，再明确今晚家庭配合点与明日复查节奏。`;
@@ -696,7 +718,15 @@ function buildCommunicationSummary(context: TeacherAgentChildContext, answer: st
 }
 
 function buildCommunicationHighlights(context: TeacherAgentChildContext, response: TeacherCommunicationModelResponse) {
+  const ageBandGuidance = getTeacherAgeBandGuidance(context);
   const highlights = [...response.keyPoints];
+
+  if (ageBandGuidance) {
+    highlights.unshift(`阶段重点：${ageBandGuidance.teacherObservationFocus[0]}`);
+    if (ageBandGuidance.teacherObservationFocus[1]) {
+      highlights.push(`继续关注：${ageBandGuidance.teacherObservationFocus[1]}`);
+    }
+  }
 
   if (context.todayAbnormalChecks[0]) {
     highlights.unshift(buildHealthReason(context.todayAbnormalChecks[0]));
@@ -712,23 +742,34 @@ function buildCommunicationHighlights(context: TeacherAgentChildContext, respons
 }
 
 function buildCommunicationActionItems(context: TeacherAgentChildContext, response: TeacherCommunicationModelResponse) {
-  const tonightActions = takeRecentUnique(
-    response.nextSteps.filter((item) => !item.includes("明")),
+  const ageBandGuidance = getTeacherAgeBandGuidance(context);
+  const tonightActions = takeRecentUnique(response.nextSteps.filter((item) => !item.includes("明")), 2);
+  const familyTargets = takeRecentUnique(
+    [
+      ...tonightActions,
+      ageBandGuidance
+        ? `今晚家庭先${ageBandGuidance.defaultInterventionFocus[1] ?? `围绕${ageBandGuidance.careFocusText}做一条小动作`}。`
+        : "今晚继续记录家庭场景中的情绪和作息变化",
+      ageBandGuidance?.teacherObservationFocus[0]
+        ? `离园后重点看：${ageBandGuidance.teacherObservationFocus[0]}。`
+        : "离园后观察孩子是否出现同类异常信号",
+    ],
     2
   );
-  const familyTargets = tonightActions.length > 0 ? tonightActions : [
-    "今晚继续记录家庭场景中的情绪和作息变化",
-    "离园后观察孩子是否出现同类异常信号",
-  ];
   const teacherTarget =
     response.nextSteps.find((item) => item.includes("明")) ??
+    (ageBandGuidance?.teacherObservationFocus[0]
+      ? `明天继续观察${ageBandGuidance.teacherObservationFocus[0]}，并核对今晚家庭配合后的变化`
+      : undefined) ??
     context.pendingReviews[0]?.followUpAction ??
     "明早入园前反馈昨晚执行情况";
 
   const items = familyTargets.slice(0, 2).map((action, index) => ({
     id: `communication-family-${index + 1}`,
     target: "家长",
-    reason: "需要家园同步今晚的执行情况",
+    reason: ageBandGuidance
+      ? `当前阶段更适合围绕${ageBandGuidance.careFocusText}做连续家园观察`
+      : "需要家园同步今晚的执行情况",
     action,
     timing: "今晚",
   }));
@@ -745,6 +786,7 @@ function buildCommunicationActionItems(context: TeacherAgentChildContext, respon
 }
 
 function buildParentMessageDraft(context: TeacherAgentChildContext, response: TeacherCommunicationModelResponse) {
+  const ageBandGuidance = getTeacherAgeBandGuidance(context);
   const greetingName = context.child.guardians?.[0]?.name ?? "家长";
   const healthText = context.todayAbnormalChecks[0]
     ? `今天晨检时老师观察到 ${buildHealthReason(context.todayAbnormalChecks[0])}。`
@@ -752,18 +794,23 @@ function buildParentMessageDraft(context: TeacherAgentChildContext, response: Te
   const reviewText = context.pendingReviews[0]
     ? `另外，${context.pendingReviews[0].category} 方面仍在持续复查，园内会继续跟进。`
     : "";
+  const toneText = ageBandGuidance ? `这个阶段更适合${ageBandGuidance.parentActionTone}` : "";
   const tonightActions = buildCommunicationActionItems(context, response)
     .filter((item) => item.target === "家长")
     .map((item) => `请今晚重点配合：${item.action}`)
     .slice(0, 2)
     .join("；");
 
-  return `${greetingName}您好，${healthText}${reviewText}${tonightActions ? ` ${tonightActions}。` : ""} 明天老师也会继续关注孩子在园表现，辛苦您今晚观察后和我们同步。`;
+  return `${greetingName}您好，${healthText}${reviewText}${toneText ? ` ${toneText}。` : ""}${tonightActions ? ` ${tonightActions}。` : ""} 明天老师也会继续关注孩子在园表现，辛苦您今晚观察后和我们同步。`;
 }
 
 function buildTomorrowObservationPoint(context: TeacherAgentChildContext, response: TeacherCommunicationModelResponse) {
+  const ageBandGuidance = getTeacherAgeBandGuidance(context);
   return (
     response.nextSteps.find((item) => item.includes("明")) ??
+    (ageBandGuidance?.teacherObservationFocus[0]
+      ? `继续观察${ageBandGuidance.teacherObservationFocus[0]}，并核对今晚家庭配合后的变化。`
+      : undefined) ??
     context.pendingReviews[0]?.followUpAction ??
     context.pendingReviews[0]?.description ??
     context.todayAbnormalChecks[0]?.remark ??
@@ -783,6 +830,7 @@ export function buildTeacherCommunicationResult(params: {
     triggerReason: params.context.focusReasons[0] ?? "当前需要家园协同跟进",
     summary: buildCommunicationSummary(params.context, params.response.answer),
     riskLevel: params.context.todayAbnormalChecks.length > 0 ? "high" : params.context.pendingReviews.length > 0 ? "medium" : "low",
+    ageBandContext: params.context.ageBandContext,
     schoolActions: communicationActionItems.slice(-1).map((item) => item.action),
     familyActions: communicationActionItems.slice(0, 2).map((item) => item.action),
     observationPoints: buildCommunicationHighlights(params.context, params.response),
@@ -817,8 +865,19 @@ function buildFollowUpSummary(
   suggestion?: TeacherSuggestionModelResponse
 ) {
   if (childContext) {
+    const ageBandGuidance = getTeacherAgeBandGuidance(childContext);
+    const leading = suggestion?.summary?.trim();
+    if (leading) {
+      return ageBandGuidance
+        ? `${ageBandGuidance.label}阶段当前更该围绕${ageBandGuidance.careFocusText}推进跟进行动。${leading}`
+        : leading;
+    }
+
+    if (ageBandGuidance) {
+      return `围绕 ${childContext.child.name} 当前${ageBandGuidance.careFocusText}这些重点，建议优先处理最能影响今天闭环的 2 到 4 个动作。`;
+    }
+
     return (
-      suggestion?.summary ??
       `围绕 ${childContext.child.name} 的今日异常、待复查和近期观察，建议优先处理最能影响今天闭环的 2 到 4 个动作。`
     );
   }
@@ -834,6 +893,13 @@ function buildFollowUpHighlights(
   const highlights = suggestion?.highlights ?? [];
 
   if (childContext) {
+    const ageBandGuidance = getTeacherAgeBandGuidance(childContext);
+    if (ageBandGuidance) {
+      highlights.unshift(`阶段重点：${ageBandGuidance.teacherObservationFocus[0]}`);
+      if (ageBandGuidance.teacherObservationFocus[1]) {
+        highlights.push(`继续关注：${ageBandGuidance.teacherObservationFocus[1]}`);
+      }
+    }
     highlights.unshift(...childContext.focusReasons);
   } else {
     highlights.unshift(
@@ -851,15 +917,29 @@ function buildChildFollowUpActions(
   suggestion?: TeacherSuggestionModelResponse
 ): TeacherAgentActionItem[] {
   const items: RankedTeacherAgentActionItem[] = [];
+  const ageBandGuidance = getTeacherAgeBandGuidance(childContext);
 
   if (childContext.todayHealthChecks.length === 0) {
     items.push({
       id: `child-health-${childContext.child.id}`,
       target: childContext.child.name,
       reason: "今日晨检记录缺失，后续判断缺少基础依据",
-      action: "先补齐今日晨检，并记录体温、情绪与手口眼状态",
+      action: ageBandGuidance
+        ? `先补齐今日晨检，并重点记录${ageBandGuidance.teacherObservationFocus[0]}。`
+        : "先补齐今日晨检，并记录体温、情绪与手口眼状态",
       timing: "晨间",
       priority: 2,
+    });
+  }
+
+  if (ageBandGuidance) {
+    items.push({
+      id: `child-age-band-${childContext.child.id}`,
+      target: childContext.child.name,
+      reason: `${ageBandGuidance.label}阶段当前更适合围绕${ageBandGuidance.careFocusText}做连续观察`,
+      action: `今天先${ageBandGuidance.defaultInterventionFocus[0] ?? `围绕${ageBandGuidance.careFocusText}补一条观察`}`,
+      timing: "今日完成",
+      priority: childContext.todayAbnormalChecks.length > 0 ? 3 : 1,
     });
   }
 
@@ -868,7 +948,9 @@ function buildChildFollowUpActions(
       id: `child-abnormal-${index + 1}`,
       target: childContext.child.name,
       reason: buildHealthReason(record),
-      action: "午睡前再次观察并补充园内处理结果，必要时同步家长",
+      action: ageBandGuidance
+        ? `午睡前再次观察并补充园内处理结果，同时记录${ageBandGuidance.teacherObservationFocus[0]}。`
+        : "午睡前再次观察并补充园内处理结果，必要时同步家长",
       timing: "午睡前",
       priority: 1 + index,
     });
@@ -906,7 +988,9 @@ function buildChildFollowUpActions(
       id: `child-feedback-${childContext.child.id}`,
       target: childContext.child.name,
       reason: "最近缺少家长反馈，明天难以判断家庭执行效果",
-      action: "离园前同步今晚观察点，并提醒家长明早反馈",
+      action: ageBandGuidance?.teacherObservationFocus[0]
+        ? `离园前同步“${ageBandGuidance.teacherObservationFocus[0]}”对应的今晚观察点，并提醒家长明早反馈`
+        : "离园前同步今晚观察点，并提醒家长明早反馈",
       timing: "离园前",
       priority: 6,
     });
@@ -994,12 +1078,20 @@ export function buildTeacherFollowUpResult(params: {
           childName: params.childContext.child.name,
           triggerReason: params.childContext.focusReasons[0] ?? "当前需要家园协同跟进",
           suggestion: params.suggestion,
+          ageBandContext: params.childContext.ageBandContext,
           todayInSchoolAction: actionItems.find((item) => item.target === params.childContext?.child.name)?.action,
+          tonightHomeAction: getTeacherAgeBandGuidance(params.childContext)
+            ? `今晚请家长配合：${getTeacherAgeBandGuidance(params.childContext)?.defaultInterventionFocus[1] ?? `围绕${getTeacherAgeBandGuidance(params.childContext)?.careFocusText}做一条小动作`}`
+            : undefined,
           homeSteps: params.suggestion.actionPlan?.familyActions.slice(0, 4),
           observationPoints: buildFollowUpHighlights(params.classContext, params.childContext, params.suggestion),
           tomorrowObservationPoint:
-            params.childContext.pendingReviews[0]?.followUpAction ??
-            "明日优先核对今日重点动作是否完成，并确认家长侧是否已形成反馈。",
+            buildTomorrowObservationPoint(params.childContext, {
+              answer: "",
+              keyPoints: params.suggestion.highlights ?? [],
+              ...params.suggestion,
+              nextSteps: params.suggestion.actionPlan?.reviewActions ?? [],
+            }),
           reviewIn48h: params.suggestion.actionPlan?.reviewActions[0],
           generatedAt,
         })
@@ -1015,8 +1107,16 @@ export function buildTeacherFollowUpResult(params: {
     highlights: buildFollowUpHighlights(params.classContext, params.childContext, params.suggestion),
     actionItems,
     tomorrowObservationPoint:
-      params.childContext?.pendingReviews[0]?.followUpAction ??
-      "明日优先核对今日重点动作是否完成，并确认家长侧是否已形成反馈。",
+      params.childContext
+        ? buildTomorrowObservationPoint(params.childContext, {
+            answer: "",
+            keyPoints: params.suggestion?.highlights ?? [],
+            nextSteps: params.suggestion?.actionPlan?.reviewActions ?? [],
+            disclaimer: params.suggestion?.disclaimer ?? "",
+            source: (params.suggestion?.source ?? "fallback") as TeacherAgentResultSource,
+            model: params.suggestion?.model,
+          })
+        : "明日优先核对今日重点动作是否完成，并确认家长侧是否已形成反馈。",
     interventionCard,
     source: (params.suggestion?.source ?? "fallback") as TeacherAgentResultSource,
     model: params.suggestion?.model,

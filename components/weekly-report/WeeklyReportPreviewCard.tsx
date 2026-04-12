@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AlertCircle, Clock3, RefreshCw } from "lucide-react";
+import ParentSpeakButton from "@/components/parent/ParentSpeakButton";
 import { SectionCard } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import {
   getWeeklyReportSourceMeta,
 } from "@/lib/agent/weekly-report-client";
 import type { WeeklyReportResponse, WeeklyReportRole } from "@/lib/ai/types";
+import { buildParentSpeechScript } from "@/lib/voice/browser-tts";
 import { cn } from "@/lib/utils";
 
 type WeeklyReportPreviewCardProps = {
@@ -53,9 +55,34 @@ export default function WeeklyReportPreviewCard({
   const roleMeta = getWeeklyReportRoleMeta(role);
   const sourceMeta = report ? getWeeklyReportSourceMeta(report.source) : null;
   const careSection = pickCareSection(report);
+  const speechText = buildParentSpeechScript({
+    title,
+    sections: [
+      { label: periodLabel, text: report?.summary ?? "" },
+      {
+        label: careSection?.title ?? report?.primaryAction?.title ?? "primary action",
+        text: careSection?.summary ?? report?.primaryAction?.detail ?? "",
+      },
+    ],
+    outro: "Browser TTS only. This is not backend-generated voice.",
+  });
 
   return (
-    <SectionCard title={title} description={description} className={className}>
+    <SectionCard
+      title={title}
+      description={description}
+      className={className}
+      actions={
+        report ? (
+          <ParentSpeakButton
+            text={speechText}
+            label={"\u64ad\u62a5\u6458\u8981"}
+            careMode={careMode}
+            className={careMode ? "min-w-[220px]" : ""}
+          />
+        ) : null
+      }
+    >
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           <Badge variant="info">{roleMeta.label}</Badge>
@@ -67,15 +94,15 @@ export default function WeeklyReportPreviewCard({
             <Badge variant="outline">{report.model}</Badge>
           ) : null}
           {!careMode && report?.memoryMeta?.degraded ? (
-            <Badge variant="warning">已降级为稳定摘要</Badge>
+            <Badge variant="warning">Stable fallback</Badge>
           ) : null}
-          {loading && report ? <Badge variant="secondary">更新中</Badge> : null}
+          {loading && report ? <Badge variant="secondary">Refreshing</Badge> : null}
         </div>
 
         {report?.continuityNotes?.[0] ? (
           <div className="flex items-start gap-3 rounded-3xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-            <p>连续追踪：{report.continuityNotes[0]}</p>
+            <p>Continuity note: {report.continuityNotes[0]}</p>
           </div>
         ) : null}
 
@@ -114,8 +141,8 @@ export default function WeeklyReportPreviewCard({
                       {careSection.items.slice(0, 2).map((item) => (
                         <li key={`${careSection.id}-${item.label}`}>
                           <span className="font-medium text-slate-800">
-                            {item.label}：
-                          </span>
+                            {item.label}:
+                          </span>{" "}
                           {item.detail}
                         </li>
                       ))}
@@ -146,8 +173,8 @@ export default function WeeklyReportPreviewCard({
                         {section.items.slice(0, 2).map((item) => (
                           <li key={`${section.id}-${item.label}`}>
                             <span className="font-medium text-slate-800">
-                              {item.label}：
-                            </span>
+                              {item.label}:
+                            </span>{" "}
                             {item.detail}
                           </li>
                         ))}
@@ -163,7 +190,7 @@ export default function WeeklyReportPreviewCard({
             {loading ? (
               <div className="flex items-center gap-3 text-sm text-slate-600">
                 <RefreshCw className="h-4 w-4 animate-spin text-indigo-500" />
-                正在生成周报预览……
+                Generating weekly preview…
               </div>
             ) : error ? (
               <div className="flex items-start gap-3 text-sm text-amber-800">
@@ -172,7 +199,7 @@ export default function WeeklyReportPreviewCard({
               </div>
             ) : (
               <p className="text-sm text-slate-500">
-                本周周报预览暂时不可用，稍后可以再试。
+                Weekly preview is unavailable right now.
               </p>
             )}
           </div>
@@ -184,7 +211,7 @@ export default function WeeklyReportPreviewCard({
               <Badge variant="secondary">
                 {report?.primaryAction
                   ? report.primaryAction.title
-                  : "继续完成今晚家庭动作"}
+                  : "Continue tonight's home action"}
               </Badge>
               <p
                 className={
@@ -194,13 +221,12 @@ export default function WeeklyReportPreviewCard({
                 }
               >
                 {report?.primaryAction?.detail ??
-                  "先完成今晚任务，再把执行情况反馈给老师，系统会把这条记录带回下一轮建议。"}
+                  "Finish the current home action first, then send feedback back into the next parent follow-up loop."}
               </p>
               {!careMode && report?.primaryAction ? (
                 <p className="text-xs text-slate-500">
-                  负责人：
-                  {getWeeklyReportRoleMeta(report.primaryAction.ownerRole).label} ·
-                  时间窗：{report.primaryAction.dueWindow}
+                  Owner: {getWeeklyReportRoleMeta(report.primaryAction.ownerRole).label} · Window:{" "}
+                  {report.primaryAction.dueWindow}
                 </p>
               ) : null}
             </div>

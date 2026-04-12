@@ -1,4 +1,5 @@
-import type { AiFollowUpResponse, AiRiskLevel, AiSuggestionResponse, ConsultationResult } from "@/lib/ai/types";
+import { describeAgeBandActionGuidance } from "@/lib/age-band/policy";
+import type { AiFollowUpResponse, AiRiskLevel, AiSuggestionResponse, ConsultationResult, ResolvedAgeBandContext } from "@/lib/ai/types";
 
 export type InterventionCardSource = "ai" | "fallback" | "mock" | "vivo";
 
@@ -33,6 +34,7 @@ export interface InterventionCardFromSuggestionInput {
   childName: string;
   triggerReason: string;
   suggestion: AiSuggestionResponse;
+  ageBandContext?: ResolvedAgeBandContext | null;
   todayInSchoolAction?: string;
   tonightHomeAction?: string;
   homeSteps?: string[];
@@ -48,6 +50,7 @@ export interface InterventionCardFromCommunicationInput {
   triggerReason: string;
   summary: string;
   riskLevel?: AiRiskLevel;
+  ageBandContext?: ResolvedAgeBandContext | null;
   schoolActions?: string[];
   familyActions?: string[];
   observationPoints?: string[];
@@ -98,6 +101,57 @@ export function buildInterventionCardId(targetChildId: string, title: string, se
     .slice(0, 24);
   const normalizedSeed = (seed ?? new Date().toISOString()).replace(/[^0-9]/g, "").slice(-10);
   return `card-${targetChildId}-${normalizedTitle || "intervention"}-${normalizedSeed}`;
+}
+
+const BROAD_INTERVENTION_PATTERNS = [
+  "今天园内继续记录关键场景表现",
+  "今晚先完成一项稳定情绪和作息的家庭动作",
+  "明日入园后的情绪、晨检状态和家庭反馈是否一致",
+  "48 小时内结合今晚反馈和明早入园状态复查一次",
+];
+
+function isBroadInterventionText(value?: string | null) {
+  const normalized = value?.trim();
+  if (!normalized) return true;
+  return BROAD_INTERVENTION_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+function pickAgeBandAwareText(
+  preferred: string | undefined,
+  aiCandidate: string | undefined,
+  ageBandFallback: string | undefined
+) {
+  const preferredText = preferred?.trim();
+  if (preferredText) return preferredText;
+
+  const aiText = aiCandidate?.trim();
+  if (aiText && !isBroadInterventionText(aiText)) return aiText;
+
+  return ageBandFallback?.trim() || aiText || "";
+}
+
+function buildAgeBandInterventionGuidance(ageBandContext?: ResolvedAgeBandContext | null) {
+  const guidance = describeAgeBandActionGuidance(ageBandContext);
+  if (!guidance) return null;
+
+  const primaryObservation = guidance.teacherObservationFocus[0] ?? guidance.careFocus[0];
+  const secondaryObservation = guidance.teacherObservationFocus[1] ?? guidance.careFocus[1] ?? primaryObservation;
+  const tonightHomeAction =
+    guidance.defaultInterventionFocus[1] ??
+    `围绕${guidance.careFocusText}安排一条稳定、容易复现的小动作`;
+
+  return {
+    todayInSchoolAction: `今天园内先围绕${guidance.defaultInterventionFocus[0] ?? guidance.careFocusText}，重点记录${guidance.teacherObservationText}。`,
+    tonightHomeAction: `今晚先${tonightHomeAction}，尽量保持动作轻量、稳定、可重复。`,
+    observationPoints: guidance.teacherObservationFocus.slice(0, 3).map((item) => `重点留意：${item}`),
+    tomorrowObservationPoint: `明天继续看${primaryObservation}，并核对昨晚家庭动作后的变化。`,
+    reviewIn48h: `48 小时内连续回看${guidance.defaultInterventionFocus[2] ?? guidance.careFocusText}。${guidance.cautionText}`.trim(),
+    homeSteps: [
+      `先按“${tonightHomeAction}”只做一件小动作。`,
+      `记录${primaryObservation}和${secondaryObservation}是否更稳定。`,
+      "明早把执行结果反馈给老师，帮助继续调整建议。",
+    ],
+  };
 }
 
 function buildParentMessageDraft(card: {
@@ -196,13 +250,16 @@ function finalizeInterventionCard(input: {
 
 export function buildInterventionCardFromSuggestion(input: InterventionCardFromSuggestionInput): InterventionCard {
   const actionPlan = input.suggestion.actionPlan;
+  const ageBandGuidance = buildAgeBandInterventionGuidance(input.ageBandContext);
   const familyActions = uniqueItems([input.tonightHomeAction, ...(actionPlan?.familyActions ?? []), ...input.suggestion.actions], 4);
   const observationPoints = uniqueItems([
     ...(input.observationPoints ?? []),
+    ...(ageBandGuidance?.observationPoints ?? []),
     ...input.suggestion.highlights,
     ...input.suggestion.concerns,
   ], 4);
   const title = `${input.childName} 今晚家庭干预卡`;
+  const tonightHomeAction = pickAgeBandAwareText(input.tonightHomeAction, familyActions[0], ageBandGuidance?.tonightHomeAction);
 
   return finalizeInterventionCard({
     childName: input.childName,
@@ -211,12 +268,16 @@ export function buildInterventionCardFromSuggestion(input: InterventionCardFromS
     targetChildId: input.targetChildId,
     triggerReason: input.triggerReason,
     summary: input.suggestion.summary,
-    todayInSchoolAction: input.todayInSchoolAction ?? actionPlan?.schoolActions[0] ?? "",
-    tonightHomeAction: familyActions[0] ?? "",
-    homeSteps: input.homeSteps ?? familyActions.slice(0, 4),
+    todayInSchoolAction: pickAgeBandAwareText(input.todayInSchoolAction, actionPlan?.schoolActions[0], ageBandGuidance?.todayInSchoolAction),
+    tonightHomeAction,
+    homeSteps: uniqueItems([...(input.homeSteps ?? []), ...familyActions, ...(ageBandGuidance?.homeSteps ?? [])], 4),
     observationPoints,
-    tomorrowObservationPoint: input.tomorrowObservationPoint ?? actionPlan?.reviewActions[0] ?? "",
-    reviewIn48h: input.reviewIn48h ?? actionPlan?.reviewActions[0] ?? "",
+    tomorrowObservationPoint: pickAgeBandAwareText(
+      input.tomorrowObservationPoint,
+      actionPlan?.reviewActions[0],
+      ageBandGuidance?.tomorrowObservationPoint
+    ),
+    reviewIn48h: pickAgeBandAwareText(input.reviewIn48h, actionPlan?.reviewActions[0], ageBandGuidance?.reviewIn48h),
     source: input.suggestion.source,
     model: input.suggestion.model,
     generatedAt: input.generatedAt,
@@ -226,8 +287,10 @@ export function buildInterventionCardFromSuggestion(input: InterventionCardFromS
 export function buildInterventionCardFromCommunication(
   input: InterventionCardFromCommunicationInput
 ): InterventionCard {
+  const ageBandGuidance = buildAgeBandInterventionGuidance(input.ageBandContext);
   const familyActions = uniqueItems(input.familyActions ?? [], 4);
   const title = `${input.childName} 家园协同干预卡`;
+  const tonightHomeAction = pickAgeBandAwareText(undefined, familyActions[0], ageBandGuidance?.tonightHomeAction);
 
   return finalizeInterventionCard({
     childName: input.childName,
@@ -236,12 +299,16 @@ export function buildInterventionCardFromCommunication(
     targetChildId: input.targetChildId,
     triggerReason: input.triggerReason,
     summary: input.summary,
-    todayInSchoolAction: input.schoolActions?.[0] ?? "",
-    tonightHomeAction: familyActions[0] ?? "",
-    homeSteps: familyActions,
-    observationPoints: input.observationPoints ?? [],
-    tomorrowObservationPoint: input.tomorrowObservationPoint ?? input.schoolActions?.[1] ?? "",
-    reviewIn48h: input.reviewIn48h ?? input.familyActions?.[1] ?? "",
+    todayInSchoolAction: pickAgeBandAwareText(undefined, input.schoolActions?.[0], ageBandGuidance?.todayInSchoolAction),
+    tonightHomeAction,
+    homeSteps: uniqueItems([...(familyActions ?? []), ...(ageBandGuidance?.homeSteps ?? [])], 4),
+    observationPoints: uniqueItems([...(input.observationPoints ?? []), ...(ageBandGuidance?.observationPoints ?? [])], 4),
+    tomorrowObservationPoint: pickAgeBandAwareText(
+      input.tomorrowObservationPoint,
+      input.schoolActions?.[1],
+      ageBandGuidance?.tomorrowObservationPoint
+    ),
+    reviewIn48h: pickAgeBandAwareText(input.reviewIn48h, input.familyActions?.[1], ageBandGuidance?.reviewIn48h),
     source: input.source,
     model: input.model,
     generatedAt: input.generatedAt,

@@ -279,15 +279,18 @@
 - Lane：关怀模式 / 祖辈模式线
 - 问题定义：祖辈或低数字熟练度照护者更需要“读给我听”和“我直接说”的能力，而不是复杂文字输入。
 - 目标效果：为 Parent 关键页面加入一键播报和语音反馈能力，并区分真实 TTS / ASR 与 preview fallback。
-- 主要触达层：Parent 端 / TTS-ASR provider / 反馈入口
-- 建议触达模块：`app/parent/page.tsx`、`app/parent/agent/page.tsx`、`components/parent/*`、`backend/app/providers/vivo_tts.py`、`backend/app/providers/vivo_asr.py`
+- 主要触达层：Parent 端 / browser-first 语音预览 / 反馈入口
+- 建议触达模块：`app/parent/page.tsx`、`app/parent/agent/page.tsx`、`components/parent/ParentSpeakButton.tsx`、`components/parent/ParentVoiceNoteInput.tsx`、`components/parent/ParentStructuredFeedbackComposer.tsx`、`components/parent/ParentTransparencyPanel.tsx`、`components/weekly-report/WeeklyReportPreviewCard.tsx`、`lib/voice/browser-tts.ts`、`lib/voice/browser-speech-input.ts`
 - 推荐前置依赖：`T11`
-- 推荐 subagents：`frontend_architect + backend_architect + reviewer_tester`
+- 推荐 subagents：`repo_mapper + frontend_architect + reviewer_tester`
 - 是否适合并行：中
 - 最小验收方式：一键播报与语音反馈入口可用，且 fallback 状态对用户可见
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要真机与录屏再验
-- 当前状态：`Planned`
-- 完成后需回写哪些文档：`docs/task-registry.md`、`docs/competition-architecture.md`
+- 当前状态：`Done-code-only (Phase 1 browser-first)`
+- 2026-04-12 更新：`/parent` 与 `/parent/agent` 已新增 browser-first 一键播报入口，优先使用 `speechSynthesis`；关怀模式首屏摘要、AI 今日提醒、周报预览、透明层摘要与 Agent 当前建议摘要均可触发浏览器播报。
+- 2026-04-12 更新：`ParentStructuredFeedbackComposer` 已新增最小语音反馈入口；浏览器支持 `SpeechRecognition / webkitSpeechRecognition` 时会把识别结果追加到 `notes`，不支持时退回本地录音 fallback，并明确提示“仅录音草稿 / 暂不自动转字”。
+- 2026-04-12 边界：本轮不接 Storybook 音频，不接 `backend/app/providers/vivo_tts.py`、`backend/app/providers/vivo_asr.py`，不写成 fully live voice AI；真机、兼容性与录屏仍需后续再验。
+- 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T13｜统一意图入口：后端路由器
 
@@ -487,7 +490,11 @@
 - 是否适合并行：中
 - 最小验收方式：至少 Teacher / Parent / Weekly Report 三处出现明确年龄分层差异
 - 是否需人工 walkthrough / 真机 / 录屏再验：是；需要 walkthrough 与录屏
-- 当前状态：`Planned`
+- 当前状态：`Done-code-only (Phase 1 main-chain logic)`
+- 2026-04-12 更新：`lib/agent/intervention-card.ts`、`lib/agent/parent-agent.ts`、`lib/agent/teacher-agent.ts` 已开始真实消费 shared `ageBandContext`，把年龄分层接到 intervention card、Parent follow-up suggestion、Teacher child-mode suggestion / follow-up 三条主链；`lib/ai/dashscope.ts`、`lib/ai/fallback.ts`、`lib/ai/mock.ts` 也已同步补齐分龄 prompt 与 fallback。
+- 2026-04-12 分龄差异：`0-12m` 更偏喂养/补水节律、睡眠安抚、分离安稳；`12-24m` 更偏分离过渡、语言回应/模仿、自主进食与重复练习；`24-36m` 更偏同伴互动、情绪命名、规则切换、自理与稳定边界。
+- 2026-04-12 边界：本轮只做 policy-first 的 child-scoped 逻辑接入，不改 `app/parent/page.tsx`、`app/parent/agent/page.tsx`、`app/parent/storybook/page.tsx`、Admin / Teacher 首页结构，也不把 Storybook 页面本体接进年龄化线程。
+- 2026-04-12 Deferred：Storybook 页面级接入、Parent 首页 walkthrough、透明层联动与更完整的 UI 演绎留给后续 `T23/T31/T12` 延伸阶段。
 - 完成后需回写哪些文档：`docs/task-registry.md`、`docs/current-status-ledger.md`、`docs/competition-architecture.md`
 
 ### T24｜Teacher Copilot：backend 能力包

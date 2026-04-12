@@ -4,8 +4,10 @@ import type {
   AiSuggestionResponse,
   ChildSuggestionSnapshot,
   ConsultationResult,
+  ResolvedAgeBandContext,
   RuleFallbackItem,
 } from "@/lib/ai/types";
+import { describeAgeBandActionGuidance, getAgeBandLabel, resolveAgeBandContext } from "@/lib/age-band/policy";
 import { toFollowUpFeedbackLite } from "@/lib/feedback/normalize";
 import { getLocalToday, isDateWithinLastDays, normalizeLocalDate } from "@/lib/date";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
@@ -83,6 +85,7 @@ export interface ParentAgentChildContext {
   taskTimeline: CanonicalTask[];
   focusReasons: string[];
   observationDefaults: string[];
+  ageBandContext?: ResolvedAgeBandContext;
 }
 
 export interface ParentAgentResult {
@@ -108,7 +111,7 @@ export interface ParentAgentResult {
   parentMessageMeta?: ParentMessageMeta;
 }
 
-function getAgeBandFromBirthDate(birthDate: string) {
+function getLegacyAgeBandFromBirthDate(birthDate: string) {
   const birth = new Date(birthDate);
   const now = new Date();
   let months = (now.getFullYear() - birth.getFullYear()) * 12;
@@ -120,6 +123,10 @@ function getAgeBandFromBirthDate(birthDate: string) {
   if (months < 36) return "1–3岁";
   if (months < 72) return "3–6岁";
   return "6岁以上";
+}
+
+function getParentAgeBandGuidance(context: ParentAgentChildContext) {
+  return describeAgeBandActionGuidance(context.ageBandContext);
 }
 
 function uniqueItems(items: Array<string | undefined>, limit = 4) {
@@ -172,8 +179,12 @@ function buildObservationDefaults(context: {
   attentionGrowthRecords: GrowthRecord[];
   weeklyHealthChecks: HealthCheckRecord[];
   latestFeedback?: GuardianFeedback;
+  ageBandContext?: ResolvedAgeBandContext;
 }) {
+  const ageBandGuidance = describeAgeBandActionGuidance(context.ageBandContext);
   return uniqueItems([
+    ageBandGuidance ? `今晚先看：${ageBandGuidance.teacherObservationFocus[0]}` : undefined,
+    ageBandGuidance?.teacherObservationFocus[1] ? `今晚再看：${ageBandGuidance.teacherObservationFocus[1]}` : undefined,
     context.weeklyTrend.hydrationAvg < 140 ? "今晚补水是否比前几天更主动" : undefined,
     context.attentionGrowthRecords.some((item) => item.category === "情绪表现") ? "晚间情绪是否比接园前更稳定" : undefined,
     context.attentionGrowthRecords.some((item) => item.category === "睡眠情况") ? "入睡速度和晨起状态是否改善" : undefined,
@@ -218,13 +229,31 @@ function buildFeedbackPrompt() {
   return "做完后请反馈 4 件事：是否已执行、孩子反应、是否改善、其他补充。";
 }
 
+function buildTonightTopAction(context: ParentAgentChildContext, suggestion: AiSuggestionResponse) {
+  const ageBandGuidance = getParentAgeBandGuidance(context);
+  if (ageBandGuidance) {
+    return `${ageBandGuidance.label}阶段今晚先${ageBandGuidance.defaultInterventionFocus[1] ?? `围绕${ageBandGuidance.careFocusText}安排一条小动作`}。`;
+  }
+
+  return suggestion.actionPlan?.familyActions[0] ?? context.task.description;
+}
+
 function buildWhyNow(context: ParentAgentChildContext, suggestion: AiSuggestionResponse, topAction: string) {
+  const ageBandGuidance = getParentAgeBandGuidance(context);
   if (context.latestFeedback?.improved === false) {
-    return "上一轮家庭动作效果还不稳定，今晚需要继续执行同一方向，方便老师明天判断是否要调整建议。";
+    return ageBandGuidance
+      ? `上一轮家庭动作效果还不稳定，${ageBandGuidance.label}阶段更适合${ageBandGuidance.parentActionTone}，今晚先把动作做稳，方便老师明天判断是否要调整建议。`
+      : "上一轮家庭动作效果还不稳定，今晚需要继续执行同一方向，方便老师明天判断是否要调整建议。";
   }
 
   if (suggestion.riskLevel === "high") {
-    return "因为当前关注信号较集中，今晚越早做一个明确动作，明天老师越容易判断问题是在减轻还是持续。";
+    return ageBandGuidance
+      ? `因为当前关注信号较集中，${ageBandGuidance.label}阶段更适合先围绕${ageBandGuidance.careFocusText}做一条明确动作，明天老师越容易判断问题是在减轻还是持续。`
+      : "因为当前关注信号较集中，今晚越早做一个明确动作，明天老师越容易判断问题是在减轻还是持续。";
+  }
+
+  if (ageBandGuidance) {
+    return `因为这个阶段更适合${ageBandGuidance.parentActionTone}，今晚先围绕${ageBandGuidance.careFocusText}完成一件小动作，明天更容易看出是否有效。`;
   }
 
   return `因为当前最值得跟进的是“${topAction}”，今晚先执行这一件事，明天就能更快看出是否有效。`;
@@ -248,6 +277,7 @@ function buildAssistantAnswer(params: {
   homeSteps: string[];
   observationPoints: string[];
   teacherObservation: string;
+  parentActionTone?: string;
 }) {
   const stepsText = params.homeSteps.slice(0, 3).map((item, index) => `${index + 1}. ${item}`).join("\n");
   const observationText = params.observationPoints.map((item) => `- ${item}`).join("\n");
@@ -257,6 +287,7 @@ function buildAssistantAnswer(params: {
     "",
     `今晚最该做的一件事：${params.tonightTopAction}`,
     `为什么现在做：${params.whyNow}`,
+    params.parentActionTone ? `当前阶段建议：${params.parentActionTone}` : "",
     "",
     "执行步骤：",
     stepsText,
@@ -281,6 +312,10 @@ export function buildParentAgentChildContext(params: {
 }): ParentAgentChildContext {
   const today = getLocalToday();
   const childId = params.child.id;
+  const ageBandContext = resolveAgeBandContext({
+    birthDate: params.child.birthDate,
+    asOfDate: today,
+  });
   const weeklyMeals = params.mealRecords.filter((item) => item.childId === childId && isDateWithinLastDays(item.date, 7, today));
   const todayMeals = weeklyMeals.filter((item) => item.date === today);
   const weeklyHealthChecks = sortByDateDesc(
@@ -294,7 +329,7 @@ export function buildParentAgentChildContext(params: {
   );
   const attentionGrowthRecords = weeklyGrowthRecords.filter((item) => item.needsAttention);
   const pendingReviews = weeklyGrowthRecords.filter((item) => item.reviewStatus === "待复查");
-  const task = getWeeklyTaskForChild(childId, getAgeBandFromBirthDate(params.child.birthDate) as never);
+  const task = getWeeklyTaskForChild(childId, getLegacyAgeBandFromBirthDate(params.child.birthDate) as never);
   const latestFeedback = weeklyFeedbacks[0];
   const childTaskCheckIns = params.taskCheckInRecords.filter((item) => item.childId === childId);
   const taskTimeline = params.currentInterventionCard
@@ -340,7 +375,9 @@ export function buildParentAgentChildContext(params: {
       attentionGrowthRecords,
       weeklyHealthChecks,
       latestFeedback,
+      ageBandContext,
     }),
+    ageBandContext,
   } satisfies ParentAgentChildContext;
 }
 
@@ -364,7 +401,8 @@ export function buildParentChildSuggestionSnapshot(context: ParentAgentChildCont
     child: {
       id: context.child.id,
       name: context.child.name,
-      ageBand: getAgeBandFromBirthDate(context.child.birthDate),
+      ageBand: getAgeBandLabel(context.ageBandContext) ?? getLegacyAgeBandFromBirthDate(context.child.birthDate),
+      ageBandContext: context.ageBandContext,
       className: context.child.className,
       allergies: context.child.allergies,
       specialNotes: context.child.specialNotes,
@@ -445,8 +483,16 @@ function buildTriggerReason(context: ParentAgentChildContext, suggestion: AiSugg
 }
 
 function buildTomorrowObservation(context: ParentAgentChildContext, suggestion: AiSuggestionResponse) {
+  const ageBandGuidance = getParentAgeBandGuidance(context);
+  const explicitReviewAction = suggestion.actionPlan?.reviewActions[0];
+  if (explicitReviewAction) return explicitReviewAction;
+
+  if (ageBandGuidance) {
+    const primaryObservation = ageBandGuidance.teacherObservationFocus[0] ?? `${context.child.name} 明日入园后的连续反应`;
+    return `明天老师继续看${primaryObservation}，并核对今晚家庭动作后的变化。`;
+  }
+
   return (
-    suggestion.actionPlan?.reviewActions[0] ??
     context.pendingReviews[0]?.followUpAction ??
     context.pendingReviews[0]?.description ??
     `${context.child.name} 明日入园后的情绪、晨检状态和家庭反馈是否一致。`
@@ -454,8 +500,16 @@ function buildTomorrowObservation(context: ParentAgentChildContext, suggestion: 
 }
 
 function buildReviewIn48h(context: ParentAgentChildContext, suggestion: AiSuggestionResponse) {
+  const ageBandGuidance = getParentAgeBandGuidance(context);
+  const explicitReviewAction = suggestion.actionPlan?.reviewActions[0];
+  if (explicitReviewAction) return explicitReviewAction;
+
+  if (ageBandGuidance) {
+    const followUpFocus = ageBandGuidance.defaultInterventionFocus[2] ?? ageBandGuidance.careFocusText;
+    return `48 小时内连续回看${followUpFocus}。${ageBandGuidance.cautionText}`.trim();
+  }
+
   return (
-    suggestion.actionPlan?.reviewActions[0] ??
     (context.pendingReviews.length > 0
       ? `48 小时内重点回看 ${context.pendingReviews[0].category} 的变化，并确认家庭动作是否持续有效。`
       : "48 小时内结合今晚反馈和明早入园状态复查一次。")
@@ -469,19 +523,21 @@ export function buildParentAgentSuggestionResult(params: {
 }) {
   const generatedAt = params.generatedAt ?? new Date().toISOString();
   const triggerReason = buildTriggerReason(params.context, params.suggestion);
+  const ageBandGuidance = getParentAgeBandGuidance(params.context);
+  const tonightTopAction = buildTonightTopAction(params.context, params.suggestion);
   const interventionCard = buildInterventionCardFromSuggestion({
     targetChildId: params.context.child.id,
     childName: params.context.child.name,
     triggerReason,
     suggestion: params.suggestion,
-    tonightHomeAction: params.context.task.description,
+    ageBandContext: params.context.ageBandContext,
+    tonightHomeAction: tonightTopAction,
     homeSteps: params.suggestion.actionPlan?.familyActions.slice(0, 4),
     observationPoints: params.context.observationDefaults,
     tomorrowObservationPoint: buildTomorrowObservation(params.context, params.suggestion),
     reviewIn48h: buildReviewIn48h(params.context, params.suggestion),
     generatedAt,
   });
-  const tonightTopAction = interventionCard.tonightHomeAction;
   const whyNow = buildWhyNow(params.context, params.suggestion, tonightTopAction);
   const recommendedQuestions = buildRecommendedQuestions(params.context);
   const summary = params.suggestion.summary;
@@ -512,6 +568,7 @@ export function buildParentAgentSuggestionResult(params: {
       homeSteps: interventionCard.homeSteps,
       observationPoints: interventionCard.observationPoints,
       teacherObservation: interventionCard.tomorrowObservationPoint,
+      parentActionTone: ageBandGuidance?.parentActionTone,
     }),
     source: params.suggestion.source,
     model: params.suggestion.model,
@@ -565,13 +622,16 @@ export function buildParentAgentFollowUpResult(params: {
 }) {
   const generatedAt = params.generatedAt ?? new Date().toISOString();
   const consultation = params.response.consultation;
+  const ageBandGuidance = getParentAgeBandGuidance(params.context);
   const mergedInterventionCard = mergeInterventionCardWithFollowUp(params.baseResult.interventionCard, params.response);
   const interventionCard =
     attachConsultationToInterventionCard(mergedInterventionCard, consultation) ?? mergedInterventionCard;
   const tonightTopAction = params.response.tonightTopAction ?? interventionCard.tonightHomeAction;
   const whyNow =
     params.response.whyNow ??
-    `因为这条追问是在围绕“${params.baseResult.tonightTopAction}”继续细化，今晚执行结果会直接影响明天老师的跟进方式。`;
+    (ageBandGuidance
+      ? `因为${ageBandGuidance.label}阶段更适合${ageBandGuidance.parentActionTone}，今晚执行结果会直接影响明天老师的跟进方式。`
+      : `因为这条追问是在围绕“${params.baseResult.tonightTopAction}”继续细化，今晚执行结果会直接影响明天老师的跟进方式。`);
   const homeSteps = params.response.homeSteps?.length ? params.response.homeSteps : interventionCard.homeSteps;
   const tonightObservationPoints =
     params.response.observationPoints?.length ? params.response.observationPoints : interventionCard.observationPoints;
@@ -604,6 +664,7 @@ export function buildParentAgentFollowUpResult(params: {
         homeSteps,
         observationPoints: tonightObservationPoints,
         teacherObservation: teacherTomorrowObservation,
+        parentActionTone: ageBandGuidance?.parentActionTone,
       }),
     source: params.response.source,
     model: params.response.model,

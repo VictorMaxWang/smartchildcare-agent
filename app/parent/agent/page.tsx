@@ -10,6 +10,7 @@ import EmptyState from "@/components/EmptyState";
 import InterventionCardPanel from "@/components/agent/InterventionCardPanel";
 import CareModeToggle from "@/components/parent/CareModeToggle";
 import ParentCareFocusCard from "@/components/parent/ParentCareFocusCard";
+import ParentSpeakButton from "@/components/parent/ParentSpeakButton";
 import ParentTransparencyPanel from "@/components/parent/ParentTransparencyPanel";
 import ParentStructuredFeedbackComposer, {
   type ParentStructuredFeedbackComposerSubmitInput,
@@ -64,6 +65,7 @@ import { buildMockOcrDraft } from "@/lib/mobile/ocr-input";
 import { buildMockVoiceDraft } from "@/lib/mobile/voice-input";
 import { getHydrationDisplayState } from "@/lib/hydration-display";
 import { useCareMode } from "@/lib/care-mode";
+import { buildParentSpeechScript } from "@/lib/voice/browser-tts";
 import {
   buildInterventionTasksFromCard,
   materializeTasksFromLegacy,
@@ -252,6 +254,28 @@ export default function ParentAgentPage() {
     displayInterventionCard?.tomorrowObservationPoint ??
     currentResult?.teacherTomorrowObservation ??
     "明早继续反馈今晚执行结果，方便教师继续观察。";
+  const careFocusSpeechText = buildParentSpeechScript({
+    title: `${selectedFeed?.child.name ?? "孩子"} 今晚先做什么`,
+    sections: [
+      { label: "今晚就做", text: displayTonightTopAction },
+      { label: "为什么现在做", text: displayWhyNow },
+      { label: "明天老师继续看", text: displayTeacherObservation },
+    ],
+    outro: "浏览器播报，仅用于当前设备预览，不是后端真实语音。",
+  });
+  const currentResultSpeechText = buildParentSpeechScript({
+    title: "家长 Agent 当前建议",
+    sections: [
+      { label: "今晚动作", text: displayTonightTopAction },
+      { label: "为什么推荐", text: displayWhyNow },
+      { label: "明天继续看", text: displayTeacherObservation },
+      {
+        label: "48 小时复查",
+        text: displayConsultation?.followUp48h?.[0] ?? displayInterventionCard?.reviewIn48h,
+      },
+    ],
+    outro: "浏览器播报，仅用于当前设备预览，不是后端真实语音。",
+  });
   const transparencyModel = useMemo(
     () =>
       baseContext && selectedFeed
@@ -677,7 +701,7 @@ export default function ParentAgentPage() {
         }
       } catch {
         if (!cancelled) {
-          const fallback = buildFallbackSuggestion(snapshotPayload.ruleFallback);
+          const fallback = buildFallbackSuggestion(snapshotPayload);
           const baseResult = buildParentAgentSuggestionResult({
             context,
             suggestion: fallback,
@@ -874,6 +898,12 @@ export default function ParentAgentPage() {
                 ]}
                 actions={
                   <>
+                    <ParentSpeakButton
+                      text={careFocusSpeechText}
+                      label="读给我听"
+                      careMode
+                      variant="secondary"
+                    />
                     <Link href="#feedback" className="sm:flex-1">
                       <Button className="min-h-12 w-full rounded-2xl text-base">
                         做完后去反馈
@@ -932,6 +962,13 @@ export default function ParentAgentPage() {
                           </p>
                         ) : null}
                         <div className="rounded-[28px] border border-indigo-100 bg-indigo-50/60 p-5">
+                          <ParentSpeakButton
+                            text={currentResultSpeechText}
+                            label="读给我听"
+                            careMode
+                            variant="secondary"
+                            className="mb-4"
+                          />
                           <p className="text-xl font-semibold text-slate-950">
                             {currentResult.title}
                           </p>
@@ -1515,6 +1552,11 @@ export default function ParentAgentPage() {
                         {parentMessageStatus}
                       </p>
                     ) : null}
+                    <ParentSpeakButton
+                      text={currentResultSpeechText}
+                      label="浏览器播报"
+                      className="mt-3"
+                    />
                     <p className="mt-3 text-lg font-semibold text-slate-900">{currentResult.title}</p>
                     <p className="mt-3 text-sm leading-7 text-slate-600">{currentResult.summary}</p>
                     <div className="mt-4 rounded-2xl bg-white/80 p-4">

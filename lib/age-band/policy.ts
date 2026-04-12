@@ -200,6 +200,33 @@ export function getAgeBandLabel(input: ResolveAgeBandInput): string | null {
   return policy ? AGE_BAND_LABELS[policy.ageBand] : null;
 }
 
+export function describeAgeBandActionGuidance(input: ResolveAgeBandInput): {
+  label: string;
+  careFocusText: string;
+  careFocus: string[];
+  teacherObservationText: string;
+  teacherObservationFocus: string[];
+  defaultInterventionText: string;
+  defaultInterventionFocus: string[];
+  cautionText: string;
+  parentActionTone: string;
+} | null {
+  const policy = resolveAgeBandPolicy(input);
+  if (!policy) return null;
+
+  return {
+    label: AGE_BAND_LABELS[policy.ageBand],
+    careFocusText: policy.careFocus.slice(0, 2).join("、"),
+    careFocus: [...policy.careFocus],
+    teacherObservationText: policy.teacherObservationFocus.slice(0, 2).join("；"),
+    teacherObservationFocus: [...policy.teacherObservationFocus],
+    defaultInterventionText: policy.defaultInterventionFocus.slice(0, 2).join("；"),
+    defaultInterventionFocus: [...policy.defaultInterventionFocus],
+    cautionText: policy.doNotOverstateSignals[0] ?? "",
+    parentActionTone: policy.parentActionTone,
+  };
+}
+
 export function describeAgeBandWeeklyGuidance(input: ResolveAgeBandInput): {
   label: string;
   focusText: string;

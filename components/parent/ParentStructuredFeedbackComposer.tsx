@@ -15,6 +15,7 @@ import type { CanonicalTask } from "@/lib/tasks/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import ParentVoiceNoteInput from "@/components/parent/ParentVoiceNoteInput";
 import { cn } from "@/lib/utils";
 
 type ExecutionCountOption = 1 | 2 | 3;
@@ -151,6 +152,14 @@ export default function ParentStructuredFeedbackComposer({
     interventionCard?.reviewIn48h ??
     "提交后会继续带入 48 小时复查上下文。";
   const optionButtonClassName = getOptionButtonClassName(careMode);
+
+  function handleNotesChange(nextValue: string) {
+    setNotes(nextValue);
+    setShowDetails(true);
+    if (validationMessage) {
+      setValidationMessage(null);
+    }
+  }
 
   function handleSubmit() {
     if (!interventionCard) {
@@ -344,6 +353,15 @@ export default function ParentStructuredFeedbackComposer({
           </Button>
         </div>
 
+        <div className="mt-4">
+          <ParentVoiceNoteInput
+            value={notes}
+            onChange={handleNotesChange}
+            careMode={careMode}
+            disabled={!interventionCard}
+          />
+        </div>
+
         {showDetails ? (
           <div className="mt-4 space-y-4">
             <div className="rounded-3xl border border-white/80 bg-white p-4">
@@ -390,7 +408,7 @@ export default function ParentStructuredFeedbackComposer({
               </p>
               <Textarea
                 value={notes}
-                onChange={(event) => setNotes(event.target.value)}
+                onChange={(event) => handleNotesChange(event.target.value)}
                 placeholder="补充今晚的场景、持续时间、孩子状态，或 OCR 草稿里的细节。"
                 className={cn("mt-3 bg-white", careMode ? "min-h-32 text-base" : "min-h-28")}
               />
