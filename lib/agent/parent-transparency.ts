@@ -502,7 +502,7 @@ function buildModel(params: {
 export function buildParentHomeTransparencyModel(
   params: BuildParentHomeTransparencyInput
 ) {
-  return buildModel({
+  const model = buildModel({
     context: params.context,
     result: params.suggestionResult,
     weeklyReport: params.weeklyReport,
@@ -510,6 +510,11 @@ export function buildParentHomeTransparencyModel(
     consultation: params.latestConsultation ?? params.suggestionResult?.consultation ?? null,
     pendingFeedback: Boolean(params.pendingFeedback),
   });
+
+  return {
+    ...model,
+    defaultExpanded: true,
+  };
 }
 
 export function buildParentAgentTransparencyModel(

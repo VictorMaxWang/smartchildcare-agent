@@ -44,6 +44,30 @@ TTS_DEFAULT_FALLBACK_VOICE_NAME = "vivoHelper"
 TTS_DEFAULT_SPEED = 50
 TTS_DEFAULT_VOLUME = 50
 TTS_DEBUG_TEXT_LIMIT = 240
+TTS_AUTH_MODE = "authorization-bearer-plus-x-ai-gateway-signature"
+TTS_RUNTIME_METADATA_KEYS = (
+    "model",
+    "product",
+    "package",
+    "client_version",
+    "system_version",
+    "sdk_version",
+    "android_version",
+)
+TTS_RUNTIME_PLACEHOLDER_VALUES = frozenset(
+    {
+        "",
+        "unknown",
+        "none",
+        "null",
+        "n/a",
+        "na",
+        "unset",
+        "placeholder",
+        "tbd",
+        "todo",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +81,13 @@ def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
     return " ".join(str(value).split())
+
+
+def _normalize_runtime_metadata_value(value: Any) -> str:
+    normalized = _normalize_text(value)
+    if normalized.casefold() in TTS_RUNTIME_PLACEHOLDER_VALUES:
+        return ""
+    return normalized
 
 
 def _stable_hash(value: str) -> str:
@@ -293,6 +324,12 @@ def _build_error_brief(summary: Mapping[str, Any]) -> str:
     error_msg = summary.get("error_msg")
     if error_msg:
         parts.append(f"error={_truncate_debug_text(error_msg, limit=100)}")
+    diagnosis = _normalize_text(summary.get("diagnosis"))
+    if diagnosis:
+        parts.append(f"diagnosis={diagnosis}")
+    invalid_runtime_fields = summary.get("invalid_runtime_fields")
+    if isinstance(invalid_runtime_fields, list) and invalid_runtime_fields:
+        parts.append(f"runtime_fields={','.join(str(field) for field in invalid_runtime_fields)}")
     response_body = summary.get("response_body")
     if response_body:
         if isinstance(response_body, dict):
@@ -374,11 +411,15 @@ class VivoTtsProvider:
             raise ProviderConfigurationError("websockets package is required for vivo TTS")
 
         system_time = str(int(time.time()))
+        runtime_metadata = self._runtime_metadata_query()
+        invalid_runtime_fields = [key for key, value in runtime_metadata.items() if not value]
         query = {
             "engineid": profile.engine_id,
             "system_time": system_time,
             "user_id": self._build_user_id(child_id=child_id, story_id=story_id, scene_index=scene_index),
+            "requestId": request_id,
         }
+        query.update(runtime_metadata)
         base_ws_url = f"{_to_websocket_base_url(self.settings.vivo_base_url)}{TTS_PATH}"
         ws_url = f"{base_ws_url}?{_build_canonical_query_string(query)}"
         headers = _build_gateway_headers(
@@ -389,6 +430,7 @@ class VivoTtsProvider:
             query=query,
             timestamp=system_time,
         )
+        headers["Authorization"] = f"Bearer {app_key}"
         handshake_context = {
             "profile": profile.label,
             "engine_id": profile.engine_id,
@@ -396,8 +438,10 @@ class VivoTtsProvider:
             "ws_url": _build_redacted_ws_url(base_ws_url, query),
             "query": _build_redacted_query(query),
             "query_keys": sorted(query.keys()),
-            "auth_mode": "x-ai-gateway-signature",
+            "auth_mode": TTS_AUTH_MODE,
             "auth_header_names": sorted(headers.keys()),
+            "runtime_metadata": runtime_metadata,
+            "invalid_runtime_fields": invalid_runtime_fields,
         }
 
         try:
@@ -478,12 +522,20 @@ class VivoTtsProvider:
             status_code = _extract_response_status_code(response)
             response_headers = _extract_response_headers_summary(response)
             response_body = _extract_response_body_summary(response)
+            diagnosis = self._diagnose_handshake_failure(
+                status_code=status_code,
+                response_body=response_body,
+                invalid_runtime_fields=invalid_runtime_fields,
+            )
             summary = {
                 **handshake_context,
                 "stage": "http_handshake",
                 "status_code": status_code,
                 "response_headers": response_headers,
                 "response_body": response_body,
+                "diagnosis": diagnosis,
+                "error_code": self._extract_summary_field(response_body, "error_code"),
+                "error_msg": self._extract_error_message(response_body),
             }
             log_level = logging.ERROR if status_code in {401, 403} else logging.WARNING
             logger.log(log_level, "Vivo TTS websocket handshake failed: %s", _json_debug(summary))
@@ -497,6 +549,9 @@ class VivoTtsProvider:
                     profile=profile.label,
                     engine_id=profile.engine_id,
                     voice_name=profile.voice_name,
+                    diagnosis=diagnosis,
+                    invalid_runtime_fields=invalid_runtime_fields,
+                    runtime_metadata=runtime_metadata,
                     debug=summary,
                 ) from exc
 
@@ -508,6 +563,11 @@ class VivoTtsProvider:
                 profile=profile.label,
                 engine_id=profile.engine_id,
                 voice_name=profile.voice_name,
+                diagnosis=diagnosis,
+                invalid_runtime_fields=invalid_runtime_fields,
+                runtime_metadata=runtime_metadata,
+                error_code=summary.get("error_code"),
+                error_msg=summary.get("error_msg"),
                 response_headers=response_headers,
                 response_body=response_body,
                 debug=summary,
@@ -570,6 +630,57 @@ class VivoTtsProvider:
             seen.add(key)
             profiles.append(profile)
         return profiles
+
+    def _runtime_metadata_query(self) -> dict[str, str]:
+        return {
+            "model": _normalize_runtime_metadata_value(self.settings.storybook_tts_model),
+            "product": _normalize_runtime_metadata_value(self.settings.storybook_tts_product),
+            "package": _normalize_runtime_metadata_value(self.settings.storybook_tts_package),
+            "client_version": _normalize_runtime_metadata_value(self.settings.storybook_tts_client_version),
+            "system_version": _normalize_runtime_metadata_value(self.settings.storybook_tts_system_version),
+            "sdk_version": _normalize_runtime_metadata_value(self.settings.storybook_tts_sdk_version),
+            "android_version": _normalize_runtime_metadata_value(self.settings.storybook_tts_android_version),
+        }
+
+    @staticmethod
+    def _extract_summary_field(summary: dict[str, Any] | str | None, key: str) -> Any:
+        if isinstance(summary, dict):
+            return summary.get(key)
+        return None
+
+    @classmethod
+    def _extract_error_message(cls, summary: dict[str, Any] | str | None) -> str | None:
+        if isinstance(summary, dict):
+            for key in ("error_msg", "message", "preview"):
+                value = _normalize_text(summary.get(key))
+                if value:
+                    return value
+        elif isinstance(summary, str):
+            value = _normalize_text(summary)
+            if value:
+                return value
+        return None
+
+    @classmethod
+    def _diagnose_handshake_failure(
+        cls,
+        *,
+        status_code: int | None,
+        response_body: dict[str, Any] | str | None,
+        invalid_runtime_fields: list[str],
+    ) -> str | None:
+        error_message = (cls._extract_error_message(response_body) or "").casefold()
+        if status_code in {401, 403}:
+            return "auth_failed"
+        if any(token in error_message for token in ("package", "product", "client_version", "sdk_version", "android_version")):
+            if invalid_runtime_fields:
+                return "runtime_profile_missing_or_placeholder"
+            return "runtime_profile_rejected"
+        if status_code == 400 and invalid_runtime_fields:
+            return "runtime_profile_missing_or_placeholder"
+        if status_code == 400:
+            return "bad_request"
+        return None
 
     @staticmethod
     def _recv_json(websocket: Any, *, timeout: float) -> dict[str, Any]:

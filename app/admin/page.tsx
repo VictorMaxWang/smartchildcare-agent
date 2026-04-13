@@ -74,7 +74,7 @@ export default function AdminHomePage() {
       escalatedOnly: true,
     },
   });
-  const dispatchStatusMessage = dispatchAvailable ? "通知派单服务正常" : "通知派单暂不可用";
+  const dispatchStatusMessage = dispatchAvailable ? "可直接创建派单" : "先看优先事项，派单可稍后补建";
   const weeklyReportCacheRef = useRef<Map<string, WeeklyReportResponse>>(new Map());
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReportResponse | null>(null);
   const [weeklyReportLoading, setWeeklyReportLoading] = useState(false);
@@ -217,6 +217,9 @@ export default function AdminHomePage() {
                 "开始一次会诊",
               ]}
               institutionId={currentUser.institutionId}
+              compact
+              initiallyCollapsed
+              collapsedSummary="需要时再展开：查看今天机构最该先处理什么、生成周报，或跳转到园长 AI 助手。"
             />
 
             <MetricGrid

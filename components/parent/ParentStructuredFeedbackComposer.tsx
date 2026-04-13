@@ -108,6 +108,15 @@ interface ParentStructuredFeedbackComposerProps {
   latestFeedback?: GuardianFeedback;
   statusMessage?: string | null;
   notePrefill?: { value: string; token: number } | null;
+  initialSelections?: {
+    executionStatus?: ParentFeedbackExecutionStatus | null;
+    executionCount?: number;
+    executorRole?: ParentFeedbackExecutorRole;
+    childReaction?: ParentFeedbackChildReaction | null;
+    improvementStatus?: ParentFeedbackImprovementStatus | null;
+    barriers?: string[];
+    expandDetails?: boolean;
+  };
   onSubmit: (input: ParentStructuredFeedbackComposerSubmitInput) => Promise<boolean>;
   onSnoozeReminder?: () => void;
   careMode?: boolean;
@@ -127,23 +136,26 @@ export default function ParentStructuredFeedbackComposer({
   latestFeedback,
   statusMessage,
   notePrefill,
+  initialSelections,
   onSubmit,
   onSnoozeReminder,
   careMode = false,
 }: ParentStructuredFeedbackComposerProps) {
   const [executionStatus, setExecutionStatus] =
-    useState<ParentFeedbackExecutionStatus | null>(null);
-  const [executionCount, setExecutionCount] = useState<number | undefined>(1);
+    useState<ParentFeedbackExecutionStatus | null>(() => initialSelections?.executionStatus ?? null);
+  const [executionCount, setExecutionCount] = useState<number | undefined>(() => initialSelections?.executionCount ?? 1);
   const [childReaction, setChildReaction] =
-    useState<ParentFeedbackChildReaction | null>(null);
+    useState<ParentFeedbackChildReaction | null>(() => initialSelections?.childReaction ?? null);
   const [improvementStatus, setImprovementStatus] =
-    useState<ParentFeedbackImprovementStatus | null>(null);
+    useState<ParentFeedbackImprovementStatus | null>(() => initialSelections?.improvementStatus ?? null);
   const [executorRole, setExecutorRole] =
-    useState<ParentFeedbackExecutorRole>("parent");
-  const [barriers, setBarriers] = useState<string[]>([]);
+    useState<ParentFeedbackExecutorRole>(() => initialSelections?.executorRole ?? "parent");
+  const [barriers, setBarriers] = useState<string[]>(() => initialSelections?.barriers ?? []);
   const [notes, setNotes] = useState(() => notePrefill?.value ?? "");
   const [showDetails, setShowDetails] = useState(() =>
-    careMode ? false : Boolean(notePrefill?.value)
+    careMode
+      ? false
+      : Boolean(notePrefill?.value || initialSelections?.expandDetails || (initialSelections?.barriers?.length ?? 0) > 0)
   );
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

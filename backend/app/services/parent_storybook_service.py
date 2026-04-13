@@ -366,12 +366,24 @@ def _serialize_storybook_media_error(error: Exception) -> tuple[str | None, str 
     http_status = getattr(error, "http_status", None)
     if http_status:
         parts.append(f"http={http_status}")
+    profile = _normalize_text(getattr(error, "profile", None))
+    if profile and profile != stage:
+        parts.append(f"profile={profile}")
     engine_id = _normalize_text(getattr(error, "engine_id", None))
     voice_name = _normalize_text(getattr(error, "voice_name", None))
     if engine_id:
         parts.append(f"engine={engine_id}")
     if voice_name:
         parts.append(f"voice={voice_name}")
+    diagnosis = _normalize_text(getattr(error, "diagnosis", None))
+    if diagnosis:
+        parts.append(f"diagnosis={diagnosis}")
+    error_code = getattr(error, "error_code", None)
+    if error_code not in (None, ""):
+        parts.append(f"error_code={error_code}")
+    error_msg = _normalize_text(getattr(error, "error_msg", None))
+    if error_msg:
+        parts.append(f"error_msg={error_msg}")
     reason = " | ".join(part for part in parts if part).strip() or None
     return stage, reason
 

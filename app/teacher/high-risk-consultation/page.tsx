@@ -210,6 +210,7 @@ export default function TeacherHighRiskConsultationPage() {
   const [receivedDone, setReceivedDone] = useState(false);
   const [streamEndedUnexpectedly, setStreamEndedUnexpectedly] = useState(false);
   const [invalidResultReason, setInvalidResultReason] = useState<string | null>(null);
+  const [showSetupSections, setShowSetupSections] = useState(true);
 
   const receivedAnyEventRef = useRef(false);
   const receivedDoneRef = useRef(false);
@@ -300,6 +301,12 @@ export default function TeacherHighRiskConsultationPage() {
   ]);
 
   useEffect(() => () => stop(), [stop]);
+
+  useEffect(() => {
+    if (result) {
+      setShowSetupSections(false);
+    }
+  }, [result]);
 
   async function runConsultation(form: {
     teacherNote: string;
@@ -538,82 +545,128 @@ export default function TeacherHighRiskConsultationPage() {
       <RoleSplitLayout
         main={
           <div className="space-y-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
-            <SectionCard
-              title="1. 锁定会诊对象"
-              description="先选需要升级关注的儿童，再启动会诊流。"
-              actions={existingDraft ? <Badge variant="secondary">{getDraftSyncStatusLabel(existingDraft.syncStatus)}</Badge> : <Badge variant="outline">自动草稿缓存</Badge>}
-            >
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+            {result && !showSetupSections ? (
+              <SectionCard
+                title="已切换到结果优先视图"
+                description="输入与补充说明已收起，方便直接查看三阶段 trace 和最终会诊结论。"
+                actions={<Badge variant="success">截图友好</Badge>}
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="warning">{selectedChild.name}</Badge>
+                    <Badge variant="secondary">{selectedChild.className}</Badge>
+                    <Badge variant="outline">{buildConsultationResultBadge(result)}</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button asChild type="button" variant="outline" className="rounded-full">
+                      <a href="#consultation-trace">查看会诊过程</a>
+                    </Button>
+                    <Button asChild type="button" variant="premium" className="rounded-full">
+                      <a href="#consultation-result">查看最终结果</a>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => setShowSetupSections(true)}
+                    >
+                      重新展开输入
+                    </Button>
+                  </div>
+                </div>
+              </SectionCard>
+            ) : null}
+
+            {showSetupSections ? (
+              <>
+                <SectionCard
+                  title="1. 锁定会诊对象"
+                  description="先选需要升级关注的儿童，再启动会诊流。"
+                  actions={existingDraft ? <Badge variant="secondary">{getDraftSyncStatusLabel(existingDraft.syncStatus)}</Badge> : <Badge variant="outline">自动草稿缓存</Badge>}
+                >
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                    <div className="space-y-4">
+                      <div>
+                        <p className="mb-2 text-sm font-semibold text-slate-900">选择儿童</p>
+                        <Select value={activeChildId} onValueChange={setSelectedChildId}>
+                          <SelectTrigger className="h-12 rounded-2xl">
+                            <SelectValue placeholder="请选择需要会诊的儿童" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {visibleChildren.map((child) => (
+                              <SelectItem key={child.id} value={child.id}>
+                                {child.name} · {child.className}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="warning">高风险主路径</Badge>
+                          <Badge variant="secondary">{selectedChild.className}</Badge>
+                        </div>
+                        <p className="mt-3 text-lg font-semibold text-slate-900">{selectedChild.name}</p>
+                        <p className="mt-2 text-sm text-slate-600">
+                          {getAgeText(selectedChild.birthDate)} · 出生于 {formatDisplayDate(selectedChild.birthDate)}
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {autoContext.focusReasons.map((item) => (
+                            <Badge key={item} variant="warning">
+                              {item}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-3xl border border-slate-100 bg-white p-5">
+                      <p className="text-sm font-semibold text-slate-900">本次自动带入</p>
+                      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                        <li>晨检异常：{autoContext.morningCheckAlerts.length} 条</li>
+                        <li>待复查：{autoContext.pendingReviewNotes.length} 条</li>
+                        <li>成长观察：{autoContext.growthObservationNotes.length} 条</li>
+                        <li>家长反馈：{autoContext.parentFeedbackNotes.length} 条</li>
+                        <li>班级信号：{autoContext.classSignals.length} 条</li>
+                      </ul>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <ConsultationInputCard
+                  key={draftId}
+                  draftId={draftId}
+                  selectedChildName={selectedChild.name}
+                  className={autoContext.className}
+                  draftPayload={existingDraftPayload}
+                  saveMobileDraft={saveMobileDraft}
+                  onStart={(form) => void runConsultation(form)}
+                />
+              </>
+            ) : null}
+
+            {result && showSetupSections ? (
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" className="rounded-full" onClick={() => setShowSetupSections(false)}>
+                  只看结果视图
+                </Button>
+              </div>
+            ) : null}
+
+            <div id="consultation-trace">
+              <SectionCard
+                title="3. 流式会诊展示"
+                description="这里会按阶段展示会诊过程，适合老师讲解与录屏。"
+                actions={activeStage ? <Badge variant="info">{getConsultationStageLabel(activeStage)}</Badge> : <Badge variant="outline">待启动</Badge>}
+              >
                 <div className="space-y-4">
-                  <div>
-                    <p className="mb-2 text-sm font-semibold text-slate-900">选择儿童</p>
-                    <Select value={activeChildId} onValueChange={setSelectedChildId}>
-                      <SelectTrigger className="h-12 rounded-2xl">
-                        <SelectValue placeholder="请选择需要会诊的儿童" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {visibleChildren.map((child) => (
-                          <SelectItem key={child.id} value={child.id}>
-                            {child.name} · {child.className}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="warning">高风险主路径</Badge>
-                      <Badge variant="secondary">{selectedChild.className}</Badge>
-                    </div>
-                    <p className="mt-3 text-lg font-semibold text-slate-900">{selectedChild.name}</p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      {getAgeText(selectedChild.birthDate)} · 出生于 {formatDisplayDate(selectedChild.birthDate)}
-                    </p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {autoContext.focusReasons.map((item) => (
-                        <Badge key={item} variant="warning">
-                          {item}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
+                  {traceMode === "debug" ? <ConsultationQaPanel viewModel={traceViewModel} activeCase={traceCase} /> : null}
+                  <ConsultationTracePanel viewModel={traceViewModel} headerActions={traceHeaderActions} />
                 </div>
-                <div className="rounded-3xl border border-slate-100 bg-white p-5">
-                  <p className="text-sm font-semibold text-slate-900">本次自动带入</p>
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                    <li>晨检异常：{autoContext.morningCheckAlerts.length} 条</li>
-                    <li>待复查：{autoContext.pendingReviewNotes.length} 条</li>
-                    <li>成长观察：{autoContext.growthObservationNotes.length} 条</li>
-                    <li>家长反馈：{autoContext.parentFeedbackNotes.length} 条</li>
-                    <li>班级信号：{autoContext.classSignals.length} 条</li>
-                  </ul>
-                </div>
-              </div>
-            </SectionCard>
-
-            <ConsultationInputCard
-              key={draftId}
-              draftId={draftId}
-              selectedChildName={selectedChild.name}
-              className={autoContext.className}
-              draftPayload={existingDraftPayload}
-              saveMobileDraft={saveMobileDraft}
-              onStart={(form) => void runConsultation(form)}
-            />
-
-            <SectionCard
-              title="3. 流式会诊展示"
-              description="这里会按阶段展示会诊过程，适合老师讲解与录屏。"
-              actions={activeStage ? <Badge variant="info">{getConsultationStageLabel(activeStage)}</Badge> : <Badge variant="outline">待启动</Badge>}
-            >
-              <div className="space-y-4">
-                {traceMode === "debug" ? <ConsultationQaPanel viewModel={traceViewModel} activeCase={traceCase} /> : null}
-                <ConsultationTracePanel viewModel={traceViewModel} headerActions={traceHeaderActions} />
-              </div>
-            </SectionCard>
+              </SectionCard>
+            </div>
 
             {result ? (
-              <>
+              <div id="consultation-result" className="space-y-6">
                 <SectionCard title="4. 最终会诊结论" description="汇总本次会诊结论，方便老师直接确认并继续跟进。">
                   <div className="space-y-4">
                     <div className="rounded-3xl border border-rose-100 bg-linear-to-br from-rose-50 via-white to-amber-50 p-5">
@@ -680,7 +733,7 @@ export default function TeacherHighRiskConsultationPage() {
                     </div>
                   </div>
                 </SectionCard>
-              </>
+              </div>
             ) : null}
           </div>
         }

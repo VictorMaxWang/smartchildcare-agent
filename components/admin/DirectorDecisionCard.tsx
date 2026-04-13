@@ -290,8 +290,8 @@ export default function DirectorDecisionCard({
           </div>
 
           {!dispatchAvailable ? (
-            <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-              {dispatchStatusMessage ?? "通知派单暂不可用，当前仅保留只读建议。"}
+            <p className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+              {dispatchStatusMessage ?? "当前先保留这张优先事项卡，派单入口可稍后补建。"}
             </p>
           ) : null}
         </div>

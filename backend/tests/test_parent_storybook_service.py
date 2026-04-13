@@ -5,7 +5,7 @@ from copy import deepcopy
 from threading import Event
 from time import perf_counter
 
-from app.providers.base import ProviderResult
+from app.providers.base import ProviderResponseError, ProviderResult
 from app.services import parent_storybook_service
 from app.services.parent_storybook_service import await_storybook_media_warming, run_parent_storybook
 from app.services.storybook_media_cache import get_storybook_media_cache
@@ -504,8 +504,18 @@ def test_parent_storybook_service_surfaces_media_warm_error_diagnostics(monkeypa
 
         def render_scene(self, **kwargs):
             del kwargs
-            error = RuntimeError("tts handshake failed")
-            error.stage = "tts_handshake"  # type: ignore[attr-defined]
+            error = ProviderResponseError(
+                "Vivo TTS websocket handshake failed with status 400; "
+                "profile=primary, engine=short_audio_synthesis_jovi, voice=yige, "
+                "diagnosis=runtime_profile_rejected, error_code=10000, error_msg=package not exist"
+            )
+            error.profile = "primary"  # type: ignore[attr-defined]
+            error.engine_id = "short_audio_synthesis_jovi"  # type: ignore[attr-defined]
+            error.voice_name = "yige"  # type: ignore[attr-defined]
+            error.http_status = 400  # type: ignore[attr-defined]
+            error.error_code = 10000  # type: ignore[attr-defined]
+            error.error_msg = "package not exist"  # type: ignore[attr-defined]
+            error.diagnosis = "runtime_profile_rejected"  # type: ignore[attr-defined]
             raise error
 
     monkeypatch.setattr(
@@ -524,8 +534,13 @@ def test_parent_storybook_service_surfaces_media_warm_error_diagnostics(monkeypa
     warm_job = parent_storybook_service._get_storybook_media_warm_job(first["storyId"])
     assert warm_job is not None
     assert warm_job.audio.error_scene_count == len(first["scenes"])
-    assert warm_job.audio.last_error_stage == "tts_handshake"
-    assert "tts handshake failed" in (warm_job.audio.last_error_reason or "")
+    assert warm_job.audio.last_error_stage == "primary"
+    assert "http=400" in (warm_job.audio.last_error_reason or "")
+    assert "engine=short_audio_synthesis_jovi" in (warm_job.audio.last_error_reason or "")
+    assert "voice=yige" in (warm_job.audio.last_error_reason or "")
+    assert "diagnosis=runtime_profile_rejected" in (warm_job.audio.last_error_reason or "")
+    assert "error_code=10000" in (warm_job.audio.last_error_reason or "")
+    assert "error_msg=package not exist" in (warm_job.audio.last_error_reason or "")
 
     diagnostics = parent_storybook_service._resolve_media_diagnostics(
         story_id=first["storyId"],
@@ -537,8 +552,13 @@ def test_parent_storybook_service_surfaces_media_warm_error_diagnostics(monkeypa
     )
     assert diagnostics["audio"]["jobStatus"] == "error"
     assert diagnostics["audio"]["errorSceneCount"] == len(first["scenes"])
-    assert diagnostics["audio"]["lastErrorStage"] == "tts_handshake"
-    assert "tts handshake failed" in (diagnostics["audio"]["lastErrorReason"] or "")
+    assert diagnostics["audio"]["lastErrorStage"] == "primary"
+    assert "http=400" in (diagnostics["audio"]["lastErrorReason"] or "")
+    assert "engine=short_audio_synthesis_jovi" in (diagnostics["audio"]["lastErrorReason"] or "")
+    assert "voice=yige" in (diagnostics["audio"]["lastErrorReason"] or "")
+    assert "diagnosis=runtime_profile_rejected" in (diagnostics["audio"]["lastErrorReason"] or "")
+    assert "error_code=10000" in (diagnostics["audio"]["lastErrorReason"] or "")
+    assert "error_msg=package not exist" in (diagnostics["audio"]["lastErrorReason"] or "")
 
 
 def test_parent_storybook_service_degrades_to_card_when_context_is_sparse():

@@ -23,6 +23,8 @@ type UnifiedIntentEntryCardProps = {
   childId?: string;
   institutionId?: string;
   compact?: boolean;
+  initiallyCollapsed?: boolean;
+  collapsedSummary?: string;
   className?: string;
 };
 
@@ -44,12 +46,15 @@ export default function UnifiedIntentEntryCard({
   childId,
   institutionId,
   compact = false,
+  initiallyCollapsed = false,
+  collapsedSummary,
   className,
 }: UnifiedIntentEntryCardProps) {
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<IntentRouterResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(!initiallyCollapsed);
   const requestAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -57,6 +62,12 @@ export default function UnifiedIntentEntryCard({
       requestAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (result || error || message.trim()) {
+      setExpanded(true);
+    }
+  }, [error, message, result]);
 
   async function submitIntent(nextMessage: string) {
     const trimmedMessage = nextMessage.trim();
@@ -120,58 +131,106 @@ export default function UnifiedIntentEntryCard({
       }
     >
       <div className="space-y-4">
-        <div className="space-y-3">
-          <Textarea
-            value={message}
-            onChange={(event) => {
-              setMessage(event.target.value);
-              if (error) {
-                setError(null);
-              }
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void submitIntent(message);
-              }
-            }}
-            placeholder={placeholder}
-            className={cn(
-              "rounded-3xl border-white/80 bg-white/90 shadow-sm",
-              compact ? "min-h-20" : "min-h-24"
-            )}
-          />
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
-              {examples.slice(0, compact ? 3 : 4).map((example) => (
-                <Button
-                  key={example}
-                  type="button"
-                  variant="outline"
-                  className="rounded-full border-indigo-200 bg-white/80 text-slate-700 hover:bg-indigo-50"
-                  disabled={loading}
-                  onClick={() => void submitIntent(example)}
-                >
-                  {example}
-                </Button>
-              ))}
+        {!expanded ? (
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-3">
+              <p className="text-sm leading-6 text-slate-600">
+                {collapsedSummary ?? ROLE_HELPER_TEXT[roleHint]}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {examples.slice(0, compact ? 2 : 3).map((example) => (
+                  <Button
+                    key={example}
+                    type="button"
+                    variant="outline"
+                    className="rounded-full border-indigo-200 bg-white/80 text-slate-700 hover:bg-indigo-50"
+                    disabled={loading}
+                    onClick={() => void submitIntent(example)}
+                  >
+                    {example}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <Button
               type="button"
               variant="premium"
               className="min-h-11 rounded-xl px-4"
-              disabled={loading || message.trim().length === 0}
-              onClick={() => void submitIntent(message)}
+              onClick={() => setExpanded(true)}
             >
-              <Send className="mr-2 h-4 w-4" />
-              {"\u95ee\u4e00\u53e5"}
+              <Sparkles className="mr-2 h-4 w-4" />
+              展开统一入口
             </Button>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-3">
+            <Textarea
+              value={message}
+              onChange={(event) => {
+                setMessage(event.target.value);
+                if (error) {
+                  setError(null);
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submitIntent(message);
+                }
+              }}
+              placeholder={placeholder}
+              className={cn(
+                "rounded-3xl border-white/80 bg-white/90 shadow-sm",
+                compact ? "min-h-20" : "min-h-24"
+              )}
+            />
 
-        <IntentResultPreviewCard result={result} loading={loading} error={error} />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                {examples.slice(0, compact ? 3 : 4).map((example) => (
+                  <Button
+                    key={example}
+                    type="button"
+                    variant="outline"
+                    className="rounded-full border-indigo-200 bg-white/80 text-slate-700 hover:bg-indigo-50"
+                    disabled={loading}
+                    onClick={() => void submitIntent(example)}
+                  >
+                    {example}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {initiallyCollapsed ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl px-4"
+                    onClick={() => setExpanded(false)}
+                  >
+                    收起
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="premium"
+                  className="min-h-11 rounded-xl px-4"
+                  disabled={loading || message.trim().length === 0}
+                  onClick={() => void submitIntent(message)}
+                >
+                  <Send className="mr-2 h-4 w-4" />
+                  {"\u95ee\u4e00\u53e5"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(result || loading || error) ? (
+          <IntentResultPreviewCard result={result} loading={loading} error={error} />
+        ) : null}
       </div>
     </SectionCard>
   );

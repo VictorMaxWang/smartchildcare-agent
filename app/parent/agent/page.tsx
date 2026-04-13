@@ -211,6 +211,32 @@ export default function ParentAgentPage() {
   );
   const displayInterventionCard = currentResult?.interventionCard ?? latestInterventionCard;
   const displayConsultation = currentResult?.consultation ?? latestConsultation;
+  const feedbackInitialSelections = useMemo(() => {
+    const latestFeedback = selectedFeed?.latestFeedback;
+    if (latestFeedback) {
+      return {
+        executionStatus: latestFeedback.executionStatus ?? "partial",
+        executionCount: latestFeedback.executionCount ?? 1,
+        executorRole: latestFeedback.executorRole ?? "parent",
+        childReaction: latestFeedback.childReaction ?? "accepted",
+        improvementStatus: latestFeedback.improvementStatus ?? "slight_improvement",
+        barriers: latestFeedback.barriers ?? [],
+        expandDetails: Boolean(latestFeedback.freeNote),
+      };
+    }
+
+    if (!displayInterventionCard) {
+      return undefined;
+    }
+
+    return {
+      executionStatus: "partial" as const,
+      executionCount: 1,
+      executorRole: "parent" as const,
+      childReaction: "accepted" as const,
+      improvementStatus: "slight_improvement" as const,
+    };
+  }, [displayInterventionCard, selectedFeed?.latestFeedback]);
   const structuredFeedbackTaskContext = useMemo(() => {
     if (!selectedFeed || !displayInterventionCard) return null;
 
@@ -436,6 +462,46 @@ export default function ParentAgentPage() {
     [normalizeTrendFailureMessage, readRouteError]
   );
 
+  const normalizeParentMessageFailureMessage = useCallback((message: string, status?: number) => {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return "已先展示当前建议，补充说明会在稍后继续完善。";
+    }
+
+    const lower = trimmed.toLowerCase();
+    const looksLikeServiceUnavailable =
+      status === 503 ||
+      trimmed.includes("FastAPI brain") ||
+      lower.includes("brain") ||
+      lower.includes("reflexion") ||
+      trimmed.includes("后端") ||
+      trimmed.includes("未接通");
+    if (looksLikeServiceUnavailable) {
+      return "已先展示当前建议，补充说明会在服务恢复后继续完善。";
+    }
+
+    if (status === 504 || lower.includes("timeout") || trimmed.includes("超时")) {
+      return "已先展示当前建议，补充说明生成得比平时慢一些，请稍后再看。";
+    }
+
+    if (lower.includes("fallback") || trimmed.includes("回退") || trimmed.includes("降级")) {
+      return "已先展示当前可用建议，补充说明会继续按后续反馈更新。";
+    }
+
+    return sanitizeParentFacingText(trimmed);
+  }, []);
+
+  const readParentMessageRouteError = useCallback(
+    async (response: Response) => {
+      const rawMessage = await readRouteError(
+        response,
+        "已先展示当前建议，补充说明会在稍后继续完善。"
+      );
+      return normalizeParentMessageFailureMessage(rawMessage, response.status);
+    },
+    [normalizeParentMessageFailureMessage, readRouteError]
+  );
+
   const enrichParentMessageResult = useCallback(async (params: {
     context: ParentAgentChildContext;
     snapshotPayload: ChildSuggestionSnapshot;
@@ -466,12 +532,7 @@ export default function ParentAgentPage() {
       });
 
       if (!response.ok) {
-        throw new Error(
-          await readRouteError(
-            response,
-            "暂时无法补充更完整的家长说明，先展示当前可用建议。"
-          )
-        );
+        throw new Error(await readParentMessageRouteError(response));
       }
 
       const data = (await response.json()) as ParentMessageReflexionResponse;
@@ -513,9 +574,11 @@ export default function ParentAgentPage() {
       }
 
       setParentMessageStatus(
-        error instanceof Error
-          ? error.message
-          : "暂时无法补充更完整的家长说明，先展示当前可用建议。"
+        normalizeParentMessageFailureMessage(
+          error instanceof Error
+            ? error.message
+            : "已先展示当前建议，补充说明会在稍后继续完善。"
+        )
       );
     } finally {
       if (
@@ -528,7 +591,7 @@ export default function ParentAgentPage() {
         reflexionAbortRef.current = null;
       }
     }
-  }, [readRouteError]);
+  }, [normalizeParentMessageFailureMessage, readParentMessageRouteError]);
 
   const submitTrendQuery = useCallback(async (nextQuestion: string) => {
     if (!selectedFeed) return;
@@ -933,6 +996,7 @@ export default function ParentAgentPage() {
                     latestFeedback={selectedFeed.latestFeedback}
                     statusMessage={feedbackStatus}
                     notePrefill={feedbackNotePrefill}
+                    initialSelections={feedbackInitialSelections}
                     onSubmit={submitStructuredFeedback}
                     onSnoozeReminder={snoozeFamilyReminder}
                   />
@@ -1662,6 +1726,7 @@ export default function ParentAgentPage() {
                   latestFeedback={selectedFeed.latestFeedback}
                   statusMessage={feedbackStatus}
                   notePrefill={feedbackNotePrefill}
+                  initialSelections={feedbackInitialSelections}
                   onSubmit={submitStructuredFeedback}
                   onSnoozeReminder={snoozeFamilyReminder}
                 />

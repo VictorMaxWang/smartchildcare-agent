@@ -43,7 +43,6 @@ import {
   formatStoryBookClientCache,
   formatStoryBookFallbackReason,
   formatStoryBookHighlightSource,
-  formatStoryBookProviderLabel,
   formatStoryBookResponseCache,
   formatStoryBookSceneImageDelivery,
   formatStoryBookVoiceStyle,
@@ -878,17 +877,17 @@ function getStoryAudioRuntimeLabelHotfix(
   canUseLocalSpeech = false
 ) {
   if (audioDelivery === "local-speech") {
-    return "当前为本地补读";
+    return "可用本机朗读";
   }
   if (audioDelivery === "real" || audioDelivery === "stream-url" || audioDelivery === "inline-data-url") {
-    return "真实逐页朗读";
+    return "可播放整本朗读";
   }
   if (audioDelivery === "mixed") {
-    return canUseLocalSpeech ? "部分真实朗读 + 本地补读" : "部分真实朗读 + 字幕预演";
+    return canUseLocalSpeech ? "部分页面可朗读" : "部分页面带朗读";
   }
   return canUseLocalSpeech
-    ? "后端真实朗读未命中，当前将使用本地补读"
-    : "后端真实朗读未命中，当前仅字幕预演";
+    ? "当前先用本机朗读"
+    : "当前先看字幕版";
 }
 
 export function getRuntimeBannerItemsHotfix(
@@ -908,105 +907,95 @@ export function getRuntimeBannerItemsHotfix(
   const imageDelivery = runtimeState.imageDelivery;
   const audioDelivery = resolveRuntimeAudioDeliveryHotfix(story);
   const isPlayingLocalFallback = runtimeOverrides?.playbackSource === "local";
-  const brainTimingParts = [
-    diagnostics?.brain?.upstreamHost ? `upstream ${diagnostics.brain.upstreamHost}` : null,
-    typeof diagnostics?.brain?.elapsedMs === "number" ? `elapsed ${diagnostics.brain.elapsedMs}ms` : null,
-    typeof diagnostics?.brain?.timeoutMs === "number" ? `timeout ${diagnostics.brain.timeoutMs}ms` : null,
-  ].filter(Boolean);
-
   if (transport === "remote-brain-proxy") {
     items.push({
       tone: "success",
-      label: "绘本主链路已接通",
-      detail: brainTimingParts.join(" 路 ") || "当前绘本内容来自实时生成链路。",
+      label: "今天的成长故事已生成",
+      detail: "当前看到的是按今天成长线索整理好的版本。",
     });
   } else if (diagnostics?.brain?.reachable === false || transport === "next-json-fallback") {
     items.push({
       tone: "warning",
-      label: "实时生成暂不可用，当前使用本地结果",
+      label: "先为你展示可直接阅读的版本",
       detail: diagnostics?.brain?.fallbackReason
-        ? `当前说明：${formatStoryBookFallbackReason(diagnostics.brain.fallbackReason)}${
-            brainTimingParts.length ? ` 路 ${brainTimingParts.join(" 路 ")}` : ""
-          }`
-        : brainTimingParts.join(" 路 ") || "当前内容暂以本地结果展示。",
+        ? formatStoryBookFallbackReason(diagnostics.brain.fallbackReason)
+        : "实时补全还在继续，这一版已经可以先读先听。",
     });
   } else {
     items.push({
       tone: "info",
-      label: "生成状态待确认",
-      detail: brainTimingParts.join(" 路 ") || "当前还没有收到完整的状态信息。",
+      label: "故事版本已准备好",
+      detail: "如果稍后有更完整的资源，页面会继续补齐。",
     });
   }
 
   if (diagnostics?.image?.jobStatus === "warming") {
     items.push({
       tone: "info",
-      label: "真实图片补齐中",
-      detail: formatWarmProgressDetail(diagnostics.image),
+      label: "插画继续补齐中",
+      detail: "当前先保留可阅读的插画版本。",
     });
   }
 
   if (imageDelivery === "real") {
     items.push({
       tone: "success",
-      label: "真实图片已就绪",
-      detail: "每一页都在显示真实图片结果。",
+      label: "整本插画已准备好",
+      detail: "每一页都能看到完整插画。",
     });
   } else if (imageDelivery === "mixed") {
     items.push({
       tone: "info",
-      label: "图片正在逐步补齐",
-      detail: "部分页面已经更新图片，其余页面先保留补齐结果。",
+      label: "部分页面已换成正式插画",
+      detail: "其余页面先保留可阅读版本，不影响继续看故事。",
     });
   } else if (imageDelivery === "dynamic-fallback") {
     items.push({
       tone: "info",
-      label: "当前图片为动态插画",
-      detail:
-        diagnostics?.image?.lastErrorReason ??
-        "当前展示的是动态剧情插画，不宣称真实图片已命中。",
+      label: "当前先看故事插画版",
+      detail: "插画会继续按故事内容补齐，现在这一版已经可以阅读。",
     });
   } else {
     items.push({
       tone: "warning",
-      label: "当前图片为基础插画",
-      detail: "图片链路尚未就绪，当前先保留基础插画。",
+      label: "当前先保留基础插画",
+      detail: "故事内容已准备好，插画资源会继续补齐。",
     });
   }
 
   if (diagnostics?.audio?.jobStatus === "warming") {
     items.push({
       tone: "info",
-      label: "真实朗读补齐中",
-      detail: formatWarmProgressDetail(diagnostics.audio),
+      label: "朗读资源继续补齐中",
+      detail: "现在已经可以先看字幕版或使用本机朗读。",
     });
   }
 
   if (audioDelivery === "real") {
     items.push({
       tone: "success",
-      label: "真实朗读已就绪",
-      detail: "每一页都会优先播放后端真实朗读。",
+      label: "整本可直接播放朗读",
+      detail: "每一页都会优先播放可用朗读。",
     });
   } else if (audioDelivery === "mixed") {
     items.push({
       tone: "info",
-      label: "音频为 mixed",
+      label: "部分页面已带朗读",
       detail: canUseLocalSpeech
-        ? "部分页面命中真实朗读，其余页面会降级到本地补读。"
-        : "部分页面命中真实朗读，其余页面仍是字幕预演。",
+        ? "其余页面会自动切到本机朗读。"
+        : "其余页面先保留字幕版。",
     });
   } else if (isPlayingLocalFallback) {
     items.push({
       tone: "warning",
-      label: "当前音频为 local speech",
-      detail: "当前听到的是浏览器本地补读，不是后端真实朗读。",
+      label: "当前使用本机朗读",
+      detail: "这台设备会直接帮你把这一页读出来。",
     });
   } else {
     items.push({
       tone: "warning",
-      label: "当前音频未命中真实朗读，仅字幕预演",
-      detail: "当前浏览器也无法提供本地补读，所以只能展示字幕预演。",
+      label: "当前先看字幕版",
+      detail: "朗读资源还在补齐，先不影响阅读故事。",
     });
   }
 
@@ -1052,8 +1041,8 @@ function getRuntimeSceneAudioBadgeLabelHotfix(
     canUseLocalSpeech,
   });
   if (audioDelivery === "real") return "真实朗读";
-  if (audioDelivery === "local-speech") return "本地补读";
-  return "字幕预演";
+  if (audioDelivery === "local-speech") return "本机朗读";
+  return "字幕版";
 }
 
 export default function StoryBookViewer({
@@ -1212,22 +1201,28 @@ export default function StoryBookViewer({
         <Card className={cn("overflow-hidden backdrop-blur-xl", theme.panel)}>
           {story ? (
             <div className="space-y-2 border-b border-white/70 bg-white/60 px-4 py-4 sm:px-5">
-              {runtimeBanners.map((item) => (
-                <div
-                  key={item.label}
-                  className={cn(
-                    "rounded-[22px] border px-4 py-3 text-sm leading-6 shadow-sm",
-                    item.tone === "success"
-                      ? "border-emerald-200 bg-emerald-50/90 text-emerald-950"
-                      : item.tone === "info"
-                        ? "border-sky-200 bg-sky-50/90 text-sky-950"
-                        : "border-amber-200 bg-amber-50/90 text-amber-950"
-                  )}
-                >
-                  <div className="font-semibold">{item.label}</div>
-                  <div className="mt-1 text-xs opacity-80">{item.detail}</div>
-                </div>
-              ))}
+              <div className="flex flex-wrap gap-2">
+                {runtimeBanners.map((item) => (
+                  <Badge
+                    key={item.label}
+                    variant={
+                      item.tone === "success"
+                        ? "success"
+                        : item.tone === "info"
+                          ? "info"
+                          : "warning"
+                    }
+                    className="px-3 py-1"
+                  >
+                    {item.label}
+                  </Badge>
+                ))}
+              </div>
+              {runtimeBanners[0]?.detail ? (
+                <p className="text-xs leading-6 text-slate-500">
+                  {runtimeBanners[0].detail}
+                </p>
+              ) : null}
             </div>
           ) : null}
           <CardHeader className="space-y-4 pb-4">
@@ -1522,13 +1517,13 @@ export default function StoryBookViewer({
                       ) : null}
                     </div>
                     <p className="text-sm leading-7 text-slate-600">
-                      {formatStoryBookProviderLabel("image", story.providerMeta.imageProvider)}
+                      画风：{getStoryBookPresetCopy(story.stylePreset ?? selectedPresetId).label}
                     </p>
                     <p className="text-sm leading-7 text-slate-600">
-                      {formatStoryBookProviderLabel("audio", story.providerMeta.audioProvider)}
+                      来源：{formatStoryBookHighlightSource(story.scenes[0]?.highlightSource)}
                     </p>
                     <p className="text-sm leading-7 text-slate-600">
-                      音频状态：{getStoryAudioRuntimeLabelHotfix(
+                      朗读方式：{getStoryAudioRuntimeLabelHotfix(
                         runtimeState?.audioDelivery ??
                           story.providerMeta.audioDelivery ??
                           story.cacheMeta?.audioDelivery,
