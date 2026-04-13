@@ -5,6 +5,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as Futur
 from dataclasses import dataclass, field
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from threading import Event, Lock
 from time import monotonic, time
@@ -65,7 +66,12 @@ StoryMode = Literal["storybook", "card"]
 GenerationMode = Literal["child-personalized", "manual-theme", "hybrid"]
 StyleMode = Literal["preset", "custom"]
 
-DEFAULT_STYLE_NEGATIVE_PROMPT = "不要照片感、不要写实人脸、不要复杂背景、不要成人化、不要杂乱文字"
+DEFAULT_STYLE_NEGATIVE_PROMPT = "不要照片感、不要写实人脸、不要复杂背景、不要成人化"
+DEFAULT_NO_TEXT_IMAGE_GUARDRAIL = (
+    "不要任何中文、不要任何英文、不要任何数字、不要任何标题、不要任何对话气泡、不要任何对白框、"
+    "不要任何书页文字、不要任何海报排版文字、不要任何logo、不要任何watermark、不要任何水印、"
+    "不要任何signature、不要任何签名、不要任何标识、image-only composition、no readable text、no typography"
+)
 STYLE_PALETTES: dict[str, dict[str, str]] = {
     "sunrise-watercolor": {
         "backgroundStart": "#fff3cf",
@@ -148,6 +154,58 @@ def _coerce_text(value: Any) -> str:
 
 def _normalize_text(value: Any) -> str:
     return " ".join(_coerce_text(value).split())
+
+
+def _split_prompt_clauses(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        result: list[str] = []
+        for item in value:
+            result.extend(_split_prompt_clauses(item))
+        return result
+    text = _normalize_text(value)
+    if not text:
+        return []
+    return [item.strip("：: ") for item in re.split(r"[、，,；;。\n]+", text) if item.strip("：: ")]
+
+
+def _merge_prompt_clauses(*values: Any) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for clause in _split_prompt_clauses(value):
+            key = clause.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(clause)
+    return "、".join(merged)
+
+
+def _extract_style_prompt_body(value: Any) -> str:
+    text = _normalize_text(value)
+    if not text:
+        return ""
+    prefix = "儿童绘本风格方向："
+    if text.startswith(prefix):
+        text = text[len(prefix) :].strip()
+    if "负面约束：" in text:
+        text = text.split("负面约束：", 1)[0].strip()
+    return text.rstrip("。；;，, ")
+
+
+def _extract_style_prompt_negative(value: Any) -> str:
+    text = _normalize_text(value)
+    if "负面约束：" not in text:
+        return ""
+    return text.split("负面约束：", 1)[1].strip().rstrip("。；;，, ")
+
+
+def _build_story_image_negative_prompt(*extra_values: Any) -> str:
+    return _merge_prompt_clauses(
+        DEFAULT_STYLE_NEGATIVE_PROMPT,
+        DEFAULT_NO_TEXT_IMAGE_GUARDRAIL,
+        *extra_values,
+    )
 
 
 def _elapsed_ms(started_at: float, ended_at: float | None = None) -> int:
@@ -446,11 +504,20 @@ def _resolve_style_palette(style_mode: StyleMode, style_preset: str, custom_prom
 def _resolve_style_recipe(payload: dict[str, Any]) -> dict[str, Any]:
     style_preset = _resolve_style_preset(payload)
     style_mode = _resolve_style_mode(payload)
-    explicit = _normalize_text(_payload_get(payload, "stylePrompt", "style_prompt"))
-    custom_prompt = _normalize_text(_payload_get(payload, "customStylePrompt", "custom_style_prompt"))
-    custom_negative = _normalize_text(
+    explicit_raw = _normalize_text(_payload_get(payload, "stylePrompt", "style_prompt"))
+    explicit = _extract_style_prompt_body(explicit_raw)
+    explicit_negative = _extract_style_prompt_negative(explicit_raw)
+    custom_prompt = _extract_style_prompt_body(
+        _normalize_text(_payload_get(payload, "customStylePrompt", "custom_style_prompt"))
+    )
+    custom_negative_raw = _normalize_text(
         _payload_get(payload, "customStyleNegativePrompt", "custom_style_negative_prompt")
     )
+    custom_negative = _merge_prompt_clauses(
+        _extract_style_prompt_negative(custom_negative_raw),
+        custom_negative_raw,
+    )
+    resolved_negative = _build_story_image_negative_prompt(explicit_negative, custom_negative)
 
     if style_mode == "custom":
         resolved_prompt = (
@@ -458,7 +525,6 @@ def _resolve_style_recipe(payload: dict[str, Any]) -> dict[str, Any]:
             or explicit
             or "梦幻儿童绘本，柔焦，浅景深，温柔光影，移动端纵向大画幅"
         )
-        resolved_negative = custom_negative or DEFAULT_STYLE_NEGATIVE_PROMPT
         prompt = f"儿童绘本风格方向：{resolved_prompt}。负面约束：{resolved_negative}。"
         return {
             "mode": style_mode,
@@ -466,15 +532,19 @@ def _resolve_style_recipe(payload: dict[str, Any]) -> dict[str, Any]:
             "prompt": prompt,
             "custom_prompt": resolved_prompt,
             "custom_negative_prompt": resolved_negative,
+            "negative_prompt": resolved_negative,
             "palette": _resolve_style_palette(style_mode, style_preset, resolved_prompt),
         }
 
+    resolved_prompt = explicit or STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET])
+    prompt = f"儿童绘本风格方向：{resolved_prompt}。负面约束：{resolved_negative}。"
     return {
         "mode": style_mode,
         "preset": style_preset,
-        "prompt": explicit or STYLE_PRESET_PROMPTS.get(style_preset, STYLE_PRESET_PROMPTS[DEFAULT_STYLE_PRESET]),
+        "prompt": prompt,
         "custom_prompt": "",
         "custom_negative_prompt": "",
+        "negative_prompt": resolved_negative,
         "palette": _resolve_style_palette(style_mode, style_preset, ""),
     }
 
@@ -1198,6 +1268,13 @@ def _build_task_cue_v2(stage: str, ingredients: dict[str, Any]) -> str:
 
 def _build_scene_blueprint_v2(stage: str, index: int, ingredients: dict[str, Any]) -> dict[str, Any]:
     highlight = _select_highlight_v2(ingredients, index, stage)
+    visual_anchor = _build_visual_anchor_v2(stage, ingredients, highlight)
+    scene_object_cue = _build_scene_object_cue_v2(stage, ingredients, highlight)
+    support_character_cue = _build_support_character_cue_v2(stage, ingredients, highlight)
+    activity_cue = _build_activity_cue_v2(stage, ingredients, highlight)
+    emotion_cue = _build_emotion_cue_v2(stage, ingredients)
+    task_cue = _build_task_cue_v2(stage, ingredients)
+    negative_prompt = _build_story_image_negative_prompt(ingredients["style_recipe"].get("negative_prompt"))
     return {
         "pageIndex": index + 1,
         "stage": stage,
@@ -1208,28 +1285,27 @@ def _build_scene_blueprint_v2(stage: str, index: int, ingredients: dict[str, Any
         "visibleAction": _build_scene_visible_action_v2(stage, ingredients),
         "emotion": _build_scene_emotion_v2(stage),
         "mustInclude": [
-            ingredients["focus_theme"],
-            _normalize_text(highlight.get("title")),
-            _normalize_text(highlight.get("detail")),
-            ingredients["tonight_action"] if stage == "landing" else ingredients["summary_highlight"],
+            visual_anchor,
+            scene_object_cue,
+            support_character_cue,
+            activity_cue,
         ],
         "avoid": [
             "真实孩子正脸",
             "照片感",
             "复杂背景",
             "成人化",
-            "杂乱文字",
-            ingredients["style_recipe"].get("custom_negative_prompt") or DEFAULT_STYLE_NEGATIVE_PROMPT,
+            *_split_prompt_clauses(negative_prompt),
         ],
         "narrativeAnchor": _build_scene_narrative_anchor_v2(stage, ingredients, highlight),
         "highlightSource": _normalize_text(highlight.get("source")) or _normalize_text(highlight.get("kind")) or "rule",
         "voiceStyle": _build_scene_voice_style(stage),
-        "visualAnchor": _build_visual_anchor_v2(stage, ingredients, highlight),
-        "sceneObjectCue": _build_scene_object_cue_v2(stage, ingredients, highlight),
-        "supportCharacterCue": _build_support_character_cue_v2(stage, ingredients, highlight),
-        "activityCue": _build_activity_cue_v2(stage, ingredients, highlight),
-        "emotionCue": _build_emotion_cue_v2(stage, ingredients),
-        "taskCue": _build_task_cue_v2(stage, ingredients),
+        "visualAnchor": visual_anchor,
+        "sceneObjectCue": scene_object_cue,
+        "supportCharacterCue": support_character_cue,
+        "activityCue": activity_cue,
+        "emotionCue": emotion_cue,
+        "taskCue": task_cue,
     }
 
 
@@ -1259,25 +1335,27 @@ def _build_scene_audio_script_v2(blueprint: dict[str, Any], scene_text: str) -> 
 
 
 def _build_scene_image_prompt_v2(blueprint: dict[str, Any], ingredients: dict[str, Any]) -> str:
+    negative_prompt = _build_story_image_negative_prompt(
+        blueprint["avoid"],
+        ingredients["style_recipe"].get("negative_prompt"),
+    )
     return "；".join(
         [
             ingredients["style_recipe"]["prompt"],
-            "儿童成长绘本插画，纵向大画幅，适合移动端整页展示",
-            f"主角：拟人{blueprint['protagonist']['archetype']}小动物“{blueprint['protagonist']['label']}”，视觉特征{blueprint['protagonist']['visual_cue']}",
+            "儿童成长绘本场景插画，纯画面叙事，只表现角色、场景、动作与情绪",
+            f"成长主题氛围：{ingredients['focus_theme']}",
+            f"主角设定：拟人{blueprint['protagonist']['archetype']}小动物，视觉特征{blueprint['protagonist']['visual_cue']}",
             f"场景地点：{blueprint['environment']}",
             f"动作：{blueprint['visibleAction']}",
             f"情绪与表情：{blueprint['emotion']}",
-            f"本页画面目标：{blueprint['sceneGoal']}",
-            f"叙事锚点：{blueprint['narrativeAnchor']}",
-            f"视觉锚点：{blueprint['visualAnchor']}",
-            f"场景物件：{blueprint['sceneObjectCue']}",
-            f"辅助角色：{blueprint['supportCharacterCue']}",
+            f"画面焦点：{blueprint['visualAnchor']}",
+            f"关键道具：{blueprint['sceneObjectCue']}",
+            f"陪伴关系：{blueprint['supportCharacterCue']}",
             f"活动线索：{blueprint['activityCue']}",
             f"情绪线索：{blueprint['emotionCue']}",
-            f"任务线索：{blueprint['taskCue']}",
-            f"必须出现：{'、'.join([item for item in blueprint['mustInclude'] if item])}",
-            "构图：纵向大画幅，主角明确，前景简洁，适合绘本单页观看",
-            f"禁止项：{'、'.join(dict.fromkeys([item for item in blueprint['avoid'] if item]))}",
+            f"收尾动作：{blueprint['taskCue']}",
+            "构图：主角明确，前景简洁，背景克制，突出人物关系与动作瞬间",
+            f"严格禁止任何文字元素：{negative_prompt}",
         ]
     )
 

@@ -8,6 +8,10 @@ import {
   buildAdminWeeklyReportResultWithMemory,
   buildAdminWeeklyReportSnapshotWithMemory,
 } from "@/lib/agent/admin-agent";
+import {
+  sanitizeAdminWeeklyReportResponseForAdmin,
+  sanitizeAdminWeeklyResult,
+} from "@/lib/agent/admin-weekly-sanitize";
 import type {
   AdminAgentRequestPayload,
   AdminAgentResult,
@@ -116,51 +120,22 @@ function extractWeeklyReportResponse(value: unknown): WeeklyReportResponse | nul
   return isWeeklyReportResponse(report) ? report : null;
 }
 
-function takeUniqueStrings(items: string[], limit: number) {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const item of items) {
-    const normalized = item.trim();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    result.push(normalized);
-    if (result.length >= limit) break;
-  }
-
-  return result;
-}
-
 function normalizeWeeklyProxyResult(
   payload: AdminAgentRequestPayload,
   raw: unknown
 ): AdminAgentResult | null {
   if (isAdminAgentResult(raw)) {
-    return raw;
+    return sanitizeAdminWeeklyResult(raw);
   }
 
   const report = extractWeeklyReportResponse(raw);
   if (!report) return null;
 
   const context = buildAdminAgentContext(payload);
-  const normalized = buildAdminWeeklyReportResult({
+  return buildAdminWeeklyReportResult({
     context,
-    report,
+    report: sanitizeAdminWeeklyReportResponseForAdmin(report),
   });
-
-  return {
-    ...normalized,
-    summary:
-      report.continuityNotes && report.continuityNotes.length > 0
-        ? `${report.continuityNotes[0]} ${normalized.summary}`
-        : normalized.summary,
-    highlights: takeUniqueStrings(
-      [...(report.continuityNotes ?? []), ...normalized.highlights],
-      5
-    ),
-    continuityNotes: report.continuityNotes,
-    memoryMeta: report.memoryMeta,
-  };
 }
 
 function buildNormalizedProxyResponse(upstream: Response, data: AdminAgentResult) {
@@ -278,5 +253,5 @@ export async function POST(request: Request) {
     memoryContexts: weeklyMemoryContexts,
   });
 
-  return NextResponse.json(result, { status: 200 });
+  return NextResponse.json(sanitizeAdminWeeklyResult(result), { status: 200 });
 }

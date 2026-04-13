@@ -19,6 +19,11 @@ import {
   type AdminRecommendedOwnerMapEntry,
   type InstitutionPriorityItem,
 } from "@/lib/agent/admin-types";
+import {
+  sanitizeAdminWeeklyReportResponseForAdmin,
+  sanitizeAdminWeeklyResult,
+  sanitizeAdminWeeklyTexts,
+} from "@/lib/agent/admin-weekly-sanitize";
 import { buildInstitutionPriorityEngine } from "@/lib/agent/priority-engine";
 import { getLocalToday, isDateWithinLastDays } from "@/lib/date";
 import {
@@ -707,41 +712,43 @@ export function buildAdminWeeklyReportResult(params: {
   context: AdminAgentContext;
   report: WeeklyReportResponse;
 }): AdminAgentResult {
-  const actionItems = params.context.actionItems.slice(0, Math.max(3, params.report.nextWeekActions.length)).map(
+  const report = sanitizeAdminWeeklyReportResponseForAdmin(params.report);
+  const actionItems = params.context.actionItems.slice(0, Math.max(3, report.nextWeekActions.length)).map(
     (item, index) =>
-      params.report.nextWeekActions[index]
+      report.nextWeekActions[index]
         ? {
             ...item,
-            action: params.report.nextWeekActions[index],
-            summary: `${item.ownerLabel}在${item.deadline}前推进：${params.report.nextWeekActions[index]}`,
+            action: report.nextWeekActions[index],
+            summary: `${item.ownerLabel}在${item.deadline}前推进：${report.nextWeekActions[index]}`,
           }
         : item
   );
 
-  return {
+  return sanitizeAdminWeeklyResult({
     title: "本周机构运营周报",
-    summary: params.report.summary,
+    summary: report.summary,
     assistantAnswer:
-      params.report.nextWeekActions[0]
-        ? `${params.report.summary} 下周最值得先推动的动作是：${params.report.nextWeekActions[0]}`
-        : params.report.summary,
+      report.nextWeekActions[0]
+        ? `${report.summary} 下周最值得先推动的动作是：${report.nextWeekActions[0]}`
+        : report.summary,
     institutionScope: params.context.institutionScope,
     priorityTopItems: params.context.priorityTopItems.slice(0, 5),
     riskChildren: params.context.riskChildren.slice(0, 5),
     riskClasses: params.context.riskClasses.slice(0, 4),
     feedbackRiskItems: params.context.feedbackRiskItems.slice(0, 4),
     highlights: takeUnique(
-      [...params.report.highlights, ...params.report.risks, ...params.context.highlights],
+      [...report.highlights, ...report.risks, ...params.context.highlights],
       5
     ),
     actionItems,
     recommendedOwnerMap: buildRecommendedOwnerMap(actionItems),
     quickQuestions: params.context.quickQuestions,
     notificationEvents: params.context.notificationEvents.slice(0, 6),
-    source: params.report.source,
-    model: params.report.model,
+    continuityNotes: report.continuityNotes,
+    source: report.source,
+    model: report.model,
     generatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 export function buildAdminWeeklyReportSnapshotWithMemory(
@@ -751,13 +758,23 @@ export function buildAdminWeeklyReportSnapshotWithMemory(
 ): WeeklyReportSnapshot {
   const snapshot = buildAdminWeeklyReportSnapshot(payload, context);
   const promptMemoryContext = mergePromptMemoryContexts(memoryContexts.map((item) => item?.promptContext));
-  const continuityNotes = buildContinuityNotes(context.institutionScope.institutionName, promptMemoryContext);
+  const sanitizedMemoryContext = {
+    ...promptMemoryContext,
+    longTermTraits: sanitizeAdminWeeklyTexts(promptMemoryContext.longTermTraits, 4),
+    recentContinuitySignals: sanitizeAdminWeeklyTexts(promptMemoryContext.recentContinuitySignals, 4),
+    lastConsultationTakeaways: sanitizeAdminWeeklyTexts(promptMemoryContext.lastConsultationTakeaways, 4),
+    openLoops: sanitizeAdminWeeklyTexts(promptMemoryContext.openLoops, 4),
+  };
+  const continuityNotes = sanitizeAdminWeeklyTexts(
+    buildContinuityNotes(context.institutionScope.institutionName, sanitizedMemoryContext),
+    4
+  );
 
   return {
     ...snapshot,
     highlights: takeUnique([...snapshot.highlights, ...continuityNotes.slice(0, 2)], 5),
-    risks: takeUnique([...snapshot.risks, ...promptMemoryContext.openLoops.slice(0, 2)], 4),
-    memoryContext: promptMemoryContext,
+    risks: takeUnique([...snapshot.risks, ...sanitizedMemoryContext.openLoops.slice(0, 2)], 4),
+    memoryContext: sanitizedMemoryContext,
     continuityNotes,
   };
 }
@@ -772,16 +789,24 @@ export function buildAdminWeeklyReportResultWithMemory(params: {
     report: params.report,
   });
   const promptMemoryContext = mergePromptMemoryContexts((params.memoryContexts ?? []).map((item) => item?.promptContext));
-  const continuityNotes = buildContinuityNotes(params.context.institutionScope.institutionName, promptMemoryContext);
+  const memoryContinuityNotes = sanitizeAdminWeeklyTexts(
+    buildContinuityNotes(params.context.institutionScope.institutionName, {
+      ...promptMemoryContext,
+      longTermTraits: sanitizeAdminWeeklyTexts(promptMemoryContext.longTermTraits, 4),
+      recentContinuitySignals: sanitizeAdminWeeklyTexts(promptMemoryContext.recentContinuitySignals, 4),
+      lastConsultationTakeaways: sanitizeAdminWeeklyTexts(promptMemoryContext.lastConsultationTakeaways, 4),
+      openLoops: sanitizeAdminWeeklyTexts(promptMemoryContext.openLoops, 4),
+    }),
+    4
+  );
+  const continuityNotes = takeUnique([...(result.continuityNotes ?? []), ...memoryContinuityNotes], 4);
   const memoryMeta = mergeMemoryMeta(params.memoryContexts ?? []);
 
-  return {
+  return sanitizeAdminWeeklyResult({
     ...result,
-    summary: continuityNotes[0] ? `${continuityNotes[0]} ${result.summary}` : result.summary,
-    highlights: takeUnique([...continuityNotes, ...result.highlights], 5),
     continuityNotes,
     memoryMeta,
-  };
+  });
 }
 
 export function attachNotificationEventToResult(

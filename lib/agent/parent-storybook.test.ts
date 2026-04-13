@@ -194,7 +194,11 @@ test("hybrid storybook threads theme and child context into scene text prompt an
   assert.ok(response.scenes.some((scene) => scene.sceneText.includes("表达情绪")));
   assert.ok(response.scenes.some((scene) => scene.sceneText.includes("先停一停")));
   assert.ok(response.scenes.some((scene) => scene.imagePrompt.includes("表达情绪")));
-  assert.ok(response.scenes.some((scene) => scene.imagePrompt.includes("先停一停")));
+  assert.ok(response.scenes.every((scene) => scene.imagePrompt.includes("不要任何中文")));
+  assert.ok(response.scenes.every((scene) => scene.imagePrompt.includes("image-only composition")));
+  assert.ok(response.scenes.every((scene) => !scene.imagePrompt.includes("本页画面目标")));
+  assert.ok(response.scenes.every((scene) => !scene.imagePrompt.includes("叙事锚点")));
+  assert.ok(response.scenes.every((scene) => !scene.imagePrompt.includes("必须出现")));
   assert.ok(response.scenes.some((scene) => scene.audioScript.includes("表达情绪")));
   assert.ok(response.scenes.some((scene) => scene.audioScript.includes("先停一停")));
 });
@@ -212,6 +216,15 @@ test("custom style overrides preset prompt and reaches image prompt", () => {
   );
 
   assert.ok(response.scenes[0]?.imagePrompt.includes("梦幻3D儿童绘本"));
+  assert.ok(response.scenes[0]?.imagePrompt.includes("不要照片感"));
+  assert.ok(response.scenes[0]?.imagePrompt.includes("不要任何中文"));
+  assert.ok(response.scenes[0]?.imagePrompt.includes("不要任何英文"));
+  assert.ok(response.scenes[0]?.imagePrompt.includes("不要任何数字"));
+  assert.ok(response.scenes[0]?.imagePrompt.includes("不要任何对话气泡"));
+  assert.ok(response.scenes[0]?.imagePrompt.includes("image-only composition"));
+  assert.ok(!response.scenes[0]?.imagePrompt.includes("分镜标题"));
+  assert.ok(!response.scenes[0]?.imagePrompt.includes("文案核心"));
+  assert.ok(!response.scenes[0]?.imagePrompt.includes("本页画面目标"));
   assert.ok(!response.scenes[0]?.imagePrompt.includes("月夜剪纸"));
 });
 

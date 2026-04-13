@@ -9,3 +9,4 @@
 ✓ Starting...
 ✓ Ready in 2.5s
 [BRAIN_PROXY] Falling back for /api/v1/agents/parent/storybook: BRAIN_API_BASE_URL is not configured.
+^C^C

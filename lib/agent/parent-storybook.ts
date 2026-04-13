@@ -126,6 +126,7 @@ type StyleRecipe = {
   mode: ParentStoryBookStyleMode;
   preset: ParentStoryBookStylePreset;
   prompt: string;
+  negativePrompt: string;
   customPrompt?: string;
   customNegativePrompt?: string;
   palette: {
@@ -251,7 +252,9 @@ export const PARENT_STORYBOOK_STYLE_PRESETS: ParentStoryBookStylePresetDefinitio
 ];
 
 const DEFAULT_STYLE_NEGATIVE_PROMPT =
-  "不要照片感、不要写实人脸、不要复杂背景、不要成人化、不要杂乱文字";
+  "不要照片感、不要写实人脸、不要复杂背景、不要成人化";
+const DEFAULT_NO_TEXT_IMAGE_GUARDRAIL =
+  "不要任何中文、不要任何英文、不要任何数字、不要任何标题、不要任何对话气泡、不要任何对白框、不要任何书页文字、不要任何海报排版文字、不要任何logo、不要任何watermark、不要任何水印、不要任何signature、不要任何签名、不要任何标识、image-only composition、no readable text、no typography";
 
 const STYLE_PALETTES: Record<
   ParentStoryBookStylePreset,
@@ -296,6 +299,55 @@ function buildStableTimestamp(seed: string) {
 
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+function splitPromptClauses(value?: string | null) {
+  const normalized = normalizeText(value);
+  if (!normalized) return [];
+  return normalized
+    .split(/[、，,；;。\n]+/u)
+    .map((item) => item.trim().replace(/^[:：]\s*/u, ""))
+    .filter(Boolean);
+}
+
+function mergePromptClauses(...values: Array<string | null | undefined>) {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  values.flatMap((value) => splitPromptClauses(value)).forEach((clause) => {
+    const key = clause.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(clause);
+  });
+  return merged.join("、");
+}
+
+function extractStylePromptBody(value?: string | null) {
+  const normalized = normalizeText(value);
+  if (!normalized) return "";
+  let body = normalized;
+  const prefix = "儿童绘本风格方向：";
+  if (body.startsWith(prefix)) {
+    body = body.slice(prefix.length).trim();
+  }
+  if (body.includes("负面约束：")) {
+    body = body.split("负面约束：", 1)[0] ?? "";
+  }
+  return body.replace(/[。；;，,\s]+$/u, "");
+}
+
+function extractStylePromptNegative(value?: string | null) {
+  const normalized = normalizeText(value);
+  if (!normalized.includes("负面约束：")) return "";
+  return normalized.split("负面约束：").slice(1).join("负面约束：").replace(/[。；;，,\s]+$/u, "");
+}
+
+function buildStoryImageNegativePrompt(...extraValues: Array<string | null | undefined>) {
+  return mergePromptClauses(
+    DEFAULT_STYLE_NEGATIVE_PROMPT,
+    DEFAULT_NO_TEXT_IMAGE_GUARDRAIL,
+    ...extraValues
+  );
 }
 
 function normalizeKeywords(values?: string[] | null) {
@@ -383,31 +435,41 @@ function buildCanonicalStylePrompt(input: {
   const styleMode = resolveParentStoryBookStyleMode(input.styleMode);
   const stylePreset = resolveParentStoryBookStylePreset(input.stylePreset);
   const presetPrompt = getParentStoryBookStylePresetDefinition(stylePreset).stylePrompt;
-  const customPrompt = normalizeText(input.customStylePrompt);
-  const customNegativePrompt = normalizeText(input.customStyleNegativePrompt);
+  const customPrompt = extractStylePromptBody(input.customStylePrompt);
+  const customNegativePrompt = mergePromptClauses(
+    extractStylePromptNegative(input.customStyleNegativePrompt),
+    input.customStyleNegativePrompt
+  );
   const explicitStylePrompt = normalizeText(input.stylePrompt);
+  const explicitPromptBody = extractStylePromptBody(explicitStylePrompt);
+  const explicitNegativePrompt = extractStylePromptNegative(explicitStylePrompt);
+  const resolvedNegativePrompt = buildStoryImageNegativePrompt(
+    explicitNegativePrompt,
+    customNegativePrompt
+  );
 
   if (styleMode === "custom") {
     const prompt =
       customPrompt ||
-      explicitStylePrompt ||
+      explicitPromptBody ||
       "梦幻儿童绘本，柔焦，浅景深，温柔光影，移动端纵向大画幅";
     return {
       mode: styleMode,
       preset: stylePreset,
-      prompt: `儿童绘本风格方向：${prompt}。负面约束：${
-        customNegativePrompt || DEFAULT_STYLE_NEGATIVE_PROMPT
-      }。`,
+      prompt: `儿童绘本风格方向：${prompt}。负面约束：${resolvedNegativePrompt}。`,
+      negativePrompt: resolvedNegativePrompt,
       customPrompt: prompt,
-      customNegativePrompt: customNegativePrompt || DEFAULT_STYLE_NEGATIVE_PROMPT,
+      customNegativePrompt: resolvedNegativePrompt,
       palette: resolveStylePalette(styleMode, stylePreset, prompt),
     } satisfies StyleRecipe;
   }
 
+  const resolvedPrompt = explicitPromptBody || presetPrompt;
   return {
     mode: styleMode,
     preset: stylePreset,
-    prompt: explicitStylePrompt || presetPrompt,
+    prompt: `儿童绘本风格方向：${resolvedPrompt}。负面约束：${resolvedNegativePrompt}。`,
+    negativePrompt: resolvedNegativePrompt,
     customPrompt: undefined,
     customNegativePrompt: undefined,
     palette: resolveStylePalette(styleMode, stylePreset),
@@ -1357,6 +1419,13 @@ function buildSceneBlueprintV2(
     buildSceneTitleV2(stage),
     fallbackDetail
   );
+  const visualAnchor = buildVisualAnchorV2(stage, ingredients, highlight);
+  const sceneObjectCue = buildSceneObjectCueV2(stage, ingredients, highlight);
+  const supportCharacterCue = buildSupportCharacterCueV2(stage, ingredients, highlight);
+  const activityCue = buildActivityCueV2(stage, ingredients, highlight);
+  const emotionCue = buildEmotionCueV2(stage);
+  const taskCue = buildTaskCueV2(stage, ingredients);
+  const negativePrompt = buildStoryImageNegativePrompt(ingredients.styleRecipe.negativePrompt);
 
   return {
     pageIndex: index + 1,
@@ -1368,28 +1437,27 @@ function buildSceneBlueprintV2(
     visibleAction: buildSceneVisibleActionV2(stage, ingredients),
     emotion: buildSceneEmotionV2(stage),
     mustInclude: [
-      ingredients.focusTheme,
-      normalizeText(highlight.title),
-      normalizeText(highlight.detail),
-      stage === "landing" ? ingredients.tonightAction : ingredients.summaryHighlight,
+      visualAnchor,
+      sceneObjectCue,
+      supportCharacterCue,
+      activityCue,
     ].filter(Boolean),
     avoid: [
       "真实孩子正脸",
       "照片感",
       "复杂背景",
       "成人化",
-      "杂乱文字",
-      ingredients.styleRecipe.customNegativePrompt || DEFAULT_STYLE_NEGATIVE_PROMPT,
+      ...splitPromptClauses(negativePrompt),
     ],
     narrativeAnchor: buildSceneNarrativeAnchorV2(stage, ingredients, highlight),
     highlightSource: normalizeText(highlight.source) || highlight.kind,
     voiceStyle: buildSceneVoiceStyle(stage),
-    visualAnchor: buildVisualAnchorV2(stage, ingredients, highlight),
-    sceneObjectCue: buildSceneObjectCueV2(stage, ingredients, highlight),
-    supportCharacterCue: buildSupportCharacterCueV2(stage, ingredients, highlight),
-    activityCue: buildActivityCueV2(stage, ingredients, highlight),
-    emotionCue: buildEmotionCueV2(stage),
-    taskCue: buildTaskCueV2(stage, ingredients),
+    visualAnchor,
+    sceneObjectCue,
+    supportCharacterCue,
+    activityCue,
+    emotionCue,
+    taskCue,
   };
 }
 
@@ -1426,24 +1494,26 @@ function buildSceneImagePromptV2(
   blueprint: SceneBlueprint,
   ingredients: StoryIngredients
 ) {
+  const negativePrompt = buildStoryImageNegativePrompt(
+    blueprint.avoid.join("、"),
+    ingredients.styleRecipe.negativePrompt
+  );
   return [
     ingredients.styleRecipe.prompt,
-    "儿童成长绘本插画，纵向大画幅，适合移动端整页展示",
-    `主角：拟人${blueprint.protagonist.archetype}小动物“${blueprint.protagonist.label}”，视觉特征${blueprint.protagonist.visualCue}`,
+    "儿童成长绘本场景插画，纯画面叙事，只表现角色、场景、动作与情绪",
+    `成长主题氛围：${ingredients.focusTheme}`,
+    `主角设定：拟人${blueprint.protagonist.archetype}小动物，视觉特征${blueprint.protagonist.visualCue}`,
     `场景地点：${blueprint.environment}`,
     `动作：${blueprint.visibleAction}`,
     `情绪与表情：${blueprint.emotion}`,
-    `本页画面目标：${blueprint.sceneGoal}`,
-    `叙事锚点：${blueprint.narrativeAnchor}`,
-    `视觉锚点：${blueprint.visualAnchor}`,
-    `场景物件：${blueprint.sceneObjectCue}`,
-    `辅助角色：${blueprint.supportCharacterCue}`,
+    `画面焦点：${blueprint.visualAnchor}`,
+    `关键道具：${blueprint.sceneObjectCue}`,
+    `陪伴关系：${blueprint.supportCharacterCue}`,
     `活动线索：${blueprint.activityCue}`,
     `情绪线索：${blueprint.emotionCue}`,
-    `任务线索：${blueprint.taskCue}`,
-    `必须出现：${blueprint.mustInclude.join("、")}`,
-    "构图：纵向大画幅，主角明确，前景简洁，适合绘本单页观看",
-    `禁止项：${Array.from(new Set(blueprint.avoid)).join("、")}`,
+    `收尾动作：${blueprint.taskCue}`,
+    "构图：主角明确，前景简洁，背景克制，突出人物关系与动作瞬间",
+    `严格禁止任何文字元素：${negativePrompt}`,
   ].join("；");
 }
 

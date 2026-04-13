@@ -186,6 +186,11 @@ def test_parent_storybook_service_returns_six_page_storybook_by_default():
     assert result["scenes"][0]["imageUrl"].startswith("/api/ai/parent-storybook/media/")
     assert result["scenes"][0]["assetRef"] == result["scenes"][0]["imageUrl"]
     assert result["scenes"][0]["audioScript"]
+    assert "不要任何中文" in result["scenes"][0]["imagePrompt"]
+    assert "image-only composition" in result["scenes"][0]["imagePrompt"]
+    assert "本页画面目标" not in result["scenes"][0]["imagePrompt"]
+    assert "叙事锚点" not in result["scenes"][0]["imagePrompt"]
+    assert "必须出现" not in result["scenes"][0]["imagePrompt"]
     assert result["scenes"][0]["captionTiming"]["mode"] == "duration-derived"
     assert result["providerMeta"]["diagnostics"]["image"]["resolvedProvider"] == "storybook-dynamic-fallback"
     assert result["providerMeta"]["diagnostics"]["audio"]["resolvedProvider"] == "storybook-mock-preview"
@@ -600,7 +605,32 @@ def test_parent_storybook_service_custom_style_overrides_preset_prompt(monkeypat
 
     assert "梦幻3D儿童绘本" in image_provider.calls[0]["image_prompt"]
     assert "不要照片感" in image_provider.calls[0]["image_prompt"]
+    assert "不要任何中文" in image_provider.calls[0]["image_prompt"]
+    assert "image-only composition" in image_provider.calls[0]["image_prompt"]
     assert "月夜剪纸" not in image_provider.calls[0]["image_prompt"]
+    assert "分镜标题" not in image_provider.calls[0]["image_prompt"]
+    assert "文案核心" not in image_provider.calls[0]["image_prompt"]
+    assert "本页画面目标" not in image_provider.calls[0]["image_prompt"]
+
+
+def test_parent_storybook_service_style_recipe_merges_no_text_guardrail():
+    recipe = parent_storybook_service._resolve_style_recipe(
+        {
+            "styleMode": "custom",
+            "customStylePrompt": "梦幻3D儿童绘本，柔焦，电影感光影",
+            "customStyleNegativePrompt": "不要复杂背景、不要水印",
+        }
+    )
+
+    assert recipe["negative_prompt"]
+    assert "不要复杂背景" in recipe["negative_prompt"]
+    assert "不要任何中文" in recipe["negative_prompt"]
+    assert "不要任何英文" in recipe["negative_prompt"]
+    assert "不要任何数字" in recipe["negative_prompt"]
+    assert "不要任何对话气泡" in recipe["negative_prompt"]
+    assert "image-only composition" in recipe["negative_prompt"]
+    assert recipe["prompt"].startswith("儿童绘本风格方向：")
+    assert "负面约束：" in recipe["prompt"]
 
 
 def test_parent_storybook_service_reuses_media_cache(monkeypatch):

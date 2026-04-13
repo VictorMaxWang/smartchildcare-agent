@@ -19,6 +19,11 @@ from app.services.storybook_runtime_cache import get_storybook_runtime_cache
 
 IMAGE_SUBMIT_PATH = "/api/v1/task_submit"
 IMAGE_PROGRESS_PATH = "/api/v1/task_progress"
+DEFAULT_IMAGE_NEGATIVE_PROMPT = (
+    "不要任何中文、不要任何英文、不要任何数字、不要任何标题、不要任何对话气泡、不要任何对白框、"
+    "不要任何书页文字、不要任何海报排版文字、不要任何logo、不要任何watermark、不要任何水印、"
+    "不要任何signature、不要任何签名、不要任何标识、image-only composition、no readable text、no typography"
+)
 
 
 def _normalize_text(value: Any) -> str:
@@ -38,6 +43,15 @@ def _normalize_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [_normalize_text(item) for item in value if _normalize_text(item)]
+
+
+def _ensure_no_text_image_prompt(prompt: str) -> str:
+    normalized = _normalize_text(prompt)
+    if not normalized:
+        normalized = "温柔儿童绘本场景插画，纯画面叙事，只表现人物、场景、动作与情绪"
+    if "image-only composition" in normalized.lower() or "no readable text" in normalized.lower():
+        return normalized
+    return f"{normalized}；严格禁止任何文字元素：{DEFAULT_IMAGE_NEGATIVE_PROMPT}"
 
 
 def _is_success_code(value: Any) -> bool:
@@ -61,12 +75,19 @@ def _build_default_prompt(
     scene_title: str,
     scene_text: str,
 ) -> str:
-    return (
-        f"温柔儿童绘本插图，主角是{child_name}"
-        f"{f'，场景为{class_name}' if class_name else ''}，"
-        f"分镜标题“{scene_title}”，"
-        f"文案核心“{scene_text[:90]}”，"
-        "真实儿童绘本质感，暖黄与浅蓝色调，适合移动端家长睡前阅读。"
+    scene_hint = "温暖教室或家庭陪伴场景" if class_name else "温暖日常陪伴场景"
+    child_hint = child_name or "一位小朋友"
+    visual_hint = _normalize_text(scene_text[:48]) or _normalize_text(scene_title) or "安静的睡前陪伴时刻"
+    return _ensure_no_text_image_prompt(
+        "；".join(
+            [
+                "温柔儿童绘本场景插画，纯画面叙事，只表现人物、场景、动作与情绪",
+                f"主角：{child_hint}",
+                f"场景：{scene_hint}",
+                f"画面线索：围绕{visual_hint}营造温暖陪伴感",
+                "风格：真实儿童绘本质感，暖黄与浅蓝色调，前景简洁，突出角色动作与情绪",
+            ]
+        )
     )
 
 
@@ -125,11 +146,14 @@ class MockStoryImageProvider:
         image_prompt: str | None = None,
     ) -> ProviderResult[dict[str, Any]]:
         del child_id, story_id
-        prompt = image_prompt or _build_default_prompt(
-            child_name=child_name,
-            class_name=class_name,
-            scene_title=scene_title,
-            scene_text=scene_text,
+        prompt = _ensure_no_text_image_prompt(
+            image_prompt
+            or _build_default_prompt(
+                child_name=child_name,
+                class_name=class_name,
+                scene_title=scene_title,
+                scene_text=scene_text,
+            )
         )
         return ProviderResult(
             output={
@@ -167,11 +191,14 @@ class VivoStoryImageProvider:
         image_prompt: str | None = None,
     ) -> ProviderResult[dict[str, Any]] | None:
         del story_mode, scene_index, child_id, story_id
-        prompt = image_prompt or _build_default_prompt(
-            child_name=child_name,
-            class_name=class_name,
-            scene_title=scene_title,
-            scene_text=scene_text,
+        prompt = _ensure_no_text_image_prompt(
+            image_prompt
+            or _build_default_prompt(
+                child_name=child_name,
+                class_name=class_name,
+                scene_title=scene_title,
+                scene_text=scene_text,
+            )
         )
         cache_key = _build_story_image_cache_key(
             prompt=prompt,
@@ -212,11 +239,14 @@ class VivoStoryImageProvider:
         if story_mode != "storybook":
             raise ProviderResponseError("Vivo story image provider only runs for storybook mode")
 
-        prompt = image_prompt or _build_default_prompt(
-            child_name=child_name,
-            class_name=class_name,
-            scene_title=scene_title,
-            scene_text=scene_text,
+        prompt = _ensure_no_text_image_prompt(
+            image_prompt
+            or _build_default_prompt(
+                child_name=child_name,
+                class_name=class_name,
+                scene_title=scene_title,
+                scene_text=scene_text,
+            )
         )
         cache_key = _build_story_image_cache_key(
             prompt=prompt,
