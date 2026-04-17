@@ -123,6 +123,17 @@ const ADMIN_QUALITY_METRIC_LABELS: Record<AdminQualityMetricId, string> = {
   suggestionEffectiveness: "干预建议有效率",
 };
 
+const ADMIN_QUALITY_METRIC_NOTES: Record<AdminQualityMetricId, string> = {
+  consultationClosureRate: "优先以高风险会诊快照为主数据；任务与反馈信号仅作为保守的闭环补充依据。",
+  followUp48hCompletionRate: "当标准任务快照可用时，优先按标准任务数据计算。",
+  guardianFeedbackRate: "分母仅统计预期存在家庭闭环的儿童，不代表全部在园儿童。",
+  homeTaskExecutionRate: "当标准家长任务可用时，优先按任务执行结果计算。",
+  teacherLowConfidenceRate: "该指标优先统计可持久化的教师记录，缺失时才回退到会诊证据口径。",
+  morningCheckResponseLatency: "该时长基于后续响应事件推导，并非专门的晨检响应时间线。",
+  recurringIssueHeat: "重复问题热度沿用需求洞察聚类结果，仍以聚合口径为主。",
+  suggestionEffectiveness: "该指标只统计已回传反馈的建议，不能据此直接判断干预因果。",
+};
+
 type BadgeVariant = "success" | "info" | "warning" | "outline";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -162,8 +173,36 @@ function localizeAdminQualityWarning(warning: string) {
       "业务快照当前使用演示或兜底内容；治理指标的结构稳定，但不代表机构真实经营数据。"
     )
     .replace(
+      /High-risk consultation snapshots are the primary source; task and feedback signals only provide conservative closure support\./gi,
+      "优先以高风险会诊快照为主数据；任务与反馈信号仅作为保守的闭环补充依据。"
+    )
+    .replace(
+      /Computed from canonical tasks when snapshot\.tasks is available\./gi,
+      "当标准任务快照可用时，优先按标准任务数据计算。"
+    )
+    .replace(
+      /Computed from canonical parent intervention tasks when available\./gi,
+      "当标准家长任务可用时，优先按任务执行结果计算。"
+    )
+    .replace(
+      /Denominator is limited to children with an expected home loop, not all visible children\./gi,
+      "分母仅统计预期存在家庭闭环的儿童，不代表全部在园儿童。"
+    )
+    .replace(
+      /This metric only covers suggestions with returned feedback and cannot establish causality\./gi,
+      "该指标只统计已回传反馈的建议，不能据此直接判断干预因果。"
+    )
+    .replace(
       /Consultation-derived metrics use demo consultation feed fallback because recent consultation snapshots were unavailable\./gi,
       "会诊相关指标当前使用演示会诊兜底，因为近期会诊快照暂不可用。"
+    )
+    .replace(
+      /当前 childcare snapshot 来自 demo\/fallback，分群、反馈与执行难点结果不能夸大为真实机构运营洞察。/gi,
+      "当前业务快照来自演示或兜底数据，分群、反馈与执行难点结果仅供演示参考，不代表机构真实运营洞察。"
+    )
+    .replace(
+      /当前 consultationTriggerHeat 使用 demo consultation feed 补位，仅适合演示聚合 shape。/gi,
+      "当前会诊触发热度使用演示会诊推送补位，仅适合展示聚合结果形态。"
     )
     .replace(
       /Canonical task data is missing from the snapshot, so follow-up and home-task metrics may rely on legacy projection\./gi,
@@ -219,7 +258,31 @@ function localizeAdminQualityWarning(warning: string) {
     )
     .replace(
       /Memory backend is degraded to ([^;]+); recent traces and snapshots may be incomplete\./gi,
-      "记忆后端已降级为 $1，近期链路记录与快照可能不完整。"
+      (_match, backend) => `记忆后端已降级为 ${formatAdminSourceLabel(String(backend))}，近期链路记录与快照可能不完整。`
+    )
+    .replace(
+      /memory backend 已降级到 ([^，;]+)，最近 trace\/snapshot 覆盖可能不完整。/gi,
+      (_match, backend) => `记忆后端已降级为 ${formatAdminSourceLabel(String(backend))}，近期链路记录与快照覆盖可能不完整。`
+    )
+    .replace(
+      /weekly report snapshots 当前仅作为辅助聚合信号，不能视为真实运营周报洞察。/gi,
+      "周报快照当前仅作为辅助聚合信号，不能视为真实运营周报洞察。"
+    )
+    .replace(
+      /parent follow-up snapshots 当前仅纳入来源统计，未直接参与核心评分，且仍可能包含 mock\/contract 依赖。/gi,
+      "家长跟进快照当前仅纳入来源统计，未直接参与核心评分，且仍可能包含演示或契约兜底依赖。"
+    )
+    .replace(
+      /^childcare snapshot fallback:.*$/gim,
+      "业务快照兜底存在异常，当前页面已改用保守展示口径。"
+    )
+    .replace(
+      /^业务快照兜底异常：.*$/gim,
+      "业务快照兜底存在异常，当前页面已改用保守展示口径。"
+    )
+    .replace(
+      /^childcare_snapshot:.*$/gim,
+      "业务快照校验存在异常，当前页面已改用保守展示口径。"
     )
     .replace(/Metrics were filtered to class ids:/gi, "指标已按班级范围过滤：")
     .replace(/Memory backend is degraded to/gi, "记忆后端已降级为");
@@ -276,26 +339,31 @@ function buildLocalizedMetricSummary(metric: AdminQualityMetric) {
 }
 
 function buildLocalizedMetricNote(metric: AdminQualityMetric) {
+  const metricId = (metric.id as AdminQualityMetricId) in ADMIN_QUALITY_METRIC_NOTES
+    ? (metric.id as AdminQualityMetricId)
+    : null;
+  if (metricId) return ADMIN_QUALITY_METRIC_NOTES[metricId];
+
   const existing = metric.source.note ? localizeAdminQualityWarning(metric.source.note) : "";
   if (existing) return existing;
 
   switch (metric.id as AdminQualityMetricId) {
     case "consultationClosureRate":
-      return "优先以高风险会诊快照为主数据；任务与反馈信号仅作为保守的闭环补充依据。";
+      return ADMIN_QUALITY_METRIC_NOTES.consultationClosureRate;
     case "followUp48hCompletionRate":
-      return "当标准任务快照可用时，优先按标准任务数据计算。";
+      return ADMIN_QUALITY_METRIC_NOTES.followUp48hCompletionRate;
     case "guardianFeedbackRate":
-      return "分母仅统计预期存在家庭闭环的儿童，不代表全部在园儿童。";
+      return ADMIN_QUALITY_METRIC_NOTES.guardianFeedbackRate;
     case "homeTaskExecutionRate":
-      return "当标准家长任务可用时，优先按任务执行结果计算。";
+      return ADMIN_QUALITY_METRIC_NOTES.homeTaskExecutionRate;
     case "teacherLowConfidenceRate":
-      return "该指标优先统计可持久化的教师记录，缺失时才回退到会诊证据口径。";
+      return ADMIN_QUALITY_METRIC_NOTES.teacherLowConfidenceRate;
     case "morningCheckResponseLatency":
-      return "该时长基于后续响应事件推导，并非专门的晨检响应时间线。";
+      return ADMIN_QUALITY_METRIC_NOTES.morningCheckResponseLatency;
     case "recurringIssueHeat":
-      return "重复问题热度沿用需求洞察聚类结果，仍以聚合口径为主。";
+      return ADMIN_QUALITY_METRIC_NOTES.recurringIssueHeat;
     case "suggestionEffectiveness":
-      return "该指标只统计已回传反馈的建议，不能据此直接判断干预因果。";
+      return ADMIN_QUALITY_METRIC_NOTES.suggestionEffectiveness;
     default:
       return metric.source.note;
   }
