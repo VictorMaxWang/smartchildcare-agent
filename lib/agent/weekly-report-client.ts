@@ -5,6 +5,7 @@ import type {
   WeeklyReportRole,
   WeeklyReportSection,
 } from "@/lib/ai/types";
+import { sanitizeAdminWeeklyReportResponseForAdmin } from "@/lib/agent/admin-weekly-sanitize";
 
 type WeeklyReportBadgeVariant = "info" | "warning" | "secondary";
 
@@ -123,7 +124,9 @@ export async function fetchWeeklyReport(
     throw new Error("周报接口返回结构异常");
   }
 
-  return data;
+  return data.role === "admin"
+    ? sanitizeAdminWeeklyReportResponseForAdmin(data)
+    : data;
 }
 
 export function getWeeklyReportSourceMeta(source: WeeklyReportResponse["source"]) {

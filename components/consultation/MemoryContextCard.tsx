@@ -3,6 +3,7 @@
 import { Database, GitBranch, History, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatAdminSourceLabel } from "@/lib/agent/admin-display-text";
 import type { ConsultationTraceMode } from "@/lib/consultation/trace-types";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +31,9 @@ export default function MemoryContextCard({
   if (!isRecord(memoryMeta)) return null;
 
   const backend = typeof memoryMeta.backend === "string" ? memoryMeta.backend.trim() : "";
-  const usedSources = toStringArray(memoryMeta.usedSources);
+  const usedSources = toStringArray(memoryMeta.usedSources).map((item) =>
+    formatAdminSourceLabel(item)
+  );
   const matchedSnapshotIds = toStringArray(memoryMeta.matchedSnapshotIds);
   const matchedTraceIds = toStringArray(memoryMeta.matchedTraceIds);
   const errors = toStringArray(memoryMeta.errors);
@@ -48,8 +51,12 @@ export default function MemoryContextCard({
     <Card className={cn("border-slate-100 bg-white/95 shadow-sm", className)}>
       <CardHeader className="gap-3 pb-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="info">memory</Badge>
-          {backend ? <Badge variant={degraded ? "warning" : "secondary"}>{backend}</Badge> : null}
+          <Badge variant="info">记忆上下文</Badge>
+          {backend ? (
+            <Badge variant={degraded ? "warning" : "secondary"}>
+              {formatAdminSourceLabel(backend)}
+            </Badge>
+          ) : null}
           {degraded ? <Badge variant="warning">降级</Badge> : isEmpty ? <Badge variant="outline">空记忆</Badge> : <Badge variant="success">已命中</Badge>}
         </div>
         <CardTitle className="flex items-center gap-2 text-base text-slate-900">
@@ -83,7 +90,7 @@ export default function MemoryContextCard({
           <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <GitBranch className="h-4 w-4 text-emerald-500" />
-              Trace 命中
+              链路命中
             </div>
             <p className="mt-2 text-sm text-slate-600">{matchedTraceIds.length} 条</p>
           </div>
@@ -99,7 +106,7 @@ export default function MemoryContextCard({
           <div className="space-y-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-4">
             {matchedSnapshotIds.length ? (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">matchedSnapshotIds</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">命中快照 ID</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {matchedSnapshotIds.map((item) => (
                     <Badge key={item} variant="outline">
@@ -111,7 +118,7 @@ export default function MemoryContextCard({
             ) : null}
             {matchedTraceIds.length ? (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">matchedTraceIds</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">命中链路 ID</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {matchedTraceIds.map((item) => (
                     <Badge key={item} variant="outline">
@@ -125,7 +132,7 @@ export default function MemoryContextCard({
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
                   <ShieldAlert className="h-4 w-4" />
-                  Memory warnings
+                  记忆告警
                 </div>
                 <ul className="mt-2 space-y-2 text-sm leading-6 text-amber-800">
                   {errors.map((item) => (

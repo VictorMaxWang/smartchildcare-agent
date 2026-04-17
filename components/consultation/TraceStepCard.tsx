@@ -9,6 +9,7 @@ import ProviderTraceBadge from "./ProviderTraceBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatAdminSourceLabel } from "@/lib/agent/admin-display-text";
 import {
   buildConsultationEvidencePanelModel,
   getConsultationEvidenceConfidenceLabel,
@@ -25,7 +26,7 @@ import { cn } from "@/lib/utils";
 function getSourceLabel(source?: string) {
   if (!source) return "";
   if (source === "memory") return "记忆上下文";
-  return source;
+  return formatAdminSourceLabel(source);
 }
 
 function getCalloutClasses(tone: NonNullable<ConsultationStageView["callout"]>["tone"]) {

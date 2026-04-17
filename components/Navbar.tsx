@@ -51,7 +51,7 @@ export default function Navbar() {
           <div>
             <span className="block text-base leading-none">普惠托育智慧平台</span>
             <span className="mt-1 hidden text-[11px] font-medium text-slate-400 sm:block">
-              Smart Childcare Operations Suite
+              托育机构运营管理后台
             </span>
           </div>
         </Link>

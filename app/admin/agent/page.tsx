@@ -28,6 +28,7 @@ import {
   attachNotificationEventsToResult,
 } from "@/lib/agent/admin-agent";
 import type { AdminConsultationPriorityItem } from "@/lib/agent/admin-consultation";
+import { formatAdminDateTimeLabel } from "@/lib/agent/admin-display-text";
 import { dedupeAdminAgentResultExposure } from "@/lib/agent/admin-home-dedupe";
 import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
 import type {
@@ -979,7 +980,7 @@ export default function AdminAgentPage() {
                         </p>
                         <div className="mt-4 space-y-2 text-sm text-slate-600">
                           <p>负责人：{item.recommendedOwner.label}</p>
-                          <p>时限：{item.recommendedDeadline}</p>
+                          <p>时限：{formatAdminDateTimeLabel(item.recommendedDeadline)}</p>
                         </div>
                       </div>
                     ))}

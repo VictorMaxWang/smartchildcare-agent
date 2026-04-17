@@ -17,6 +17,7 @@ import {
 } from "@/components/role-shell/RoleScaffold";
 import { Badge } from "@/components/ui/badge";
 import { buildAdminHomeViewModel, buildAdminWeeklyReportSnapshot } from "@/lib/agent/admin-agent";
+import { formatAdminDateTimeLabel } from "@/lib/agent/admin-display-text";
 import { dedupeAdminHomeExposure } from "@/lib/agent/admin-home-dedupe";
 import { useAdminConsultationWorkspace } from "@/lib/agent/use-admin-consultation-workspace";
 import { fetchWeeklyReport } from "@/lib/agent/weekly-report-client";
@@ -277,7 +278,7 @@ export default function AdminHomePage() {
                     <p className="mt-2 text-sm leading-6 text-slate-600">{item.reason}</p>
                     <div className="mt-4 space-y-2 text-sm text-slate-600">
                       <p>建议负责人：{item.recommendedOwner.label}</p>
-                      <p>建议时限：{item.recommendedDeadline}</p>
+                      <p>建议时限：{formatAdminDateTimeLabel(item.recommendedDeadline)}</p>
                     </div>
                   </div>
                 ))}
@@ -370,7 +371,7 @@ export default function AdminHomePage() {
                           <EventStatusBadge status={event.status} />
                         </div>
                         <p className="mt-2 text-xs leading-5 text-slate-500">
-                          截止 {event.recommendedDeadline}
+                          截止 {formatAdminDateTimeLabel(event.recommendedDeadline)}
                         </p>
                       </div>
                     ))
