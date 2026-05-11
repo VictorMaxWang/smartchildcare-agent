@@ -19,6 +19,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+const SMARTCHILDCARE_SITE_URL = "https://www.smartchildcare.cn/";
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -188,14 +190,20 @@ export default function LoginPage() {
             </div>
 
             <div className="grid gap-4">
-              <div className="rounded-3xl border border-white/14 bg-white/10 px-5 py-4 backdrop-blur-sm">
+              <a
+                href={SMARTCHILDCARE_SITE_URL}
+                className="rounded-3xl border border-white/14 bg-white/10 px-5 py-4 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-indigo-600"
+              >
                 <p className="text-sm font-semibold text-white">快速开始</p>
                 <p className="mt-1 text-sm leading-6 text-white/76">选择示例账号可直接体验系统，使用普通账号可注册并保存自己的数据。</p>
-              </div>
-              <div className="rounded-3xl border border-white/14 bg-white/10 px-5 py-4 backdrop-blur-sm">
+              </a>
+              <a
+                href={SMARTCHILDCARE_SITE_URL}
+                className="rounded-3xl border border-white/14 bg-white/10 px-5 py-4 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-indigo-600"
+              >
                 <p className="text-sm font-semibold text-white">核心能力</p>
                 <p className="mt-1 text-sm leading-6 text-white/76">覆盖晨检、饮食记录、成长观察和家园反馈等日常托育场景。</p>
-              </div>
+              </a>
             </div>
           </div>
         </section>
