@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import { getAuthSessionSecret } from "@/lib/auth/session-config";
 
 const SESSION_COOKIE = "ccs_session";
+const LEGACY_AGENT_HOSTS = new Set(["www.smartchildcareagent.cn", "smartchildcareagent.cn"]);
+const SMARTCHILDCARE_SITE_URL = "https://www.smartchildcare.cn/";
 const encoder = new TextEncoder();
 
 function normalizeBase64Url(value: string) {
@@ -74,6 +76,11 @@ async function verifySessionToken(token?: string | null) {
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
+
+  if (host && LEGACY_AGENT_HOSTS.has(host)) {
+    return NextResponse.redirect(SMARTCHILDCARE_SITE_URL, 307);
+  }
 
   if (
     pathname.startsWith("/_next") ||
