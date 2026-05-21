@@ -3,7 +3,12 @@ import type { NextRequest } from "next/server";
 import { getAuthSessionSecret } from "@/lib/auth/session-config";
 
 const SESSION_COOKIE = "ccs_session";
-const LEGACY_AGENT_HOSTS = new Set(["www.smartchildcareagent.cn", "smartchildcareagent.cn"]);
+const LEGACY_AGENT_HOSTS = new Set([
+  "www.smartchildcareagent.cn",
+  "smartchildcareagent.cn",
+  "www.smartchilecareagent.cn",
+  "smartchilecareagent.cn",
+]);
 const SMARTCHILDCARE_SITE_URL = "https://www.smartchildcare.cn/";
 const encoder = new TextEncoder();
 
